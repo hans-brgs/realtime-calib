@@ -1,0 +1,11 @@
+# Yarn Berry (node-modules linker). yarn.lock IS committed; the rest is local.
+.yarn/*
+!.yarn/patches
+!.yarn/releases
+!.yarn/sdks
+.pnp.*
+
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo

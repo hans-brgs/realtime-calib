@@ -22,7 +22,7 @@ Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **table
 | `livekit-token-server/` | Émission de tokens JWT LiveKit | Python (Flask) |
 | `caddy/` | Reverse proxy + terminaison TLS + statique | Caddy v2 |
 
-L'orchestration est dans `docker-compose.yml`, qui ajoute aussi `livekit` (SFU WebRTC, image upstream `livekit/livekit-server`). **Deux profils** : `default` (Caddy + TLS, accès tablette) et `local` (same-machine, `ws://localhost`, sans Caddy). Cf. ADR-0006.
+L'orchestration est dans `docker-compose.yml`, qui ajoute aussi `livekit` (SFU WebRTC, image upstream `livekit/livekit-server`). **Stack unique** : Caddy (TLS) est le point d'entrée **obligatoire et toujours présent** ; l'accès same-machine se fait via `https://localhost`, l'accès tablette via `https://<HOST_IP>` (un seul certificat mkcert couvre les deux). Cf. ADR-0014 (supersede ADR-0006).
 
 ## 📃 Où est la documentation ?
 
@@ -43,11 +43,9 @@ Avant toute modification structurante (interface partagée, format de message in
 ## ⚡ Commandes essentielles
 
 ```bash
-# Démarrage complet — profil par défaut (Caddy + TLS)
+# Démarrage complet — stack unique (Caddy + TLS, toujours présent)
+# Accès tablette : https://<HOST_IP>  ·  same-machine : https://localhost
 docker compose up --build
-
-# Profil local (same-machine, sans TLS)
-docker compose --profile local up --build
 
 # Redémarrage / logs d'un service
 docker compose restart calibration-service
@@ -78,6 +76,8 @@ Pas de Makefile ni de justfile — les commandes `docker compose` sont la source
 - **IP hôte** : centralisée dans `HOST_IP` (`.env`), propagée à `caddy`, `livekit`, et au build webapp (`VITE_HOST_IP`). Ne pas hardcoder d'IP ailleurs.
 - **Pas de chemins absolus hardcodés** type `/home/hans/...` ou `C:/Users/...`. Tout chemin local via variable d'environnement.
 - **Format de config compatible Caliscope** (ADR-0002) : ne pas casser la sémantique des champs natifs ; les champs propres sont additifs.
+- **Langue** : les `README.md` (racine et par service) et **tous les commentaires dans le code** sont rédigés en **anglais** — par cohérence, les commentaires des fichiers de config committés (`.gitignore`, `.env.example`, `Dockerfile`, `docker-compose.yml`, `Caddyfile`…) aussi. Le reste de la documentation (specs, ADRs, `CLAUDE.md`, journal d'ingénierie) reste en **français**.
+- **LiveKit** : avant tout développement temps-réel touchant LiveKit (publication de tracks, data channel, tokens JWT, configuration réseau/ICE), consulter **https://docs.livekit.io/llms-full.txt** (doc LiveKit optimisée pour LLM) pour les bonnes pratiques et l'API à jour.
 - **Pas de commentaires de signature ASCII** dans les nouveaux fichiers.
 
 ---
