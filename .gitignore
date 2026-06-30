@@ -1,0 +1,35 @@
+# --- Secrets & environment (ADR-0006, cross-services conventions) ---
+.env
+.env.*
+!.env.example
+
+# --- Local TLS certificates (mkcert) ---
+caddy/certs/
+
+# --- Claude Code: personal settings (the shared `settings.json` is committed) ---
+.claude/settings.local.json
+
+# --- Python / calibration-service & livekit-token-server ---
+__pycache__/
+*.py[cod]
+.venv/
+.uv/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+*.egg-info/
+
+# --- Node / calibration-webapp ---
+node_modules/
+dist/
+.vite/
+*.tsbuildinfo
+# Yarn Berry artifacts are handled by calibration-webapp/.gitignore (yarn.lock is committed).
+
+# --- Calibration session folders (runtime data, kept out of the repo) ---
+sessions/
+
+# --- OS / editors ---
+.DS_Store
+Thumbs.db
+*.swp

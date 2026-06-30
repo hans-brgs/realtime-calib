@@ -1,0 +1,41 @@
+[project]
+name = "livekit-token-server"
+version = "0.0.0"
+description = "Issues short-lived LiveKit JWT access tokens for the calibration webapp."
+requires-python = ">=3.14"
+dependencies = [
+    "flask>=3.1",
+    "livekit-api>=1.1",
+    "gunicorn>=23",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.9",
+    "mypy>=1.13",
+    "pytest>=8.3",
+    "pyjwt>=2.9",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/livekit_token_server"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py314"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM", "RUF"]
+
+[tool.mypy]
+python_version = "3.14"
+strict = true
+files = ["src", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -1,0 +1,47 @@
+{
+	# Local LAN certs (mkcert) — no automatic ACME.
+	auto_https off
+	admin off
+	log {
+		level INFO
+	}
+}
+
+# Single entry point (ADR-0014): TLS, static webapp, and reverse proxies.
+# Same cert serves https://<HOST_IP> (tablet) and https://localhost (same-machine).
+https://:443 {
+	tls /certs/livekit.crt /certs/livekit.key
+
+	# Calibration-service HTTP API (commands/config). Strip /api so /api/health
+	# reaches the service's /health.
+	handle /api* {
+		uri strip_prefix /api
+		reverse_proxy calibration-service:8000
+	}
+
+	# LiveKit JWT token issuance.
+	handle /token* {
+		reverse_proxy livekit-token-server:8080
+	}
+
+	# LiveKit signaling (WebSocket). LiveKit runs on the host network, so reach it
+	# via host.docker.internal (mapped to host-gateway in docker-compose.yml).
+	handle /livekit* {
+		uri strip_prefix /livekit
+		reverse_proxy host.docker.internal:7880
+	}
+
+	# Static webapp (SPA) — catch-all, must be last.
+	handle {
+		root * /srv/webapp
+		try_files {path} /index.html
+		encode gzip
+		file_server
+
+		@assets path /assets/*
+		header @assets Cache-Control "public, max-age=31536000, immutable"
+
+		@indexhtml path /index.html
+		header @indexhtml Cache-Control "no-cache, no-store, must-revalidate"
+	}
+}

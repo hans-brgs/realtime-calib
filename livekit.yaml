@@ -1,0 +1,46 @@
+# =============================================================================
+# LiveKit server configuration (realtime-calib)
+# Machine-specific values are injected by docker-compose.yml via environment:
+#   - API keys : LIVEKIT_KEYS="<key>: <secret>"
+#   - node IP  : NODE_IP=<HOST_IP>   (fills rtc.node_ip, WebRTC media)
+# Caddy terminates TLS; LiveKit listens in plain HTTP/WS internally.
+# =============================================================================
+
+# WebSocket/signal port (HTTP internally, Caddy handles TLS).
+port: 7880
+
+# Listen on all container interfaces (reachable at the container IP / via Caddy).
+bind_addresses:
+  - "0.0.0.0"
+
+rtc:
+  # Single muxed UDP port for all WebRTC media (simpler than a range, and easy to
+  # publish 1:1 / relocate). Overridable via --udp-port / LIVEKIT_UDP_PORT in
+  # docker-compose. LiveKit advertises THIS exact port to clients, so it must be
+  # published host==container and reachable at NODE_IP.
+  udp_port: 7882
+  # TCP fallback (published, host==container). REQUIRED: the in-container
+  # publisher (calibration-service) cannot UDP-hairpin to NODE_IP via the docker
+  # bridge, so it reaches LiveKit over ICE-TCP (Docker userland-proxy handles TCP
+  # hairpin). 7883 avoids a typical second LiveKit on 7881. Must match the
+  # published port in docker-compose.yml (no CLI flag for this — config only).
+  tcp_port: 7883
+  # Local network: advertise NODE_IP (injected), no external IP discovery.
+  use_external_ip: false
+  # Allow loopback candidates for same-machine testing.
+  enable_loopback_candidate: true
+
+# No NAT on the LAN: TURN is unnecessary.
+turn:
+  enabled: false
+
+# Rooms are created on demand by the publishing service.
+room:
+  auto_create: true
+  empty_timeout: 300
+  departure_timeout: 20
+  max_participants: 10
+
+logging:
+  level: info
+  pion_level: warn

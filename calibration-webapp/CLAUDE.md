@@ -13,7 +13,7 @@ Interface opérateur : un **wizard** qui guide la calibration de bout en bout (c
 
 **Cliente sans état durable** : elle ne possède pas l'état de la session — celui-ci est détenu par le `calibration-service` et persisté sur disque (ADR-0011). Au montage, elle rehydrate depuis l'API HTTP et **reprend le wizard depuis l'état persisté**. Pas de `localStorage`.
 
-**Compatible desktop, tablette et mobile** (ADR-0010) : responsive (reflow des tuiles caméra), tactile (cibles ≥ 44 px, `OrbitControls` pinch/rotate), portrait + paysage. La tablette est un appareil de pilotage de premier ordre (d'où le TLS par défaut, ADR-0006).
+**Compatible desktop, tablette et mobile** (ADR-0010) : responsive (reflow des tuiles caméra), tactile (cibles ≥ 44 px, `OrbitControls` pinch/rotate), portrait + paysage. La tablette est un appareil de pilotage de premier ordre (d'où le TLS toujours présent via Caddy, ADR-0014 supersede ADR-0006).
 
 ## 🏛️ Architecture interne
 
@@ -38,7 +38,7 @@ Arborescence (cible) sous `src/` :
 ## 🧱 Stack et tooling
 
 - React + **TypeScript strict** + Vite.
-- **Mantine** (UI, responsive, tactile).
+- **Mantine** (UI, responsive, tactile). Avant tout travail Mantine non trivial, consulter **https://mantine.dev/llms.txt** (référence Mantine optimisée pour LLM) pour les bonnes pratiques et l'API à jour.
 - **Redux Toolkit** (+ listener middleware) — typed hooks.
 - **React-Three-Fiber** + **drei** (vue 3D).
 - **React Compiler** activé.
@@ -64,7 +64,7 @@ yarn tsc --noEmit
 yarn test
 ```
 
-En conteneur, la webapp est buildée et servie en statique par Caddy (ADR-0006) ; `yarn dev` reste pour l'itération locale.
+En conteneur, la webapp est buildée et servie en statique par Caddy (ADR-0014) ; `yarn dev` reste pour l'itération front pure (pointant vers une stack Caddy qui tourne).
 
 ## 📝 Conventions TypeScript / React
 
