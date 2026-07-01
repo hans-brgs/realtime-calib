@@ -11,12 +11,15 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
+import cv2
 from fastapi import FastAPI
 from pydantic import BaseModel
 
 from calibration_service import __version__
 from calibration_service.config import Config, LiveKitConfig
 from calibration_service.logging_setup import setup_logging
+from calibration_service.session.manager import SessionManager
+from calibration_service.transport.api import router as api_router
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
 logger = logging.getLogger(__name__)
@@ -35,10 +38,19 @@ class HealthResponse(BaseModel):
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     setup_logging()
+    # OpenCV's parallel backend keeps a worker pool sized to the CPU count that
+    # SPIN-WAITS for work (active polling), burning ~all cores even while idle. We
+    # already parallelize across cameras (one capture task each), so force OpenCV to
+    # run serially on the calling thread — no spinning pool. This was the dominant
+    # CPU cost (profiled: 12 pthreads at ~70%). CPU-only service (ADR-0013).
+    cv2.setNumThreads(1)
     config = Config()
     logger.info("calibration-service starting (sessions_dir=%s)", config.sessions_dir)
 
-    publish_service = CameraPublishService(LiveKitConfig())
+    session_manager = app.state.session_manager
+    assert isinstance(session_manager, SessionManager)
+    publish_service = CameraPublishService(LiveKitConfig(), session_manager)
+    app.state.publish_service = publish_service
     await publish_service.start()
     try:
         yield
@@ -46,9 +58,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         await publish_service.stop()
 
 
-def create_app() -> FastAPI:
+def create_app(session_manager: SessionManager | None = None) -> FastAPI:
     """Build the FastAPI application (factory, so tests get a fresh instance)."""
     app = FastAPI(title=SERVICE_NAME, version=__version__, lifespan=lifespan)
+    app.state.session_manager = session_manager or SessionManager(Config().sessions_dir)
+    app.include_router(api_router)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:
