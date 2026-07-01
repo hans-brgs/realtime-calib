@@ -60,7 +60,7 @@ export const theme = createTheme({
 
   defaultRadius: 'md',
   radius: {
-    xs: '0.375rem', // 6
+    xs: '0.4375rem', // 7
     sm: '0.5rem', // 8
     md: '0.625rem', // 10
     lg: '0.75rem', // 12
@@ -86,6 +86,15 @@ export const theme = createTheme({
     surfaceBar: '#0c0c0f',
     surfacePanel: '#0f0f12',
     surfaceInput: '#16161b',
+    // Text emphasis ramp (descending) — full design ramp beyond the Mantine dark scale.
+    text: '#ececf0',
+    textStrong: '#cfcfd6',
+    textMuted: '#9a9aa5',
+    textSubtle: '#7a7a85',
+    textDim: '#6a6a74',
+    textFaint: '#4a4a54',
+    // Quality gauge fill (red → amber → green), reused by live gauges (Phase 3).
+    gauge: 'linear-gradient(90deg, #f87171, #fbbf24, #34d399)',
   },
 
   components: {

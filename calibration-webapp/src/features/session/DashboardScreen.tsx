@@ -1,21 +1,21 @@
 import { Box, Group, SimpleGrid, Text, Title, UnstyledButton } from '@mantine/core';
 import {
   IconChevronRight,
-  IconCirclePlus,
-  IconFileImport,
-  IconSquareCheck,
+  IconFolder,
+  IconVideo,
   type IconProps,
 } from '@tabler/icons-react';
 import { type ComponentType, useEffect } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { fetchRecentSessions, selectRecentSessions } from '@/features/session/sessionSlice';
-import { stepToView, type ViewId } from '@/features/session/selectors';
+import { stepToView, type NavTarget } from '@/features/session/selectors';
 import type { SessionSummary } from '@/transport/types';
 
 interface EntryCard {
   icon: ComponentType<IconProps>;
   title: string;
+  subtitle: string;
   desc: string;
   cta: string;
   accent: boolean;
@@ -33,8 +33,10 @@ function EntryCardTile({ card }: { card: EntryCard }) {
         minHeight: 208,
         padding: 20,
         borderRadius: 'var(--mantine-radius-xl)',
-        border: '1px solid var(--mantine-color-dark-4)',
-        background: 'linear-gradient(180deg, #131317, #0f0f12)',
+        border: `1px solid ${card.accent ? 'rgba(167,139,250,0.3)' : 'var(--mantine-color-dark-4)'}`,
+        background: card.accent
+          ? 'linear-gradient(180deg, rgba(139,92,246,0.12), #0f0f12)'
+          : 'linear-gradient(180deg, #131317, #0f0f12)',
       }}
     >
       <Box
@@ -55,7 +57,15 @@ function EntryCardTile({ card }: { card: EntryCard }) {
       <Text ff="heading" fw={600} fz="1rem" mt={16}>
         {card.title}
       </Text>
-      <Text c="dark.2" fz="0.81rem" mt={8} style={{ lineHeight: 1.55 }}>
+      <Text
+        fz="0.72rem"
+        mt={5}
+        c={card.accent ? 'var(--rc-accent)' : 'var(--rc-text-subtle)'}
+        style={{ letterSpacing: '0.01em' }}
+      >
+        {card.subtitle}
+      </Text>
+      <Text c="dark.2" fz="0.81rem" mt={10} style={{ lineHeight: 1.55 }}>
         {card.desc}
       </Text>
       <Group
@@ -152,12 +162,12 @@ function SessionRow({
 }
 
 interface DashboardScreenProps {
-  onNavigate: (id: ViewId) => void;
+  onNavigate: (id: NavTarget) => void;
 }
 
-// Session entry (dashboard): the three FSM entry modes as workflow cards + recent
-// sessions. The sessions list endpoint is not wired yet (Phase 1), so the table
-// shows an honest empty state rather than fixtures.
+// Session entry (dashboard): the two FSM entry modes (ADR-0019) as workflow cards +
+// recent sessions. The sessions list endpoint is not wired yet, so the table shows an
+// honest empty state rather than fixtures.
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const dispatch = useAppDispatch();
   const recent = useAppSelector(selectRecentSessions);
@@ -170,26 +180,22 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
   const cards: EntryCard[] = [
     {
-      icon: IconCirclePlus,
-      title: 'New Calibration',
-      desc: 'Run the full intrinsic + extrinsic workflow from scratch.',
+      icon: IconVideo,
+      title: 'New realtime calibration',
+      subtitle: 'Live capture · records video as you go',
+      desc: 'Run the full wizard from scratch. Each intrinsic sweep is recorded to the session folder, so it can be replayed and recomputed later.',
       cta: 'START WIZARD',
       accent: true,
       onClick: () => onNavigate('cameras'),
     },
     {
-      icon: IconFileImport,
-      title: 'Load Intrinsics',
-      desc: 'Reuse existing optics to skip straight to spatial alignment.',
-      cta: 'IMPORT .toml',
+      icon: IconFolder,
+      title: 'Load from files',
+      subtitle: 'Open a session folder · replay & resume',
+      desc: 'Pick a folder and see which artifacts are present — videos, board, results — and the derived wizard state. Recompute or resume where you left off.',
+      cta: 'CHOOSE FOLDER',
       accent: false,
-    },
-    {
-      icon: IconSquareCheck,
-      title: 'Load Full Calibration',
-      desc: 'Import a complete calibration to inspect metrics and the 3D model.',
-      cta: 'IMPORT .zip',
-      accent: false,
+      onClick: () => onNavigate('load'),
     },
   ];
 
@@ -197,11 +203,11 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
     <Box p={{ base: 'md', sm: 'xl' }} maw={1180}>
       <Title order={1}>Welcome to the calibration bench</Title>
       <Text c="dark.2" mt={9} maw={600} fz="0.9rem">
-        Prepare and validate your camera array with sub-millimetric precision. Choose a workflow to
-        begin — or resume a recent session.
+        Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow
+        to begin — or resume a recent session.
       </Text>
 
-      <SimpleGrid cols={{ base: 1, sm: 2, md: 3 }} spacing="md" mt="lg">
+      <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="lg">
         {cards.map((card) => (
           <EntryCardTile key={card.title} card={card} />
         ))}

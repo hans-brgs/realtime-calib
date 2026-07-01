@@ -34,13 +34,30 @@ SESSION_FILE = "session.toml"
 _INTRINSIC_DIR = "intrinsic"
 _EXTRINSIC_DIR = "extrinsic"
 
+# Map pre-ADR-0019 session modes to the two current ones, so old session.toml
+# files on disk still reload. Live capture folded into new-realtime; the loaded
+# variants into load-from-files.
+_LEGACY_MODES: dict[str, SessionMode] = {
+    "new": SessionMode.NEW_REALTIME,
+    "resume": SessionMode.NEW_REALTIME,
+    "load_intrinsic": SessionMode.LOAD_FROM_FILES,
+    "load_full": SessionMode.LOAD_FROM_FILES,
+}
+
+
+def _parse_mode(raw: str) -> SessionMode:
+    """Parse a persisted mode value, mapping legacy names (ADR-0019)."""
+    if raw in _LEGACY_MODES:
+        return _LEGACY_MODES[raw]
+    return SessionMode(raw)
+
 
 def session_dir(sessions_dir: Path, session_id: str) -> Path:
     return sessions_dir / session_id
 
 
 def create_session(
-    sessions_dir: Path, session_id: str, mode: SessionMode = SessionMode.NEW
+    sessions_dir: Path, session_id: str, mode: SessionMode = SessionMode.NEW_REALTIME
 ) -> CalibrationSession:
     """Create the session folder structure and persist a fresh session."""
     target = session_dir(sessions_dir, session_id)
@@ -124,7 +141,7 @@ def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
     return CalibrationSession(
         session_id=str(data["session_id"]),
         step=WizardStep(data["step"]),
-        mode=SessionMode(data["mode"]),
+        mode=_parse_mode(str(data["mode"])),
         cameras=cameras,
         intrinsic_fps=int(data["intrinsic_fps"]),
         optimization_strategy=str(data["optimization_strategy"]),

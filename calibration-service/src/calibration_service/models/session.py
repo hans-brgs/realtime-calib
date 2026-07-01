@@ -25,12 +25,15 @@ class WizardStep(StrEnum):
 
 
 class SessionMode(StrEnum):
-    """How the session was entered (wizard-navigation entry-branching)."""
+    """How the session was entered (ADR-0019 entry-branching).
 
-    NEW = "new"
-    RESUME = "resume"
-    LOAD_INTRINSIC = "load_intrinsic"
-    LOAD_FULL = "load_full"
+    Two modes replace the former ``new`` / ``resume`` / ``load_intrinsic`` /
+    ``load_full``: a live capture that always records to disk, or loading an
+    existing session folder whose wizard state is derived from its artifacts.
+    """
+
+    NEW_REALTIME = "new-realtime"
+    LOAD_FROM_FILES = "load-from-files"
 
 
 class CameraStatus(StrEnum):
@@ -64,7 +67,7 @@ class CalibrationSession:
 
     session_id: str
     step: WizardStep = WizardStep.CAMERA_SETUP
-    mode: SessionMode = SessionMode.NEW
+    mode: SessionMode = SessionMode.NEW_REALTIME
     cameras: list[CameraConfig] = field(default_factory=list)
     intrinsic_fps: int = 30
     optimization_strategy: str = "coverage-aware"

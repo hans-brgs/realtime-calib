@@ -23,7 +23,7 @@ def test_get_session_returns_fresh_session(tmp_path: Path) -> None:
     assert response.status_code == 200
     body = response.json()
     assert body["step"] == "camera_setup"
-    assert body["mode"] == "new"
+    assert body["mode"] == "new-realtime"
     assert body["cameras"] == []
 
 

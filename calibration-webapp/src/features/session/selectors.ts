@@ -20,11 +20,11 @@ interface StageDef {
 }
 
 const STAGES: StageDef[] = [
-  { id: 'cameras', label: 'Caméras', steps: ['camera_setup'] },
-  { id: 'boards', label: 'Boards', steps: ['intrinsic_board', 'extrinsic_board_choice'] },
-  { id: 'intrinsic', label: 'Intrinsèque', steps: ['intrinsic_capture'] },
-  { id: 'extrinsic', label: 'Extrinsèque', steps: ['extrinsic_capture'] },
-  { id: 'review', label: 'Revue 3D', steps: ['review_3d'] },
+  { id: 'cameras', label: 'Camera Setup', steps: ['camera_setup'] },
+  { id: 'boards', label: 'Target Config', steps: ['intrinsic_board', 'extrinsic_board_choice'] },
+  { id: 'intrinsic', label: 'Intrinsics', steps: ['intrinsic_capture'] },
+  { id: 'extrinsic', label: 'Extrinsics', steps: ['extrinsic_capture'] },
+  { id: 'review', label: 'Review 3D', steps: ['review_3d'] },
   { id: 'export', label: 'Export', steps: ['export'] },
 ];
 
@@ -79,6 +79,11 @@ export function selectStages(state: RootState): Stage[] {
 // six wizard stages. Navigation between completed stages is free (completion-driven,
 // spec wizard-navigation); it does not mutate the persisted FSM step.
 export type ViewId = StageId | 'session';
+
+// Navigation targets include the rail views plus transient screens reached outside
+// the rail (e.g. the Load-from-files entry from the dashboard). 'load' is never
+// derived from a persisted step — it is a volatile sub-flow of the session entry.
+export type NavTarget = ViewId | 'load';
 
 export function stepToView(step: WizardStep): ViewId {
   if (step === 'entry') {
