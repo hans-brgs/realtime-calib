@@ -17,6 +17,17 @@
   --rc-success: #34d399;
   --rc-warning: #fbbf24;
   --rc-error: #f87171;
+
+  /* Text emphasis ramp (descending). Mirrors theme.ts `other`. */
+  --rc-text: #ececf0;
+  --rc-text-strong: #cfcfd6;
+  --rc-text-muted: #9a9aa5;
+  --rc-text-subtle: #7a7a85;
+  --rc-text-dim: #6a6a74;
+  --rc-text-faint: #4a4a54;
+
+  /* Quality gauge fill (coverage/diversity/sharpness), red → amber → green. */
+  --rc-gauge: linear-gradient(90deg, #f87171, #fbbf24, #34d399);
 }
 
 * {
