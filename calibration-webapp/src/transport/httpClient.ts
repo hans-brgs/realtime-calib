@@ -1,7 +1,15 @@
 // Typed HTTP client for the calibration-service API and the token server.
 // URLs come from Vite env (never hardcoded), see env.d.ts.
 
-import type { ConfigRequest, DetectedCamera, Session, SessionSummary } from '@/transport/types';
+import type {
+  Board,
+  BoardConfigRequest,
+  BoardTarget,
+  ConfigRequest,
+  DetectedCamera,
+  Session,
+  SessionSummary,
+} from '@/transport/types';
 
 export interface TokenResponse {
   token: string;
@@ -41,6 +49,29 @@ export const detectCameras = (): Promise<DetectedCamera[]> =>
 
 export const configureCameras = (request: ConfigRequest): Promise<Session> =>
   postJson<Session>('/cameras/config', request);
+
+export const fetchBoardDictionaries = (): Promise<string[]> =>
+  getJson<string[]>('/board/dictionaries');
+
+export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
+  postJson<Session>('/board', request);
+
+// Persisted board PNG (physical print), usable directly as an <img>/download href.
+export const boardImageUrl = (target: BoardTarget): string =>
+  `${API_URL}/board/${target}/image.png`;
+
+// Render an unsaved board to a PNG blob (live preview), same engine as the download.
+export async function previewBoard(board: Board): Promise<Blob> {
+  const response = await fetch(`${API_URL}/board/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(board),
+  });
+  if (!response.ok) {
+    throw new Error(`board preview failed: ${response.status}`);
+  }
+  return response.blob();
+}
 
 export async function fetchToken(): Promise<TokenResponse> {
   const response = await fetch(import.meta.env.VITE_TOKEN_URL);

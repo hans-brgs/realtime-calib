@@ -3,7 +3,20 @@ import { describe, expect, it } from 'vitest';
 import type { RootState } from '@/app/store';
 import { selectStages } from '@/features/session/selectors';
 import reducer, { rehydrateSession } from '@/features/session/sessionSlice';
-import type { CameraConfig, Session } from '@/transport/types';
+import type { Board, CameraConfig, Session } from '@/transport/types';
+
+function board(): Board {
+  return {
+    board_type: 'charuco',
+    dictionary: 'DICT_5X5_100',
+    columns: 8,
+    rows: 5,
+    marker_ratio: 0.75,
+    square_size_mm: 40,
+    marker_size_mm: 30,
+    inverted: false,
+  };
+}
 
 function camera(overrides: Partial<CameraConfig> = {}): CameraConfig {
   return {
@@ -29,6 +42,8 @@ function session(overrides: Partial<Session> = {}): Session {
     intrinsic_fps: 30,
     optimization_strategy: 'coverage-aware',
     cameras: [],
+    intrinsic_board: null,
+    extrinsic_board: null,
     ...overrides,
   };
 }
@@ -46,27 +61,37 @@ describe('sessionSlice', () => {
 });
 
 describe('selectStages (completion-driven)', () => {
-  it('no session: cameras is todo, the rest locked', () => {
+  it('no session: boards is todo first, the rest locked (board-first)', () => {
     const stages = selectStages(stateWith(null));
-    expect(stages[0]).toMatchObject({ id: 'cameras', status: 'todo' });
-    expect(stages[1].status).toBe('locked');
+    expect(stages[0]).toMatchObject({ id: 'boards', status: 'todo' });
+    expect(stages[1]).toMatchObject({ id: 'cameras', status: 'locked' });
     expect(stages[2].status).toBe('locked');
   });
 
-  it('configured cameras at camera_setup: cameras active, boards todo, intrinsic locked', () => {
-    const stages = selectStages(stateWith(session({ cameras: [camera()] })));
-    expect(stages[0]).toMatchObject({ id: 'cameras', status: 'active' });
-    expect(stages[1]).toMatchObject({ id: 'boards', status: 'todo' });
-    expect(stages[2]).toMatchObject({ id: 'intrinsic', status: 'locked' });
+  it('intrinsic board defined at camera_setup: boards complete, cameras active, intrinsic todo', () => {
+    const stages = selectStages(
+      stateWith(session({ step: 'camera_setup', intrinsic_board: board(), cameras: [camera()] })),
+    );
+    expect(stages[0]).toMatchObject({ id: 'boards', status: 'complete' });
+    expect(stages[1]).toMatchObject({ id: 'cameras', status: 'active' });
+    expect(stages[2]).toMatchObject({ id: 'intrinsic', status: 'todo' });
+  });
+
+  it('board undefined keeps cameras locked (board-first gating)', () => {
+    const stages = selectStages(stateWith(session({ step: 'intrinsic_board' })));
+    expect(stages[0]).toMatchObject({ id: 'boards', status: 'active' });
+    expect(stages[1]).toMatchObject({ id: 'cameras', status: 'locked' });
   });
 
   it('load-from-files at review_3d with all done: stages complete, review active', () => {
     const done = session({
       step: 'review_3d',
       mode: 'load-from-files',
+      intrinsic_board: board(),
       cameras: [camera({ status: 'extrinsic_done' })],
     });
     const stages = selectStages(stateWith(done));
+    expect(stages.find((s) => s.id === 'boards')?.status).toBe('complete');
     expect(stages.find((s) => s.id === 'cameras')?.status).toBe('complete');
     expect(stages.find((s) => s.id === 'intrinsic')?.status).toBe('complete');
     expect(stages.find((s) => s.id === 'extrinsic')?.status).toBe('complete');

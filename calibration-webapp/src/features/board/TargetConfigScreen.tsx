@@ -1,0 +1,329 @@
+import {
+  Alert,
+  Box,
+  Button,
+  Group,
+  NumberInput,
+  SegmentedControl,
+  Select,
+  Switch,
+  Text,
+} from '@mantine/core';
+import { IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
+
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { ScreenHeader } from '@/components/ScreenHeader';
+import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
+import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
+import type { Board, BoardTarget, BoardType } from '@/transport/types';
+
+const DEFAULT_BOARD: Board = {
+  board_type: 'charuco',
+  dictionary: 'DICT_5X5_100',
+  columns: 8,
+  rows: 5,
+  marker_ratio: 0.75,
+  square_size_mm: 40,
+  marker_size_mm: 30,
+  inverted: false,
+};
+
+// marker_ratio drives the render; derive it from the (measured) mm so preview and
+// print stay consistent with what the operator entered.
+function withRatio(board: Board): Board {
+  const ratio = board.square_size_mm > 0 ? board.marker_size_mm / board.square_size_mm : 0.75;
+  return { ...board, marker_ratio: ratio };
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return (
+    <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb={11} style={{ letterSpacing: '0.07em' }}>
+      {children}
+    </Text>
+  );
+}
+
+function FieldLabel({ children }: { children: ReactNode }) {
+  return (
+    <Text fz="0.69rem" c="dark.2" mb={6}>
+      {children}
+    </Text>
+  );
+}
+
+const INPUT_STYLES = {
+  input: {
+    background: 'var(--rc-input)',
+    borderColor: 'var(--mantine-color-dark-4)',
+    fontVariantNumeric: 'tabular-nums' as const,
+  },
+} as const;
+
+export function TargetConfigScreen() {
+  const dispatch = useAppDispatch();
+  const session = useAppSelector(selectSession);
+
+  const [dictionaries, setDictionaries] = useState<string[]>([DEFAULT_BOARD.dictionary]);
+  const [active, setActive] = useState<BoardTarget>('intrinsic');
+  const [intrinsic, setIntrinsic] = useState<Board>(session?.intrinsic_board ?? DEFAULT_BOARD);
+  const [extrinsic, setExtrinsic] = useState<Board>(
+    session?.extrinsic_board ?? session?.intrinsic_board ?? DEFAULT_BOARD,
+  );
+  const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
+    session?.extrinsic_board != null,
+  );
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  const urlRef = useRef<string | null>(null);
+
+  const editingInherited = active === 'extrinsic' && !extrinsicDifferent;
+  const board = active === 'intrinsic' ? intrinsic : extrinsic;
+  const setBoard = active === 'intrinsic' ? setIntrinsic : setExtrinsic;
+  const patch = (fields: Partial<Board>) => setBoard((b) => ({ ...b, ...fields }));
+
+  useEffect(() => {
+    fetchBoardDictionaries()
+      .then(setDictionaries)
+      .catch(() => setDictionaries([DEFAULT_BOARD.dictionary]));
+  }, []);
+
+  // Live preview: same render engine as the download (backend), debounced.
+  const previewBoardValue = editingInherited ? intrinsic : board;
+  const previewKey = JSON.stringify(withRatio(previewBoardValue));
+  useEffect(() => {
+    let cancelled = false;
+    const timer = setTimeout(() => {
+      previewBoard(withRatio(previewBoardValue))
+        .then((blob) => {
+          if (cancelled) return;
+          const url = URL.createObjectURL(blob);
+          if (urlRef.current) URL.revokeObjectURL(urlRef.current);
+          urlRef.current = url;
+          setPreviewUrl(url);
+          setPreviewError(null);
+        })
+        .catch((err: unknown) => {
+          if (!cancelled) setPreviewError(err instanceof Error ? err.message : 'preview failed');
+        });
+    }, 300);
+    return () => {
+      cancelled = true;
+      clearTimeout(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [previewKey]);
+
+  useEffect(() => () => void (urlRef.current && URL.revokeObjectURL(urlRef.current)), []);
+
+  const save = async () => {
+    const target: BoardTarget = active;
+    setSaving(true);
+    try {
+      await dispatch(applyBoardConfig({ target, board: withRatio(board) })).unwrap();
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Box p={{ base: 'md', sm: 'xl' }}>
+      <ScreenHeader
+        title="Target Config"
+        subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
+      />
+
+      <Box
+        className="rc-camsetup-grid"
+        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: 22 }}
+      >
+        {/* Left — preview + download */}
+        <Box
+          style={{
+            border: '1px solid var(--rc-border)',
+            borderRadius: 'var(--mantine-radius-lg)',
+            background: 'var(--rc-panel)',
+            padding: 16,
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 14,
+          }}
+        >
+          <Box
+            style={{
+              flex: 1,
+              minHeight: 260,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              background: '#ffffff',
+              borderRadius: 'var(--mantine-radius-md)',
+              overflow: 'hidden',
+            }}
+          >
+            {previewError ? (
+              <Text c="var(--rc-error)" fz="0.82rem" p="md" ta="center">
+                {previewError}
+              </Text>
+            ) : previewUrl ? (
+              <img
+                src={previewUrl}
+                alt="Board preview"
+                style={{ maxWidth: '100%', maxHeight: 460, objectFit: 'contain' }}
+              />
+            ) : (
+              <Text c="dark.4" fz="0.82rem">
+                Rendering…
+              </Text>
+            )}
+          </Box>
+
+          <Group justify="space-between" wrap="wrap" gap="sm">
+            <Button
+              component="a"
+              href={previewUrl ?? undefined}
+              download={`board_${active}.png`}
+              disabled={!previewUrl}
+              leftSection={<IconDownload size={16} />}
+            >
+              Download PNG
+            </Button>
+          </Group>
+
+          <Alert
+            variant="light"
+            color="yellow"
+            icon={<IconRuler size={16} />}
+            styles={{ message: { fontSize: '0.78rem', lineHeight: 1.5 } }}
+          >
+            Print the PNG, then measure a printed square with a caliper and enter its real size below.
+            The measurement — not the print scale — sets the metric scale.
+          </Alert>
+        </Box>
+
+        {/* Right — settings */}
+        <Box>
+          <SegmentedControl
+            fullWidth
+            value={active}
+            onChange={(v) => setActive(v as BoardTarget)}
+            data={[
+              { label: 'Intrinsic board', value: 'intrinsic' },
+              { label: 'Extrinsic board', value: 'extrinsic' },
+            ]}
+            mb="md"
+          />
+
+          {active === 'extrinsic' && (
+            <Switch
+              checked={extrinsicDifferent}
+              onChange={(e) => setExtrinsicDifferent(e.currentTarget.checked)}
+              label="Use a different board for extrinsic"
+              mb="md"
+            />
+          )}
+
+          {editingInherited ? (
+            <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>
+              <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
+            </Alert>
+          ) : (
+            <Box
+              style={{
+                border: '1px solid var(--rc-border)',
+                borderRadius: 'var(--mantine-radius-lg)',
+                background: 'var(--rc-panel)',
+                padding: 16,
+              }}
+            >
+              <SectionLabel>Board</SectionLabel>
+              <SegmentedControl
+                fullWidth
+                value={board.board_type}
+                onChange={(v) => patch({ board_type: v as BoardType })}
+                data={[
+                  { label: 'ChArUco', value: 'charuco' },
+                  { label: 'ArUco', value: 'aruco' },
+                ]}
+                mb="md"
+              />
+
+              <FieldLabel>Dictionary</FieldLabel>
+              <Select
+                value={board.dictionary}
+                onChange={(v) => v && patch({ dictionary: v })}
+                data={dictionaries}
+                allowDeselect={false}
+                comboboxProps={{ withinPortal: true }}
+                styles={INPUT_STYLES}
+                mb="md"
+              />
+
+              <Group grow mb="md">
+                <Box>
+                  <FieldLabel>Columns</FieldLabel>
+                  <NumberInput
+                    value={board.columns}
+                    onChange={(v) => patch({ columns: Number(v) || 0 })}
+                    min={2}
+                    max={30}
+                    styles={INPUT_STYLES}
+                  />
+                </Box>
+                <Box>
+                  <FieldLabel>Rows</FieldLabel>
+                  <NumberInput
+                    value={board.rows}
+                    onChange={(v) => patch({ rows: Number(v) || 0 })}
+                    min={2}
+                    max={30}
+                    styles={INPUT_STYLES}
+                  />
+                </Box>
+              </Group>
+
+              <Group grow mb="md">
+                <Box>
+                  <FieldLabel>Square size (mm, measured)</FieldLabel>
+                  <NumberInput
+                    value={board.square_size_mm}
+                    onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                    min={1}
+                    decimalScale={2}
+                    step={0.5}
+                    styles={INPUT_STYLES}
+                  />
+                </Box>
+                <Box>
+                  <FieldLabel>Marker size (mm)</FieldLabel>
+                  <NumberInput
+                    value={board.marker_size_mm}
+                    onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                    min={1}
+                    decimalScale={2}
+                    step={0.5}
+                    styles={INPUT_STYLES}
+                  />
+                </Box>
+              </Group>
+
+              <Switch
+                checked={board.inverted}
+                onChange={(e) => patch({ inverted: e.currentTarget.checked })}
+                label="Inverted (ink saving)"
+              />
+            </Box>
+          )}
+
+          {!editingInherited && (
+            <Button fullWidth mt="lg" onClick={save} loading={saving}>
+              Save {active} board
+            </Button>
+          )}
+        </Box>
+      </Box>
+    </Box>
+  );
+}

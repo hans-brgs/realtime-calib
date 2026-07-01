@@ -19,9 +19,11 @@ interface StageDef {
   steps: WizardStep[];
 }
 
+// Board definition comes first so the operator can print early, before wiring
+// cameras (ADR-0020 workflow).
 const STAGES: StageDef[] = [
-  { id: 'cameras', label: 'Camera Setup', steps: ['camera_setup'] },
   { id: 'boards', label: 'Target Config', steps: ['intrinsic_board', 'extrinsic_board_choice'] },
+  { id: 'cameras', label: 'Camera Setup', steps: ['camera_setup'] },
   { id: 'intrinsic', label: 'Intrinsics', steps: ['intrinsic_capture'] },
   { id: 'extrinsic', label: 'Extrinsics', steps: ['extrinsic_capture'] },
   { id: 'review', label: 'Review 3D', steps: ['review_3d'] },
@@ -34,6 +36,10 @@ function isComplete(id: StageId, session: Session | null): boolean {
   }
   const cameras = session.cameras;
   switch (id) {
+    case 'boards':
+      // Target Config complete once the intrinsic board is defined (the extrinsic
+      // board inherits it by default) — this unlocks Camera Setup (board-first).
+      return session.intrinsic_board !== null;
     case 'cameras':
       return cameras.length > 0;
     case 'intrinsic':
@@ -43,7 +49,7 @@ function isComplete(id: StageId, session: Session | null): boolean {
       );
     case 'extrinsic':
       return cameras.length > 0 && cameras.every((c) => c.status === 'extrinsic_done');
-    // boards / review / export: not modelled yet (data comes in later phases).
+    // review / export: not modelled yet (data comes in later phases).
     default:
       return false;
   }
@@ -69,7 +75,10 @@ export function selectStages(state: RootState): Stage[] {
       status = 'locked';
     }
     stages.push({ id: def.id, label: def.label, status });
-    prerequisitesMet = complete || active;
+    // Strict linear progression: a stage unlocks only once the previous one is
+    // *complete* (not merely active). This enforces board-first — Camera Setup
+    // stays locked until the intrinsic board is defined (ADR-0020).
+    prerequisitesMet = complete;
   }
 
   return stages;
