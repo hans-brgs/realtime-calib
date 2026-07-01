@@ -21,8 +21,8 @@ import type { Board, BoardTarget, BoardType } from '@/transport/types';
 const DEFAULT_BOARD: Board = {
   board_type: 'charuco',
   dictionary: 'DICT_5X5_100',
-  columns: 8,
-  rows: 5,
+  columns: 7,
+  rows: 8,
   marker_ratio: 0.75,
   marker_id: 0,
   square_size_mm: 40,
