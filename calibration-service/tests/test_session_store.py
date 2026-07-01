@@ -49,7 +49,7 @@ def test_round_trip_preserves_state(tmp_path: Path) -> None:
     original = CalibrationSession(
         session_id="demo",
         step=WizardStep.EXTRINSIC_CAPTURE,
-        mode=SessionMode.LOAD_INTRINSIC,
+        mode=SessionMode.LOAD_FROM_FILES,
         cameras=[_sample_camera()],
         intrinsic_fps=60,
         optimization_strategy="outlier-rejection",
@@ -75,3 +75,21 @@ def test_list_sessions(tmp_path: Path) -> None:
     (tmp_path / "not_a_session").mkdir()  # no session.toml
 
     assert list_sessions(tmp_path) == ["alpha", "beta"]
+
+
+def test_reload_maps_legacy_modes(tmp_path: Path) -> None:
+    """Pre-ADR-0019 session.toml files still load (mode name mapping)."""
+    base = session_dir(tmp_path, "legacy")
+    base.mkdir(parents=True)
+    (base / SESSION_FILE).write_text(
+        'session_id = "legacy"\n'
+        'step = "camera_setup"\n'
+        'mode = "load_intrinsic"\n'
+        "intrinsic_fps = 30\n"
+        'optimization_strategy = "coverage-aware"\n'
+        "cameras = []\n"
+    )
+
+    loaded = load_session(tmp_path, "legacy")
+
+    assert loaded.mode is SessionMode.LOAD_FROM_FILES
