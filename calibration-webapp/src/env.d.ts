@@ -10,3 +10,7 @@ interface ImportMetaEnv {
 interface ImportMeta {
   readonly env: ImportMetaEnv;
 }
+
+// CSS-only side-effect modules (@fontsource-variable) ship no type declarations.
+declare module '@fontsource-variable/sora';
+declare module '@fontsource-variable/manrope';
