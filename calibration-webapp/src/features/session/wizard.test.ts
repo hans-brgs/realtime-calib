@@ -12,6 +12,7 @@ function board(): Board {
     columns: 8,
     rows: 5,
     marker_ratio: 0.75,
+    marker_id: 0,
     square_size_mm: 40,
     marker_size_mm: 30,
     inverted: false,

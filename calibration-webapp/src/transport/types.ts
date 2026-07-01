@@ -33,11 +33,12 @@ export type BoardType = 'charuco' | 'aruco';
 export interface Board {
   board_type: BoardType;
   dictionary: string;
-  columns: number;
+  columns: number; // ChArUco grid (ignored for a single ArUco marker)
   rows: number;
-  marker_ratio: number; // marker/square, render-only
-  square_size_mm: number; // measured (metric scale)
-  marker_size_mm: number;
+  marker_ratio: number; // ChArUco marker/square, render-only
+  marker_id: number; // ArUco single-marker id
+  square_size_mm: number; // ChArUco measured square (metric scale)
+  marker_size_mm: number; // measured marker side; metric scale for ArUco
   inverted: boolean;
 }
 

@@ -24,16 +24,30 @@ const DEFAULT_BOARD: Board = {
   columns: 8,
   rows: 5,
   marker_ratio: 0.75,
+  marker_id: 0,
   square_size_mm: 40,
   marker_size_mm: 30,
   inverted: false,
 };
 
-// marker_ratio drives the render; derive it from the (measured) mm so preview and
-// print stay consistent with what the operator entered.
+// For ChArUco, marker_ratio drives the render; derive it from the (measured) mm so
+// preview and print stay consistent. ArUco (single marker) ignores the ratio.
 function withRatio(board: Board): Board {
+  if (board.board_type !== 'charuco') {
+    return board;
+  }
   const ratio = board.square_size_mm > 0 ? board.marker_size_mm / board.square_size_mm : 0.75;
   return { ...board, marker_ratio: ratio };
+}
+
+// Marker capacity from a predefined dictionary name (mirrors the backend): the
+// trailing number, e.g. DICT_5X5_100 -> 100; DICT_ARUCO_ORIGINAL -> 1024.
+function dictionaryCapacity(name: string): number {
+  if (name === 'DICT_ARUCO_ORIGINAL') {
+    return 1024;
+  }
+  const tail = Number(name.split('_').at(-1));
+  return Number.isFinite(tail) ? tail : 50;
 }
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -258,56 +272,91 @@ export function TargetConfigScreen() {
                 allowDeselect={false}
                 comboboxProps={{ withinPortal: true }}
                 styles={INPUT_STYLES}
-                mb="md"
+                mb={6}
               />
+              <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
+                <Text span fw={600} inherit>
+                  NxN
+                </Text>{' '}
+                = marker bit grid · trailing number = how many marker ids exist. Pick the smallest
+                that fits.
+              </Text>
 
-              <Group grow mb="md">
-                <Box>
-                  <FieldLabel>Columns</FieldLabel>
-                  <NumberInput
-                    value={board.columns}
-                    onChange={(v) => patch({ columns: Number(v) || 0 })}
-                    min={2}
-                    max={30}
-                    styles={INPUT_STYLES}
-                  />
-                </Box>
-                <Box>
-                  <FieldLabel>Rows</FieldLabel>
-                  <NumberInput
-                    value={board.rows}
-                    onChange={(v) => patch({ rows: Number(v) || 0 })}
-                    min={2}
-                    max={30}
-                    styles={INPUT_STYLES}
-                  />
-                </Box>
-              </Group>
+              {board.board_type === 'charuco' ? (
+                <>
+                  <Group grow mb="md">
+                    <Box>
+                      <FieldLabel>Columns</FieldLabel>
+                      <NumberInput
+                        value={board.columns}
+                        onChange={(v) => patch({ columns: Number(v) || 0 })}
+                        min={2}
+                        max={30}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                    <Box>
+                      <FieldLabel>Rows</FieldLabel>
+                      <NumberInput
+                        value={board.rows}
+                        onChange={(v) => patch({ rows: Number(v) || 0 })}
+                        min={2}
+                        max={30}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                  </Group>
 
-              <Group grow mb="md">
-                <Box>
-                  <FieldLabel>Square size (mm, measured)</FieldLabel>
-                  <NumberInput
-                    value={board.square_size_mm}
-                    onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
-                    min={1}
-                    decimalScale={2}
-                    step={0.5}
-                    styles={INPUT_STYLES}
-                  />
-                </Box>
-                <Box>
-                  <FieldLabel>Marker size (mm)</FieldLabel>
-                  <NumberInput
-                    value={board.marker_size_mm}
-                    onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
-                    min={1}
-                    decimalScale={2}
-                    step={0.5}
-                    styles={INPUT_STYLES}
-                  />
-                </Box>
-              </Group>
+                  <Group grow mb="md">
+                    <Box>
+                      <FieldLabel>Square size (mm, measured)</FieldLabel>
+                      <NumberInput
+                        value={board.square_size_mm}
+                        onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                        min={1}
+                        decimalScale={2}
+                        step={0.5}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                    <Box>
+                      <FieldLabel>Marker size (mm)</FieldLabel>
+                      <NumberInput
+                        value={board.marker_size_mm}
+                        onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                        min={1}
+                        decimalScale={2}
+                        step={0.5}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                  </Group>
+                </>
+              ) : (
+                <Group grow mb="md">
+                  <Box>
+                    <FieldLabel>Marker ID</FieldLabel>
+                    <NumberInput
+                      value={board.marker_id}
+                      onChange={(v) => patch({ marker_id: Number(v) || 0 })}
+                      min={0}
+                      max={dictionaryCapacity(board.dictionary) - 1}
+                      styles={INPUT_STYLES}
+                    />
+                  </Box>
+                  <Box>
+                    <FieldLabel>Marker size (mm, measured)</FieldLabel>
+                    <NumberInput
+                      value={board.marker_size_mm}
+                      onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                      min={1}
+                      decimalScale={2}
+                      step={0.5}
+                      styles={INPUT_STYLES}
+                    />
+                  </Box>
+                </Group>
+              )}
 
               <Switch
                 checked={board.inverted}
