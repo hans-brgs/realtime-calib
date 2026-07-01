@@ -30,14 +30,13 @@ const DEFAULT_BOARD: Board = {
   inverted: false,
 };
 
-// For ChArUco, marker_ratio drives the render; derive it from the (measured) mm so
-// preview and print stay consistent. ArUco (single marker) ignores the ratio.
-function withRatio(board: Board): Board {
+// For ChArUco the operator sets the square (measured, metric scale) + a marker ratio;
+// the marker's mm size is derived from them. ArUco (single marker) is left as-is.
+function normalizeBoard(board: Board): Board {
   if (board.board_type !== 'charuco') {
     return board;
   }
-  const ratio = board.square_size_mm > 0 ? board.marker_size_mm / board.square_size_mm : 0.75;
-  return { ...board, marker_ratio: ratio };
+  return { ...board, marker_size_mm: board.marker_ratio * board.square_size_mm };
 }
 
 // Marker capacity from a predefined dictionary name (mirrors the backend): the
@@ -106,11 +105,11 @@ export function TargetConfigScreen() {
 
   // Live preview: same render engine as the download (backend), debounced.
   const previewBoardValue = editingInherited ? intrinsic : board;
-  const previewKey = JSON.stringify(withRatio(previewBoardValue));
+  const previewKey = JSON.stringify(normalizeBoard(previewBoardValue));
   useEffect(() => {
     let cancelled = false;
     const timer = setTimeout(() => {
-      previewBoard(withRatio(previewBoardValue))
+      previewBoard(normalizeBoard(previewBoardValue))
         .then((blob) => {
           if (cancelled) return;
           const url = URL.createObjectURL(blob);
@@ -136,7 +135,7 @@ export function TargetConfigScreen() {
     const target: BoardTarget = active;
     setSaving(true);
     try {
-      await dispatch(applyBoardConfig({ target, board: withRatio(board) })).unwrap();
+      await dispatch(applyBoardConfig({ target, board: normalizeBoard(board) })).unwrap();
     } finally {
       setSaving(false);
     }
@@ -221,12 +220,15 @@ export function TargetConfigScreen() {
         <Box>
           <SegmentedControl
             fullWidth
+            color="violet"
+            size="md"
             value={active}
             onChange={(v) => setActive(v as BoardTarget)}
             data={[
               { label: 'Intrinsic board', value: 'intrinsic' },
               { label: 'Extrinsic board', value: 'extrinsic' },
             ]}
+            styles={{ label: { fontWeight: 600 } }}
             mb="md"
           />
 
@@ -255,6 +257,7 @@ export function TargetConfigScreen() {
               <SectionLabel>Board</SectionLabel>
               <SegmentedControl
                 fullWidth
+                color="violet"
                 value={board.board_type}
                 onChange={(v) => patch({ board_type: v as BoardType })}
                 data={[
@@ -278,8 +281,8 @@ export function TargetConfigScreen() {
                 <Text span fw={600} inherit>
                   NxN
                 </Text>{' '}
-                = marker bit grid · trailing number = how many marker ids exist. Pick the smallest
-                that fits.
+                = marker bit grid: 4×4 reads from farther / lower resolution, 6×6 is more robust but
+                needs more pixels.
               </Text>
 
               {board.board_type === 'charuco' ? (
@@ -307,7 +310,7 @@ export function TargetConfigScreen() {
                     </Box>
                   </Group>
 
-                  <Group grow mb="md">
+                  <Group grow mb={6}>
                     <Box>
                       <FieldLabel>Square size (mm, measured)</FieldLabel>
                       <NumberInput
@@ -320,17 +323,25 @@ export function TargetConfigScreen() {
                       />
                     </Box>
                     <Box>
-                      <FieldLabel>Marker size (mm)</FieldLabel>
+                      <FieldLabel>Marker ratio</FieldLabel>
                       <NumberInput
-                        value={board.marker_size_mm}
-                        onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
-                        min={1}
+                        value={board.marker_ratio}
+                        onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
+                        min={0.1}
+                        max={0.95}
                         decimalScale={2}
-                        step={0.5}
+                        step={0.05}
                         styles={INPUT_STYLES}
                       />
                     </Box>
                   </Group>
+                  <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
+                    <Text span fw={600} inherit>
+                      Square
+                    </Text>{' '}
+                    = checkerboard cell — the metric scale you measure. The ArUco marker printed
+                    inside each white cell is that ratio of it (≈ 0.75).
+                  </Text>
                 </>
               ) : (
                 <Group grow mb="md">
