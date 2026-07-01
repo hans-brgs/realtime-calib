@@ -73,9 +73,10 @@ class CameraConfigOut(BaseModel):
 class BoardIn(BaseModel):
     board_type: str
     dictionary: str
-    columns: int
-    rows: int
+    columns: int = 8
+    rows: int = 5
     marker_ratio: float = 0.75
+    marker_id: int = 0
     square_size_mm: float = 40.0
     marker_size_mm: float = 30.0
     inverted: bool = False
@@ -138,6 +139,7 @@ def _board_out(board: CalibrationBoard | None) -> BoardOut | None:
         columns=board.columns,
         rows=board.rows,
         marker_ratio=board.marker_ratio,
+        marker_id=board.marker_id,
         square_size_mm=board.square_size_mm,
         marker_size_mm=board.marker_size_mm,
         inverted=board.inverted,
@@ -151,6 +153,7 @@ def _to_board(item: BoardIn) -> CalibrationBoard:
         columns=item.columns,
         rows=item.rows,
         marker_ratio=item.marker_ratio,
+        marker_id=item.marker_id,
         square_size_mm=item.square_size_mm,
         marker_size_mm=item.marker_size_mm,
         inverted=item.inverted,

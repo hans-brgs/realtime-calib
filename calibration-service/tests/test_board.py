@@ -41,6 +41,29 @@ def test_render_charuco_png_dimensions() -> None:
     assert image.shape[0] == 5 * PX_PER_SQUARE + PX_PER_SQUARE
 
 
+def test_render_aruco_single_marker() -> None:
+    board = CalibrationBoard(
+        board_type=BoardType.ARUCO, dictionary="DICT_5X5_100", columns=1, rows=1, marker_id=7
+    )
+    png = render_board_png(board)
+    image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    # Square single marker + symmetric quiet zone.
+    assert image.shape[0] == image.shape[1]
+
+
+def test_validate_rejects_marker_id_out_of_range() -> None:
+    with pytest.raises(ValueError, match="marker_id"):
+        validate_board(
+            CalibrationBoard(
+                board_type=BoardType.ARUCO,
+                dictionary="DICT_5X5_100",
+                columns=1,
+                rows=1,
+                marker_id=100,
+            )
+        )
+
+
 def test_render_inverted_is_negative() -> None:
     normal = render_board_png(_charuco())
     inverted = render_board_png(_charuco(inverted=True))

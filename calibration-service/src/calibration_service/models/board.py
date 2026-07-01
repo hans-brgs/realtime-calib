@@ -33,9 +33,10 @@ class CalibrationBoard:
 
     board_type: BoardType
     dictionary: str  # e.g. "DICT_5X5_100" (an OpenCV predefined dictionary name)
-    columns: int
-    rows: int
-    marker_ratio: float = 0.75  # marker/square, render-only
-    square_size_mm: float = 40.0  # measured (metric scale)
-    marker_size_mm: float = 30.0  # measured, or marker_ratio * square_size_mm
+    columns: int  # ChArUco grid width (ignored for a single ArUco marker)
+    rows: int  # ChArUco grid height (ignored for a single ArUco marker)
+    marker_ratio: float = 0.75  # ChArUco marker/square, render-only
+    marker_id: int = 0  # ArUco single-marker id (0 <= id < dictionary capacity)
+    square_size_mm: float = 40.0  # ChArUco measured square (metric scale)
+    marker_size_mm: float = 30.0  # measured marker side; the metric scale for ArUco
     inverted: bool = False

@@ -16,6 +16,8 @@ from calibration_service.models.board import BoardType, CalibrationBoard
 
 PX_PER_SQUARE = 120  # render density for print sharpness (not a physical scale)
 _MARGIN_RATIO = 0.5  # quiet zone around the board, in squares
+_ARUCO_MARKER_PX = 720  # single ArUco marker side (pixels)
+_ARUCO_QUIET_RATIO = 0.15  # white quiet zone around a single marker
 _BORDER_BITS = 1
 
 
@@ -24,21 +26,21 @@ def render_board_png(board: CalibrationBoard, px_per_square: int = PX_PER_SQUARE
     validate_board(board)
     dictionary = resolve(board.dictionary)
 
-    margin = round(px_per_square * _MARGIN_RATIO)
-    width = board.columns * px_per_square + 2 * margin
-    height = board.rows * px_per_square + 2 * margin
-
     if board.board_type is BoardType.CHARUCO:
-        cv_board: cv2.aruco.Board = cv2.aruco.CharucoBoard(
+        margin = round(px_per_square * _MARGIN_RATIO)
+        width = board.columns * px_per_square + 2 * margin
+        height = board.rows * px_per_square + 2 * margin
+        cv_board = cv2.aruco.CharucoBoard(
             (board.columns, board.rows), 1.0, board.marker_ratio, dictionary
         )
+        image = cv_board.generateImage((width, height), marginSize=margin, borderBits=_BORDER_BITS)
     else:
-        # ArUco grid: each cell = 1 unit, marker occupies marker_ratio, the rest is separation.
-        cv_board = cv2.aruco.GridBoard(
-            (board.columns, board.rows), board.marker_ratio, 1.0 - board.marker_ratio, dictionary
+        # A single ArUco marker (dictionary + id), with a white quiet zone (Caliscope-style).
+        marker = cv2.aruco.generateImageMarker(
+            dictionary, board.marker_id, _ARUCO_MARKER_PX, borderBits=_BORDER_BITS
         )
-
-    image = cv_board.generateImage((width, height), marginSize=margin, borderBits=_BORDER_BITS)
+        pad = round(_ARUCO_MARKER_PX * _ARUCO_QUIET_RATIO)
+        image = cv2.copyMakeBorder(marker, pad, pad, pad, pad, cv2.BORDER_CONSTANT, value=255)
 
     if board.inverted:
         image = cv2.bitwise_not(image)
