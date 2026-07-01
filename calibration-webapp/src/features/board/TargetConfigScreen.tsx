@@ -142,7 +142,7 @@ export function TargetConfigScreen() {
   };
 
   return (
-    <Box p={{ base: 'md', sm: 'xl' }}>
+    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       <ScreenHeader
         title="Target Config"
         subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
@@ -150,11 +150,19 @@ export function TargetConfigScreen() {
 
       <Box
         className="rc-camsetup-grid"
-        style={{ display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 380px', gap: 22 }}
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) 380px',
+          gap: 22,
+        }}
       >
-        {/* Left — preview + download */}
+        {/* Left — preview + download (fills the column height like Camera Setup) */}
         <Box
           style={{
+            minWidth: 0,
+            minHeight: 0,
             border: '1px solid var(--rc-border)',
             borderRadius: 'var(--mantine-radius-lg)',
             background: 'var(--rc-panel)',
@@ -167,13 +175,14 @@ export function TargetConfigScreen() {
           <Box
             style={{
               flex: 1,
-              minHeight: 260,
+              minHeight: 'min(48vh, 520px)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
               background: '#ffffff',
               borderRadius: 'var(--mantine-radius-md)',
               overflow: 'hidden',
+              padding: 12,
             }}
           >
             {previewError ? (
@@ -184,7 +193,7 @@ export function TargetConfigScreen() {
               <img
                 src={previewUrl}
                 alt="Board preview"
-                style={{ maxWidth: '100%', maxHeight: 460, objectFit: 'contain' }}
+                style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
               />
             ) : (
               <Text c="dark.4" fz="0.82rem">
@@ -217,7 +226,7 @@ export function TargetConfigScreen() {
         </Box>
 
         {/* Right — settings */}
-        <Box>
+        <Box style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
           <SegmentedControl
             fullWidth
             color="violet"
@@ -257,7 +266,6 @@ export function TargetConfigScreen() {
               <SectionLabel>Board</SectionLabel>
               <SegmentedControl
                 fullWidth
-                color="violet"
                 value={board.board_type}
                 onChange={(v) => patch({ board_type: v as BoardType })}
                 data={[
