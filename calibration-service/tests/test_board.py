@@ -78,9 +78,9 @@ def test_validate_rejects_marker_ratio_ge_one() -> None:
 
 
 def test_validate_rejects_dictionary_too_small() -> None:
-    # A 12x12 ChArUco needs 72 markers; DICT_5X5_50 holds only 50.
+    # A 16x16 ChArUco needs 128 markers; DICT_5X5_100 holds only 100.
     with pytest.raises(ValueError, match="larger dictionary"):
-        validate_board(_charuco(columns=12, rows=12, dictionary="DICT_5X5_50"))
+        validate_board(_charuco(columns=16, rows=16, dictionary="DICT_5X5_100"))
 
 
 def test_board_config_round_trip(tmp_path: Path) -> None:

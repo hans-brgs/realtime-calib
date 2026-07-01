@@ -9,25 +9,14 @@ from __future__ import annotations
 
 import cv2
 
-# Curated subset of OpenCV's predefined dictionaries, ordered for the UI.
+# Curated set (one per useful bit size): the meaningful choice is the marker bit
+# grid (4x4 reads from farther / lower resolution, 6x6 is more robust but needs
+# more pixels). Capacity is fixed at a sensible value per size. Same-dimension
+# predefined dictionaries are nested, so extra capacities add no distinct markers.
 SUPPORTED_DICTIONARIES: tuple[str, ...] = (
-    "DICT_4X4_50",
     "DICT_4X4_100",
-    "DICT_4X4_250",
-    "DICT_4X4_1000",
-    "DICT_5X5_50",
     "DICT_5X5_100",
-    "DICT_5X5_250",
-    "DICT_5X5_1000",
-    "DICT_6X6_50",
-    "DICT_6X6_100",
     "DICT_6X6_250",
-    "DICT_6X6_1000",
-    "DICT_7X7_50",
-    "DICT_7X7_100",
-    "DICT_7X7_250",
-    "DICT_7X7_1000",
-    "DICT_ARUCO_ORIGINAL",
 )
 
 # Special-case capacities that are not encoded in the constant name.
