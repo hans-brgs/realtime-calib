@@ -116,15 +116,31 @@
           <h1 style="font-family:'Sora',sans-serif;font-size:27px;font-weight:600;letter-spacing:-.02em;margin:0;">Welcome to the calibration bench</h1>
           <p style="color:#9a9aa5;margin:9px 0 0;max-width:600px;font-size:14.5px;">Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow to begin — or resume a recent session.</p>
 
-          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px;">
-            <sc-for list="{{ entryCards }}" as="c" hint-placeholder-count="3">
-              <div style="border:1px solid #232329;border-radius:14px;padding:20px;background:linear-gradient(180deg,#131317,#0f0f12);display:flex;flex-direction:column;min-height:208px;cursor:pointer;transition:border-color .15s;" style-hover="border-color:#3a3550;">
-                <div style="width:46px;height:46px;border-radius:11px;background:{{ c.iconBg }};border:1px solid {{ c.iconBorder }};display:flex;align-items:center;justify-content:center;color:{{ c.iconColor }};">{{ c.icon }}</div>
-                <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:16px;margin-top:16px;">{{ c.title }}</div>
-                <div style="color:#8a8a95;font-size:13px;margin-top:8px;line-height:1.55;">{{ c.desc }}</div>
-                <div style="margin-top:auto;padding-top:16px;display:flex;align-items:center;gap:6px;font-family:'Sora',sans-serif;font-size:12px;font-weight:600;letter-spacing:.02em;color:{{ c.ctaColor }};">{{ c.cta }} →</div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-top:24px;">
+            <!-- CARD 1 · New realtime calibration (primary) -->
+            <div onClick="{{ goNew }}" style="position:relative;border:1px solid rgba(167,139,250,.32);border-radius:16px;padding:22px;background:linear-gradient(180deg,rgba(139,92,246,.12),#0f0f12);display:flex;flex-direction:column;min-height:200px;cursor:pointer;transition:border-color .15s;" style-hover="border-color:rgba(167,139,250,.6);">
+              <div style="display:flex;align-items:center;gap:13px;">
+                <div style="width:48px;height:48px;border-radius:12px;background:rgba(167,139,250,.16);border:1px solid rgba(167,139,250,.35);display:flex;align-items:center;justify-content:center;color:#c4b5fd;flex:none;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"></path><circle cx="12" cy="13" r="3.4"></circle></svg></div>
+                <div>
+                  <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:17px;">New realtime calibration</div>
+                  <div style="font-size:11px;color:#8b8b96;margin-top:2px;">Live capture · records video as you go</div>
+                </div>
               </div>
-            </sc-for>
+              <div style="color:#8a8a95;font-size:13.5px;margin-top:15px;line-height:1.6;">Run the full wizard from scratch. Each intrinsic sweep is <span style="color:#c4b5fd;">recorded to the session folder</span>, so it can be replayed and recomputed later.</div>
+              <div style="margin-top:auto;padding-top:18px;display:flex;align-items:center;gap:7px;font-family:'Sora',sans-serif;font-size:12.5px;font-weight:600;letter-spacing:.02em;color:#a78bfa;">START WIZARD →</div>
+            </div>
+            <!-- CARD 2 · Load from files -->
+            <div onClick="{{ goLoad }}" style="border:1px solid #232329;border-radius:16px;padding:22px;background:linear-gradient(180deg,#131317,#0f0f12);display:flex;flex-direction:column;min-height:200px;cursor:pointer;transition:border-color .15s;" style-hover="border-color:#3a3550;">
+              <div style="display:flex;align-items:center;gap:13px;">
+                <div style="width:48px;height:48px;border-radius:12px;background:#1a1a20;border:1px solid #2a2a32;display:flex;align-items:center;justify-content:center;color:#9a9aa5;flex:none;"><svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.2h9A1.5 1.5 0 0 1 21 9.7v8.3A1.5 1.5 0 0 1 19.5 19.5h-15A1.5 1.5 0 0 1 3 18z"></path></svg></div>
+                <div>
+                  <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:17px;">Load from files</div>
+                  <div style="font-size:11px;color:#8b8b96;margin-top:2px;">Open a session folder · replay &amp; resume</div>
+                </div>
+              </div>
+              <div style="color:#8a8a95;font-size:13.5px;margin-top:15px;line-height:1.6;">Pick a folder and see <span style="color:#cfcfd6;">which artifacts are present</span> — videos, board, results — and the derived wizard state. Recompute or resume where you left off.</div>
+              <div style="margin-top:auto;padding-top:18px;display:flex;align-items:center;gap:7px;font-family:'Sora',sans-serif;font-size:12.5px;font-weight:600;letter-spacing:.02em;color:#9a9aa5;">CHOOSE FOLDER →</div>
+            </div>
           </div>
 
           <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:34px;">
@@ -224,84 +240,185 @@
         </div>
       </sc-if>
 
-      <!-- ===== INTRINSICS ===== -->
+      <!-- ===== INTRINSICS · record → compute → review ===== -->
       <sc-if value="{{ isIntrinsic }}" hint-placeholder-val="{{ false }}">
         <div style="padding:22px 26px;">
-          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
             <div>
-              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Intrinsics</h1>
-              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Calibrate each camera one at a time — capture varied, sharp board views until coverage is full.</p>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Intrinsics · {{ activeCamName }}</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Record a sweep of board views, compute, then review the annotated replay before validating. One camera at a time.</p>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">strategy <span style="color:#c4b5fd;font-weight:600;">coverage-aware</span> <span style="color:#5a5a64;">▾</span></div>
+            <div style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">strategy <span style="color:#c4b5fd;font-weight:600;">coverage-aware</span> <span style="color:#5a5a64;">▾</span></div>
           </div>
 
           <!-- camera tabs -->
           <div style="display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;">
             <sc-for list="{{ intrinsicTabs }}" as="t" hint-placeholder-count="4">
-              <div style="padding:7px 15px;border-radius:8px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};font-family:'Manrope';font-size:12.5px;font-weight:600;cursor:pointer;">{{ t.name }}</div>
+              <div onClick="{{ t.onClick }}" style="display:flex;align-items:center;gap:8px;min-height:42px;padding:0 15px;border-radius:9px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};font-family:'Manrope';font-size:12.5px;font-weight:600;cursor:pointer;"><span style="color:{{ t.glyphColor }};font-size:11px;">{{ t.glyph }}</span>{{ t.name }}</div>
             </sc-for>
           </div>
 
-          <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start;">
-            <!-- feed -->
-            <div style="min-width:0;">
-              <div style="position:relative;border-radius:13px;overflow:hidden;border:1px solid #1f1f25;background:#0d0d10;width:100%;aspect-ratio:4/3;max-height:64vh;">
-                <div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#141418,#141418 12px,#191920 12px,#191920 24px);"></div>
-                <div style="position:absolute;top:11px;left:12px;right:12px;display:flex;justify-content:space-between;font-family:'Manrope';font-size:10.5px;color:#cfcfd6;">
-                  <span style="background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">● FEED LIVE · cam_0</span>
-                  <span style="background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;font-variant-numeric:tabular-nums;">59 FPS · 2048×1536 · 12 ms</span>
-                </div>
-                <svg viewBox="0 0 400 300" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;">
-                  <polygon points="150,118 252,108 268,205 138,214" fill="rgba(52,211,153,.1)" stroke="#34d399" stroke-width="2"></polygon>
-                  <circle cx="150" cy="118" r="3.5" fill="#34d399"></circle><circle cx="252" cy="108" r="3.5" fill="#34d399"></circle><circle cx="268" cy="205" r="3.5" fill="#34d399"></circle><circle cx="138" cy="214" r="3.5" fill="#34d399"></circle>
-                </svg>
-                <div style="position:absolute;bottom:11px;left:12px;display:flex;gap:7px;">
-                  <span style="font-family:'Manrope';font-size:10.5px;color:#9ce8c0;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">burn-in · server</span>
-                  <span style="font-family:'Manrope';font-size:10.5px;color:#34d399;background:rgba(52,211,153,.14);padding:3px 8px;border-radius:6px;">fill 62% · good distance</span>
+          <!-- SUB-STEPPER · record · compute · review -->
+          <div style="display:flex;align-items:stretch;border:1px solid #232329;border-radius:12px;overflow:hidden;background:#0e0e12;margin-bottom:18px;">
+            <sc-for list="{{ phaseSteps }}" as="p" hint-placeholder-count="3">
+              <div onClick="{{ p.onClick }}" style="flex:1;display:flex;align-items:center;gap:12px;min-height:58px;padding:0 18px;cursor:pointer;background:{{ p.bg }};border-left:2px solid {{ p.bar }};">
+                <span style="width:28px;height:28px;flex:none;border-radius:50%;border:1.5px solid {{ p.ringColor }};background:{{ p.dotBg }};display:flex;align-items:center;justify-content:center;font-family:'Sora';font-size:12px;font-weight:600;color:{{ p.numColor }};">{{ p.num }}</span>
+                <div style="min-width:0;">
+                  <div style="font-family:'Sora';font-size:13.5px;font-weight:600;color:{{ p.titleColor }};">{{ p.title }}</div>
+                  <div style="font-size:10.5px;color:#6a6a74;white-space:nowrap;">{{ p.sub }}</div>
                 </div>
               </div>
-              <!-- controls -->
-              <div style="display:flex;gap:10px;margin-top:13px;">
-                <button style="flex:1;min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.5" fill="currentColor"></circle></svg> Capture pose</button>
-                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">↺ Reset</button>
-                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">Compute · next →</button>
-              </div>
-            </div>
-
-            <!-- metrics panel -->
-            <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
-              <div>
-                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:10px;">Coverage gauges</div>
-                <div style="display:flex;flex-direction:column;gap:11px;">
-                  <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="3">
-                    <div>
-                      <div style="display:flex;justify-content:space-between;font-size:12px;color:#bcbcc6;margin-bottom:5px;"><span>{{ g.label }}</span><span style="font-family:'Manrope';color:{{ g.color }};font-weight:600;font-variant-numeric:tabular-nums;">{{ g.val }}</span></div>
-                      <div style="height:8px;border-radius:5px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ g.pct }};background:{{ g.color }};border-radius:5px;"></div></div>
-                    </div>
-                  </sc-for>
-                  <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#bcbcc6;margin-top:1px;"><span style="width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399;"></span>Sharpness OK <span style="color:#6a6a74;">· gate passes</span></div>
-                </div>
-              </div>
-
-              <div>
-                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:10px;">Calibration progress</div>
-                <div style="display:flex;flex-direction:column;gap:9px;">
-                  <sc-for list="{{ intrinsicProgress }}" as="p" hint-placeholder-count="4">
-                    <div style="opacity:{{ p.fade }};">
-                      <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:11.5px;margin-bottom:4px;"><span style="color:#bcbcc6;">{{ p.name }}</span><span style="color:#8a8a95;font-variant-numeric:tabular-nums;">{{ p.label }} poses</span></div>
-                      <div style="height:6px;border-radius:4px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ p.pct }};background:{{ p.color }};border-radius:4px;"></div></div>
-                    </div>
-                  </sc-for>
-                </div>
-              </div>
-
-              <div style="border-top:1px solid #1c1c22;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
-                <sc-for list="{{ intrinsicMetrics }}" as="m" hint-placeholder-count="4">
-                  <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:12.5px;font-variant-numeric:tabular-nums;"><span style="color:#7a7a85;">{{ m.k }}</span><span style="color:#ececf0;font-weight:600;">{{ m.v }}</span></div>
-                </sc-for>
-              </div>
-            </div>
+            </sc-for>
           </div>
+
+          <!-- PHASE · RECORDING (also the backdrop while computing) -->
+          <sc-if value="{{ showFeed }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start;">
+              <div style="min-width:0;">
+                <div style="position:relative;border-radius:13px;overflow:hidden;border:1px solid #1f1f25;background:#0d0d10;width:100%;aspect-ratio:4/3;max-height:58vh;">
+                  <div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#141418,#141418 12px,#191920 12px,#191920 24px);"></div>
+                  <div style="position:absolute;top:12px;left:13px;right:13px;display:flex;justify-content:space-between;align-items:center;">
+                    <sc-if value="{{ isRecording }}" hint-placeholder-val="{{ true }}">
+                      <span style="display:inline-flex;align-items:center;gap:8px;background:rgba(0,0,0,.62);padding:6px 12px;border-radius:8px;font-family:'Manrope';font-size:12.5px;font-weight:700;letter-spacing:.06em;color:#f87171;"><span style="width:10px;height:10px;border-radius:50%;background:#f87171;box-shadow:0 0 10px #f87171;animation:pulseDot 1.1s infinite;"></span>REC</span>
+                    </sc-if>
+                    <span style="background:rgba(0,0,0,.62);padding:6px 12px;border-radius:8px;font-family:'Manrope';font-size:14px;font-weight:600;color:#ececf0;font-variant-numeric:tabular-nums;">{{ recLabel }}</span>
+                  </div>
+                  <svg viewBox="0 0 400 300" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;">
+                    <polygon points="150,118 252,108 268,205 138,214" fill="rgba(52,211,153,.1)" stroke="#34d399" stroke-width="2"></polygon>
+                    <circle cx="150" cy="118" r="3.5" fill="#34d399"></circle><circle cx="252" cy="108" r="3.5" fill="#34d399"></circle><circle cx="268" cy="205" r="3.5" fill="#34d399"></circle><circle cx="138" cy="214" r="3.5" fill="#34d399"></circle>
+                  </svg>
+                  <div style="position:absolute;bottom:12px;left:13px;display:flex;gap:7px;">
+                    <span style="font-family:'Manrope';font-size:10.5px;color:#9ce8c0;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">writing → intrinsic/{{ activeCamName }}/capture.mkv</span>
+                  </div>
+                </div>
+                <div style="display:flex;gap:10px;margin-top:13px;">
+                  <button onClick="{{ stopRecording }}" style="flex:1;min-height:54px;border-radius:12px;border:1px solid #4a2530;background:linear-gradient(180deg,#f0576b,#d63a52);color:#fff;font-family:'Sora';font-size:14.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:10px;"><span style="width:15px;height:15px;border-radius:3px;background:#fff;"></span>Stop &amp; compute</button>
+                </div>
+                <div style="margin-top:11px;font-size:11.5px;color:#6a6a74;line-height:1.55;display:flex;gap:8px;"><span style="color:#a78bfa;flex:none;">ⓘ</span><span>Gauges are <strong style="color:#9a9aa5;">indicative</strong> while recording — true reprojection quality is measured on compute, from the recorded video.</span></div>
+              </div>
+
+              <!-- live gauges -->
+              <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
+                <div>
+                  <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px;"><span style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;">Live gauges</span><span style="font-size:10px;color:#fbbf24;background:rgba(251,191,36,.12);padding:3px 9px;border-radius:6px;">indicative</span></div>
+                  <div style="display:flex;flex-direction:column;gap:11px;">
+                    <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="3">
+                      <div>
+                        <div style="display:flex;justify-content:space-between;font-size:12px;color:#bcbcc6;margin-bottom:5px;"><span>{{ g.label }}</span><span style="font-family:'Manrope';color:{{ g.color }};font-weight:600;font-variant-numeric:tabular-nums;">{{ g.val }}</span></div>
+                        <div style="height:8px;border-radius:5px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ g.pct }};background:{{ g.color }};border-radius:5px;"></div></div>
+                      </div>
+                    </sc-for>
+                    <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#bcbcc6;margin-top:1px;"><span style="width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399;"></span>Sharpness OK <span style="color:#6a6a74;">· gate passes</span></div>
+                  </div>
+                </div>
+                <div style="border-top:1px solid #1c1c22;padding-top:14px;">
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">This capture</div>
+                  <div style="display:flex;flex-direction:column;gap:9px;">
+                    <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:12.5px;font-variant-numeric:tabular-nums;"><span style="color:#7a7a85;">Duration</span><span style="color:#ececf0;font-weight:600;">{{ recLabel }}</span></div>
+                    <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:12.5px;font-variant-numeric:tabular-nums;"><span style="color:#7a7a85;">Frames written</span><span style="color:#ececf0;font-weight:600;">{{ framesWritten }}</span></div>
+                    <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:12.5px;font-variant-numeric:tabular-nums;"><span style="color:#7a7a85;">Board detected</span><span style="color:#34d399;font-weight:600;">86%</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </sc-if>
+
+          <!-- PHASE · REVIEWING -->
+          <sc-if value="{{ isReviewing }}" hint-placeholder-val="{{ false }}">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 322px;gap:18px;align-items:start;">
+              <!-- annotated replay viewer -->
+              <div style="min-width:0;">
+                <div style="position:relative;border-radius:13px;overflow:hidden;border:1px solid #1f1f25;background:#0b0b0e;width:100%;aspect-ratio:{{ viewerAspect }};">
+                  <div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#131317,#131317 12px,#17171c 12px,#17171c 24px);"></div>
+                  <div style="position:absolute;top:11px;left:12px;right:12px;display:flex;justify-content:space-between;">
+                    <span style="background:rgba(0,0,0,.62);padding:5px 11px;border-radius:7px;font-family:'Manrope';font-size:11px;color:#c4b5fd;">▷ annotated replay · {{ activeCamName }}</span>
+                    <span style="background:rgba(0,0,0,.62);padding:5px 11px;border-radius:7px;font-family:'Manrope';font-size:11.5px;color:#ececf0;font-variant-numeric:tabular-nums;">frame {{ frameNo }} / {{ frameTotal }}</span>
+                  </div>
+                  <svg viewBox="0 0 480 300" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;">
+                    <polygon points="120,86 360,78 372,224 108,232" fill="rgba(255,255,255,.015)" stroke="#33333c" stroke-width="1"></polygon>
+                    <!-- error vectors (detected → reprojected), exaggerated ×20 -->
+                    <g stroke="#a78bfa" stroke-width="1.1" opacity=".75">
+                      <line x1="150" y1="108" x2="156" y2="112"></line><line x1="210" y1="104" x2="214" y2="99"></line><line x1="270" y1="100" x2="275" y2="106"></line><line x1="330" y1="98" x2="335" y2="94"></line>
+                      <line x1="148" y1="156" x2="153" y2="161"></line><line x1="209" y1="153" x2="205" y2="149"></line><line x1="270" y1="150" x2="276" y2="154"></line><line x1="331" y1="148" x2="337" y2="143"></line>
+                      <line x1="146" y1="204" x2="151" y2="209"></line><line x1="208" y1="202" x2="213" y2="198"></line><line x1="269" y1="200" x2="264" y2="205"></line><line x1="332" y1="198" x2="338" y2="203"></line>
+                    </g>
+                    <!-- reprojected corners (violet rings) -->
+                    <g fill="none" stroke="#c4b5fd" stroke-width="1.4">
+                      <circle cx="156" cy="112" r="4"></circle><circle cx="214" cy="99" r="4"></circle><circle cx="275" cy="106" r="4"></circle><circle cx="335" cy="94" r="4"></circle>
+                      <circle cx="153" cy="161" r="4"></circle><circle cx="205" cy="149" r="4"></circle><circle cx="276" cy="154" r="4"></circle><circle cx="337" cy="143" r="4"></circle>
+                      <circle cx="151" cy="209" r="4"></circle><circle cx="213" cy="198" r="4"></circle><circle cx="264" cy="205" r="4"></circle><circle cx="338" cy="203" r="4"></circle>
+                    </g>
+                    <!-- detected corners (green dots) -->
+                    <g fill="#34d399">
+                      <circle cx="150" cy="108" r="2.6"></circle><circle cx="210" cy="104" r="2.6"></circle><circle cx="270" cy="100" r="2.6"></circle><circle cx="330" cy="98" r="2.6"></circle>
+                      <circle cx="148" cy="156" r="2.6"></circle><circle cx="209" cy="153" r="2.6"></circle><circle cx="270" cy="150" r="2.6"></circle><circle cx="331" cy="148" r="2.6"></circle>
+                      <circle cx="146" cy="204" r="2.6"></circle><circle cx="208" cy="202" r="2.6"></circle><circle cx="269" cy="200" r="2.6"></circle><circle cx="332" cy="198" r="2.6"></circle>
+                    </g>
+                  </svg>
+                  <div style="position:absolute;bottom:11px;left:12px;display:flex;gap:8px;flex-wrap:wrap;">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:'Manrope';font-size:10.5px;color:#cfcfd6;background:rgba(0,0,0,.55);padding:3px 9px;border-radius:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#34d399;"></span>detected</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:'Manrope';font-size:10.5px;color:#cfcfd6;background:rgba(0,0,0,.55);padding:3px 9px;border-radius:6px;"><span style="width:8px;height:8px;border-radius:50%;border:1.4px solid #c4b5fd;"></span>reprojected</span>
+                    <span style="font-family:'Manrope';font-size:10.5px;color:#9a9aa5;background:rgba(0,0,0,.55);padding:3px 9px;border-radius:6px;">error ×20</span>
+                  </div>
+                </div>
+                <!-- transport / scrub -->
+                <div style="display:flex;align-items:center;gap:11px;margin-top:13px;">
+                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;cursor:pointer;font-size:13px;">⏮</button>
+                  <button style="width:48px;height:48px;flex:none;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg></button>
+                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;cursor:pointer;font-size:13px;">⏭</button>
+                  <div style="flex:1;height:6px;border-radius:4px;background:#1c1c22;position:relative;"><div style="position:absolute;left:0;width:{{ scrubPct }};height:100%;background:#8b5cf6;border-radius:4px;"></div><div style="position:absolute;left:{{ scrubPct }};top:-5px;width:16px;height:16px;border-radius:50%;background:#c4b5fd;border:2px solid #0b0b0e;transform:translateX(-8px);"></div></div>
+                  <span style="font-family:'Manrope';font-size:11px;color:#7a7a85;font-variant-numeric:tabular-nums;white-space:nowrap;">frame {{ frameNo }} / {{ frameTotal }}</span>
+                </div>
+              </div>
+
+              <!-- side / bottom panel -->
+              <div style="display:{{ reviewPanelDisplay }};{{ reviewPanelExtra }}min-width:0;">
+                <!-- quality metrics -->
+                <div style="min-width:0;">
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Quality · from replay</div>
+                  <div style="border:1px solid #232329;border-radius:11px;padding:13px 14px;background:#101014;">
+                    <div style="font-size:11px;color:#7a7a85;">Reprojection error</div>
+                    <div style="font-family:'Sora';font-size:27px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;">{{ reprojErr }} <span style="font-size:13px;color:#7a7a85;font-weight:400;">px</span></div>
+                  </div>
+                  <div style="display:flex;gap:9px;margin-top:9px;">
+                    <div style="flex:1;border:1px solid #232329;border-radius:11px;padding:11px 12px;background:#101014;"><div style="font-size:10.5px;color:#7a7a85;">Coverage</div><div style="font-family:'Sora';font-size:16px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;color:#34d399;">78%</div></div>
+                    <div style="flex:1;border:1px solid #232329;border-radius:11px;padding:11px 12px;background:#101014;"><div style="font-size:10.5px;color:#7a7a85;">Keyframes</div><div style="font-family:'Sora';font-size:16px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;">{{ keyframesUsed }}</div></div>
+                  </div>
+                </div>
+
+                <!-- recalibration params -->
+                <div style="min-width:0;">
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin:16px 0 9px;">Recalibration</div>
+                  <div style="border:1px solid #232329;border-radius:12px;padding:15px;background:#101014;display:flex;flex-direction:column;gap:14px;">
+                    <div>
+                      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;"><span style="font-size:12.5px;color:#bcbcc6;">Sampling stride</span><span style="font-family:'Manrope';font-size:11px;color:#8a8a95;">1 frame / {{ stride }}</span></div>
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <button onClick="{{ decStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
+                        <div style="flex:1;text-align:center;font-family:'Sora';font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;color:#ececf0;">{{ stride }}</div>
+                        <button onClick="{{ incStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
+                      </div>
+                    </div>
+                    <div>
+                      <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;"><span style="font-size:12.5px;color:#bcbcc6;">Keyframe cap</span><span style="font-family:'Manrope';font-size:11px;color:#8a8a95;">max kept</span></div>
+                      <div style="display:flex;align-items:center;gap:10px;">
+                        <button onClick="{{ decCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
+                        <div style="flex:1;text-align:center;font-family:'Sora';font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;color:#ececf0;">{{ keyframeCap }}</div>
+                        <button onClick="{{ incCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
+                      </div>
+                    </div>
+                    <div style="font-size:10.5px;color:#6a6a74;line-height:1.5;">Fewer keyframes → faster compute, potentially lower coverage. Recompute overwrites the current result.</div>
+                    <button onClick="{{ onRecompute }}" style="min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,rgba(167,139,250,.18),rgba(139,92,246,.1));color:#c4b5fd;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg> Recompute with these settings</button>
+                  </div>
+                </div>
+
+                <!-- verdict actions -->
+                <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;">
+                  <button onClick="{{ onValidate }}" style="min-height:48px;border-radius:11px;border:1px solid #1f4a35;background:linear-gradient(180deg,#2fbf82,#1f9c68);color:#04120c;font-family:'Sora';font-size:13.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"></path></svg> Validate &amp; next camera →</button>
+                  <button onClick="{{ onReRecord }}" style="min-height:44px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">↺ Re-record this camera</button>
+                </div>
+              </div>
+            </div>
+          </sc-if>
         </div>
       </sc-if>
 
@@ -558,6 +675,57 @@
         </div>
       </sc-if>
 
+      <!-- ===== LOAD FROM FILES ===== -->
+      <sc-if value="{{ isLoad }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 30px;max-width:1180px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+            <div>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Load from files</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;max-width:640px;">Point to a session folder. We read its artifacts, derive the state of each wizard step, and flag anything you must complete before resuming. <span style="color:#c4b5fd;">Missing steps are marked in the rail.</span></p>
+            </div>
+          </div>
+
+          <!-- folder picker -->
+          <div style="margin-top:18px;display:flex;gap:11px;align-items:center;flex-wrap:wrap;">
+            <div style="flex:1;min-width:260px;display:flex;align-items:center;gap:11px;min-height:50px;padding:0 15px;border:1px solid #2a2a32;border-radius:11px;background:#16161b;">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7a7a85" stroke-width="1.8" style="flex:none;"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.2h9A1.5 1.5 0 0 1 21 9.7v8.3A1.5 1.5 0 0 1 19.5 19.5h-15A1.5 1.5 0 0 1 3 18z"></path></svg>
+              <span style="font-family:'Manrope';font-size:13px;color:#c4b5fd;word-break:break-all;">{{ folderPath }}</span>
+            </div>
+            <button style="min-height:50px;padding:0 20px;border-radius:11px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Choose folder…</button>
+          </div>
+
+          <!-- session artifacts × derived wizard state -->
+          <div style="margin-top:20px;border:1px solid #232329;border-radius:13px;overflow:hidden;background:#0f0f12;">
+            <div style="display:grid;grid-template-columns:1.1fr 1.9fr .9fr;gap:14px;padding:11px 18px;background:#121216;font-size:10.5px;letter-spacing:.07em;color:#6a6a74;text-transform:uppercase;font-weight:600;">
+              <span>Wizard step</span><span>Artifacts in folder</span><span style="text-align:right;">State</span>
+            </div>
+            <sc-for list="{{ matrixRows }}" as="r" hint-placeholder-count="6">
+              <div style="display:grid;grid-template-columns:1.1fr 1.9fr .9fr;gap:14px;padding:15px 18px;border-top:1px solid #18181d;align-items:center;">
+                <span style="font-family:'Sora';font-size:13px;font-weight:600;color:#ececf0;">{{ r.step }}</span>
+                <span style="display:flex;flex-wrap:wrap;gap:6px;">
+                  <sc-for list="{{ r.arts }}" as="c" hint-placeholder-count="2">
+                    <span style="display:inline-flex;align-items:center;gap:6px;font-family:'Manrope';font-size:11px;color:{{ c.fg }};background:{{ c.bg }};padding:4px 10px;border-radius:6px;"><span style="font-size:10px;">{{ c.mark }}</span>{{ c.l }}</span>
+                  </sc-for>
+                </span>
+                <span style="text-align:right;"><span style="display:inline-flex;align-items:center;gap:6px;font-family:'Manrope';font-size:11.5px;color:{{ r.stateFg }};background:{{ r.stateBg }};padding:4px 11px;border-radius:20px;"><span style="width:6px;height:6px;border-radius:50%;background:{{ r.stateFg }};"></span>{{ r.stateLabel }}</span></span>
+              </div>
+            </sc-for>
+          </div>
+
+          <!-- resume bar -->
+          <div style="margin-top:20px;border:1px solid rgba(251,191,36,.28);border-radius:13px;padding:16px 18px;display:flex;justify-content:space-between;align-items:center;gap:16px;flex-wrap:wrap;background:linear-gradient(180deg,rgba(251,191,36,.05),#0f0f12);">
+            <div style="display:flex;align-items:flex-start;gap:12px;">
+              <span style="width:30px;height:30px;flex:none;border-radius:8px;background:rgba(251,191,36,.14);display:flex;align-items:center;justify-content:center;color:#fbbf24;font-size:15px;">⚠</span>
+              <div>
+                <div style="font-family:'Sora';font-size:13.5px;font-weight:600;">Resumes at Intrinsics · with warnings</div>
+                <div style="font-size:12px;color:#9a9aa5;margin-top:2px;max-width:620px;line-height:1.5;">cam_3 has no video and the extrinsic pass is missing — the rail marks both (<span style="color:#fbbf24;">⚠</span> recomputable, <span style="color:#f87171;">✕</span> blocking). You can recompute intrinsics now; extrinsics must be recorded before Review.</div>
+              </div>
+            </div>
+            <button onClick="{{ onResume }}" style="min-height:48px;padding:0 22px;border-radius:11px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13.5px;font-weight:600;cursor:pointer;white-space:nowrap;">Resume session →</button>
+          </div>
+        </div>
+      </sc-if>
+
       <!-- ===== PLACEHOLDER SCREENS (built next passes) ===== -->
       <sc-if value="{{ isPlaceholder }}" hint-placeholder-val="{{ false }}">
         <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:60px;">
@@ -571,14 +739,95 @@
 
     </div>
   </div>
+
+  <!-- ===== MODAL · computing (blocking) ===== -->
+  <sc-if value="{{ isComputing }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:60;background:rgba(6,6,8,.74);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:min(460px,100%);border:1px solid #2a2a32;border-radius:16px;background:#111116;padding:26px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
+        <div style="display:flex;align-items:center;gap:14px;">
+          <span style="width:34px;height:34px;flex:none;border-radius:50%;border:2.5px solid #26262e;border-top-color:#a78bfa;animation:spin .8s linear infinite;"></span>
+          <div style="min-width:0;">
+            <div style="font-family:'Sora';font-size:15.5px;font-weight:600;">Computing intrinsics</div>
+            <div style="font-family:'Manrope';font-size:11.5px;color:#8a8a95;">{{ activeCamName }} · calibrateCameraCharucoExtended</div>
+          </div>
+        </div>
+        <div style="margin-top:20px;height:9px;border-radius:6px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ computePct }};background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:6px;transition:width .3s ease;"></div></div>
+        <div style="display:flex;justify-content:space-between;margin-top:9px;font-family:'Manrope';font-size:11.5px;color:#9a9aa5;font-variant-numeric:tabular-nums;"><span>Selecting keyframes · bundle solve</span><span style="color:#c4b5fd;font-weight:600;">{{ computePctLabel }}</span></div>
+        <div style="margin-top:20px;padding-top:18px;border-top:1px solid #1c1c22;display:flex;justify-content:flex-end;">
+          <button onClick="{{ cancelCompute }}" style="min-height:44px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ===== MODAL · overwrite confirmation (2-step) ===== -->
+  <sc-if value="{{ showOverwrite }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:65;background:rgba(6,6,8,.74);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;padding:24px;">
+      <div style="width:min(460px,100%);border:1px solid #4a2530;border-radius:16px;background:#111116;padding:26px;box-shadow:0 24px 70px rgba(0,0,0,.55);">
+        <div style="display:flex;align-items:center;gap:13px;">
+          <span style="width:38px;height:38px;flex:none;border-radius:10px;background:rgba(248,113,113,.14);display:flex;align-items:center;justify-content:center;color:#f87171;font-size:19px;">⚠</span>
+          <div style="font-family:'Sora';font-size:16px;font-weight:600;">Overwrite {{ activeCamName }} calibration?</div>
+        </div>
+        <div style="margin-top:15px;font-size:13px;color:#9a9aa5;line-height:1.6;">Recomputing with <span style="color:#c4b5fd;">stride 1/{{ stride }}</span> and a <span style="color:#c4b5fd;">{{ keyframeCap }}-keyframe cap</span> will replace the current intrinsics for {{ activeCamName }}. The existing result (error {{ reprojErr }} px) is <strong style="color:#ececf0;">discarded and cannot be recovered</strong>. The recorded video is kept.</div>
+        <div style="margin-top:22px;display:flex;justify-content:flex-end;gap:10px;">
+          <button onClick="{{ cancelOverwrite }}" style="min-height:46px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+          <button onClick="{{ confirmOverwrite }}" style="min-height:46px;padding:0 20px;border-radius:10px;border:1px solid #4a2530;background:linear-gradient(180deg,#f0576b,#d63a52);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;">Overwrite &amp; recompute</button>
+        </div>
+      </div>
+    </div>
+  </sc-if>
 </div>
 </x-dc>
 <script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860}}">
 class Component extends DCLogic {
-  state = { collapsed: false, screen: 'dashboard' };
+  state = {
+    collapsed: false, screen: 'dashboard',
+    // intrinsic sub-FSM
+    intrinsicPhase: 'recording', activeCam: 0, recSeconds: 47, computePct: 4,
+    // reviewing
+    reviewVariant: 'A', stride: 4, keyframeCap: 60,
+    // load-from-files
+    loadVariant: 'A',
+    // modals
+    showOverwrite: false,
+  };
 
-  // canonical loaded session: steps 1-5 done, export still to write
+  componentDidMount() {
+    this._rec = setInterval(() => {
+      if (this.state.screen === 'intrinsic' && this.state.intrinsicPhase === 'recording') {
+        this.setState(s => ({ recSeconds: s.recSeconds + 1 }));
+      }
+    }, 1000);
+  }
+  componentDidUpdate(prevProps, prevState) {
+    if (this.state.intrinsicPhase === 'computing' && prevState.intrinsicPhase !== 'computing') {
+      this.startCompute();
+    }
+  }
+  componentWillUnmount() { clearInterval(this._rec); clearInterval(this._cmp); }
+
+  startCompute() {
+    clearInterval(this._cmp);
+    this.setState({ computePct: 4 });
+    this._cmp = setInterval(() => {
+      this.setState(s => {
+        if (s.intrinsicPhase !== 'computing') { clearInterval(this._cmp); return {}; }
+        const next = s.computePct + 6 + Math.random() * 7;
+        if (next >= 100) { clearInterval(this._cmp); return { computePct: 100, intrinsicPhase: 'reviewing' }; }
+        return { computePct: next };
+      });
+    }, 300);
+  }
+
+  // derived per-screen step statuses feeding the rail
   progress() {
+    if (this.state.screen === 'load') {
+      // derived from the loaded folder's artifacts (cam_3 + extrinsic video missing)
+      return { session: 'home', cameras: 'done', boards: 'done', intrinsic: 'warning', extrinsic: 'error', review: 'locked', export: 'locked' };
+    }
+    if (this.state.screen === 'intrinsic') {
+      return { session: 'home', cameras: 'done', boards: 'done', intrinsic: 'current', extrinsic: 'todo', review: 'locked', export: 'locked' };
+    }
     return { session: 'home', cameras: 'done', boards: 'done', intrinsic: 'done', extrinsic: 'done', review: 'done', export: 'todo' };
   }
 
@@ -589,7 +838,9 @@ class Component extends DCLogic {
       done: { glyph: '✓', glyphColor: '#34d399' },
       current: { glyph: '●', glyphColor: '#a78bfa' },
       todo: { glyph: '○', glyphColor: '#6a6a74' },
-      locked: { glyph: '', glyphColor: '#4a4a54' },
+      locked: { glyph: '🔒', glyphColor: '#4a4a54' },
+      warning: { glyph: '⚠', glyphColor: '#fbbf24' },
+      error: { glyph: '✕', glyphColor: '#f87171' },
       home: { glyph: '', glyphColor: '#6a6a74' },
     };
     const g = glyphMap[st] || glyphMap.todo;
@@ -619,6 +870,59 @@ class Component extends DCLogic {
     const placeholders = {};
     const ph = placeholders[screen];
 
+    // ---- intrinsic sub-FSM derived ----
+    const cam = this.state.activeCam;
+    const camName = 'cam_' + cam;
+    const secs = this.state.recSeconds;
+    const recLabel = String(Math.floor(secs / 60)).padStart(2, '0') + ':' + String(secs % 60).padStart(2, '0');
+    const phase = this.state.intrinsicPhase;
+    const phaseOrder = ['recording', 'computing', 'reviewing'];
+    const ci = phaseOrder.indexOf(phase);
+    const phaseDefs = [
+      { key: 'recording', num: '1', title: 'Record', sub: 'live capture + video' },
+      { key: 'computing', num: '2', title: 'Compute', sub: 'keyframes + solve' },
+      { key: 'reviewing', num: '3', title: 'Review', sub: 'replay + validate' },
+    ];
+    const phaseSteps = phaseDefs.map((d, i) => {
+      const active = i === ci, done = i < ci;
+      return {
+        onClick: () => { if (d.key === 'computing' && phase !== 'computing') this.setState({ intrinsicPhase: 'computing' }); else this.setState({ intrinsicPhase: d.key }); },
+        num: done ? '✓' : d.num, title: d.title, sub: d.sub,
+        bg: active ? 'rgba(167,139,250,.1)' : 'transparent',
+        bar: active ? '#a78bfa' : 'transparent',
+        ringColor: active ? '#a78bfa' : (done ? '#34d399' : '#3a3a44'),
+        dotBg: active ? 'rgba(167,139,250,.18)' : (done ? 'rgba(52,211,153,.14)' : 'transparent'),
+        numColor: active ? '#c4b5fd' : (done ? '#34d399' : '#6a6a74'),
+        titleColor: active ? '#ececf0' : (done ? '#bcbcc6' : '#8a8a95'),
+      };
+    });
+    const camStatus = (i) => i < cam ? { glyph: '✓', glyphColor: '#34d399' } : (i === cam ? { glyph: '●', glyphColor: '#a78bfa' } : { glyph: '○', glyphColor: '#6a6a74' });
+    const intrinsicTabs = [0, 1, 2, 3].map((i) => {
+      const a = i === cam, st = camStatus(i);
+      return {
+        name: 'cam_' + i, onClick: () => this.setState({ activeCam: i, intrinsicPhase: 'recording', recSeconds: 0 }),
+        bg: a ? 'rgba(167,139,250,.14)' : '#16161b', border: a ? 'rgba(167,139,250,.35)' : '#2a2a32',
+        color: a ? '#c4b5fd' : '#9a9aa5', glyph: st.glyph, glyphColor: st.glyphColor,
+      };
+    });
+    const rv = this.state.reviewVariant;
+    const lv = this.state.loadVariant;
+    const seg = (on) => ({ bg: on ? 'rgba(167,139,250,.16)' : '#15151a', color: on ? '#c4b5fd' : '#9a9aa5' });
+
+    // ---- load-from-files derived ----
+    const artOk = { badge: 'present', badgeFg: '#34d399', badgeBg: 'rgba(52,211,153,.12)', icon: '▤', iconBg: 'rgba(52,211,153,.1)', iconBorder: 'rgba(52,211,153,.25)', iconColor: '#34d399', nameColor: '#ececf0' };
+    const artMiss = { badge: 'missing', badgeFg: '#f87171', badgeBg: 'rgba(248,113,113,.12)', icon: '✕', iconBg: 'rgba(248,113,113,.1)', iconBorder: 'rgba(248,113,113,.25)', iconColor: '#f87171', nameColor: '#8a8a95' };
+    const artPart = { badge: 'partial', badgeFg: '#fbbf24', badgeBg: 'rgba(251,191,36,.12)', icon: '~', iconBg: 'rgba(251,191,36,.1)', iconBorder: 'rgba(251,191,36,.25)', iconColor: '#fbbf24', nameColor: '#ececf0' };
+    const stepStyle = {
+      done: { glyph: '✓', glyphColor: '#34d399', glyphBg: 'rgba(52,211,153,.12)', border: '#232329', bg: '#0f0f12', noteColor: '#7a7a85' },
+      warning: { glyph: '⚠', glyphColor: '#fbbf24', glyphBg: 'rgba(251,191,36,.14)', border: 'rgba(251,191,36,.28)', bg: 'linear-gradient(180deg,rgba(251,191,36,.05),#0f0f12)', noteColor: '#d9b86a' },
+      error: { glyph: '✕', glyphColor: '#f87171', glyphBg: 'rgba(248,113,113,.14)', border: 'rgba(248,113,113,.28)', bg: 'linear-gradient(180deg,rgba(248,113,113,.05),#0f0f12)', noteColor: '#e39a9a' },
+      locked: { glyph: '🔒', glyphColor: '#5a5a64', glyphBg: '#16161b', border: '#232329', bg: '#0d0d10', noteColor: '#6a6a74' },
+    };
+    const dStep = (label, status, note) => ({ label, note, ...stepStyle[status] });
+    const chip = (l, ok) => ok ? { l, mark: '✓', fg: '#7fe8b4', bg: 'rgba(52,211,153,.1)' } : { l, mark: '✕', fg: '#f0a0a0', bg: 'rgba(248,113,113,.1)' };
+    const statePill = { done: { stateFg: '#34d399', stateBg: 'rgba(52,211,153,.1)' }, warning: { stateFg: '#fbbf24', stateBg: 'rgba(251,191,36,.12)' }, error: { stateFg: '#f87171', stateBg: 'rgba(248,113,113,.12)' }, locked: { stateFg: '#8a8a95', stateBg: '#1a1a20' } };
+
     return {
       sidebarWidth: collapsed ? '70px' : '236px',
       labelDisplay: collapsed ? 'none' : 'block',
@@ -641,9 +945,87 @@ class Component extends DCLogic {
       isBoards: screen === 'boards',
       isExtrinsic: screen === 'extrinsic',
       isExport: screen === 'export',
+      isLoad: screen === 'load',
+      isRecording: screen === 'intrinsic' && this.state.intrinsicPhase === 'recording',
+      isComputing: screen === 'intrinsic' && this.state.intrinsicPhase === 'computing',
+      isReviewing: screen === 'intrinsic' && this.state.intrinsicPhase === 'reviewing',
+      showFeed: screen === 'intrinsic' && this.state.intrinsicPhase !== 'reviewing',
       isPlaceholder: !!ph,
       placeholderTitle: ph ? ph.title : '',
       placeholderIcon: ph ? ph.icon : '',
+
+      // dashboard card actions
+      goNew: () => this.setState({ screen: 'cameras' }),
+      goLoad: () => this.setState({ screen: 'load' }),
+
+      // intrinsic sub-FSM
+      activeCamName: camName,
+      recLabel,
+      framesWritten: (secs * 30).toLocaleString(),
+      phaseSteps,
+      intrinsicTabs,
+      stopRecording: () => this.setState({ intrinsicPhase: 'computing' }),
+      cancelCompute: () => { clearInterval(this._cmp); this.setState({ intrinsicPhase: 'recording' }); },
+      computePct: Math.round(this.state.computePct) + '%',
+      computePctLabel: Math.round(this.state.computePct) + '%',
+
+      // reviewing
+      setReviewA: () => this.setState({ reviewVariant: 'A' }),
+      setReviewB: () => this.setState({ reviewVariant: 'B' }),
+      revA: seg(rv === 'A'), revB: seg(rv === 'B'),
+      reviewGridCols: rv === 'A' ? 'minmax(0,1fr) 322px' : '1fr',
+      viewerAspect: rv === 'A' ? '16/10' : '21/9',
+      reviewPanelDisplay: rv === 'A' ? 'flex' : 'grid',
+      reviewPanelExtra: rv === 'A' ? 'flex-direction:column;' : 'grid-template-columns:1fr 1fr 1fr;gap:18px;',
+      frameNo: '128', frameTotal: '300', scrubPct: '43%',
+      reprojErr: '0.14', keyframesUsed: '46',
+      stride: this.state.stride, keyframeCap: this.state.keyframeCap,
+      incStride: () => this.setState(s => ({ stride: Math.min(20, s.stride + 1) })),
+      decStride: () => this.setState(s => ({ stride: Math.max(1, s.stride - 1) })),
+      incCap: () => this.setState(s => ({ keyframeCap: Math.min(300, s.keyframeCap + 10) })),
+      decCap: () => this.setState(s => ({ keyframeCap: Math.max(10, s.keyframeCap - 10) })),
+      onRecompute: () => this.setState({ showOverwrite: true }),
+      onValidate: () => this.setState(s => ({ activeCam: Math.min(3, s.activeCam + 1), intrinsicPhase: 'recording', recSeconds: 0 })),
+      onReRecord: () => this.setState({ intrinsicPhase: 'recording', recSeconds: 0 }),
+
+      // modals
+      showOverwrite: this.state.showOverwrite,
+      confirmOverwrite: () => this.setState({ showOverwrite: false, intrinsicPhase: 'computing' }),
+      cancelOverwrite: () => this.setState({ showOverwrite: false }),
+
+      // load-from-files
+      setLoadA: () => this.setState({ loadVariant: 'A' }),
+      setLoadB: () => this.setState({ loadVariant: 'B' }),
+      loadA: seg(lv === 'A'), loadB: seg(lv === 'B'),
+      loadIsA: lv === 'A', loadIsB: lv === 'B',
+      folderPath: '~/calib/CAL-2026-4591/',
+      onResume: () => this.setState({ screen: 'intrinsic', intrinsicPhase: 'recording' }),
+      artifacts: [
+        { name: 'intrinsic/cam_0/capture.mkv', detail: 'video · 48 s · 1,412 frames', ...artOk },
+        { name: 'intrinsic/cam_1/capture.mkv', detail: 'video · 51 s · 1,502 frames', ...artOk },
+        { name: 'intrinsic/cam_2/capture.mkv', detail: 'video · 45 s · 1,331 frames', ...artOk },
+        { name: 'intrinsic/cam_3/capture.mkv', detail: 'no file in folder', ...artMiss },
+        { name: 'extrinsic/sync.mkv', detail: 'no synchronized capture', ...artMiss },
+        { name: 'config.toml', detail: 'board · ChArUco 8×5 · 40 mm', ...artOk },
+        { name: 'camera_array.toml', detail: 'intrinsics only · 3 / 4 cams', ...artPart },
+        { name: 'session.toml', detail: 'FSM · step = intrinsic_capture', ...artOk },
+      ],
+      derivedSteps: [
+        dStep('① Cameras', 'done', '4 cameras configured'),
+        dStep('② Target / boards', 'done', 'ChArUco board defined'),
+        dStep('③ Intrinsics', 'warning', 'recomputable · cam_3 video missing'),
+        dStep('④ Extrinsics', 'error', 'blocked · no extrinsic video — record required'),
+        dStep('⑤ Review 3D', 'locked', 'needs extrinsics'),
+        dStep('⑥ Export', 'locked', 'needs extrinsics'),
+      ],
+      matrixRows: [
+        { step: '① Cameras', arts: [chip('4 cams', true)], stateLabel: 'done', ...statePill.done, action: 'Open', actionColor: '#a78bfa', actionCursor: 'pointer' },
+        { step: '② Boards', arts: [chip('config.toml', true)], stateLabel: 'done', ...statePill.done, action: 'Open', actionColor: '#a78bfa', actionCursor: 'pointer' },
+        { step: '③ Intrinsics', arts: [chip('cam_0', true), chip('cam_1', true), chip('cam_2', true), chip('cam_3', false)], stateLabel: 'recomputable', ...statePill.warning, action: 'Recompute', actionColor: '#fbbf24', actionCursor: 'pointer' },
+        { step: '④ Extrinsics', arts: [chip('sync video', false)], stateLabel: 'blocked', ...statePill.error, action: 'Record', actionColor: '#f87171', actionCursor: 'pointer' },
+        { step: '⑤ Review 3D', arts: [chip('extrinsics', false)], stateLabel: 'locked', ...statePill.locked, action: '—', actionColor: '#5a5a64', actionCursor: 'default' },
+        { step: '⑥ Export', arts: [chip('camera_array', false)], stateLabel: 'locked', ...statePill.locked, action: '—', actionColor: '#5a5a64', actionCursor: 'default' },
+      ],
 
       entryCards: [
         { icon: '＋', title: 'New Calibration', desc: 'Run the full intrinsic + extrinsic workflow from scratch.', cta: 'START WIZARD', ctaColor: '#a78bfa', iconBg: 'rgba(167,139,250,.12)', iconBorder: 'rgba(167,139,250,.3)', iconColor: '#c4b5fd' },
