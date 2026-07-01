@@ -111,6 +111,19 @@ class LiveKitPublisher:
             raise RuntimeError(f"push() for unpublished track {name!r}")
         source.capture_frame(bgr_to_video_frame(image))
 
+    async def send_data(self, payload: str, topic: str) -> None:
+        """Publish a data-channel message (best-effort, lossy) to subscribers.
+
+        Used for telemetry ([[coverage-metrics]]): dropping a packet is fine, so it
+        goes out unreliable and swallows errors rather than disturbing capture.
+        """
+        if self._room.connection_state != rtc.ConnectionState.CONN_CONNECTED:
+            return
+        try:
+            await self._room.local_participant.publish_data(payload, reliable=False, topic=topic)
+        except Exception:
+            logger.debug("data publish failed (topic=%s)", topic, exc_info=True)
+
     def is_disconnected(self) -> bool:
         """True once the room is fully disconnected (LiveKit gone / gave up reconnecting).
 

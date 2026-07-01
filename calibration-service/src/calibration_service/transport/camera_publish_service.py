@@ -12,17 +12,33 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import json
 import logging
 from dataclasses import dataclass
+
+import numpy as np
+from numpy.typing import NDArray
 
 from calibration_service.capture.camera import CameraCapture, CameraOpenError, open_camera
 from calibration_service.capture.enumeration import enumerate_cameras
 from calibration_service.config import LiveKitConfig
+from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
+from calibration_service.overlays import draw_overlay
 from calibration_service.session.manager import SessionManager
+from calibration_service.telemetry import TELEMETRY_TOPIC, coverage_metrics_payload
 from calibration_service.transport.livekit_publisher import LiveKitPublisher, mint_publish_token
 
 logger = logging.getLogger(__name__)
+
+
+def _process_frame(
+    detector: BoardDetector, image: NDArray[np.uint8]
+) -> tuple[NDArray[np.uint8], BoardDetection]:
+    """Detect the board and burn the overlay in — CPU-bound, meant for an executor."""
+    detection = detector.detect(image)
+    preview = draw_overlay(image, detection, resize_factor=1.0)
+    return preview, detection
 
 _EMPTY_READ_BACKOFF_S = 0.005
 _FIRST_FRAME_ATTEMPTS = 60
@@ -36,6 +52,8 @@ _OPEN_STAGGER_S = 0.5
 _DEFAULT_FPS = 30
 # Single publisher participant; cameras are distinguished by their track name.
 _PARTICIPANT_IDENTITY = "service"
+# Telemetry cadence on the data channel (coverage metrics ~10 Hz, not per frame).
+_TELEMETRY_PERIOD_S = 0.1
 
 
 @dataclass(frozen=True)
@@ -57,6 +75,18 @@ class CameraPublishService:
         self._config = config
         self._sessions = session_manager
         self._task: asyncio.Task[None] | None = None
+        # Track name currently in intrinsic capture: only that camera runs detection +
+        # burn-in + telemetry; the others publish raw preview (Phase 3.5).
+        self._active_intrinsic: str | None = None
+
+    def set_active_intrinsic(self, name: str | None) -> None:
+        """Select the camera whose feed gets board detection/overlay/telemetry."""
+        logger.info("active intrinsic camera -> %s", name)
+        self._active_intrinsic = name
+
+    def _build_detector(self) -> BoardDetector | None:
+        board = self._sessions.current().intrinsic_board
+        return BoardDetector(board) if board is not None else None
 
     async def start(self) -> None:
         self._task = asyncio.create_task(self._run(), name="camera-publish")
@@ -181,14 +211,36 @@ class CameraPublishService:
     ) -> None:
         """Read one camera and push every frame to its track until the room disconnects.
 
-        Push every frame: the encoder caps the wire rate at target.fps (no rate-gate —
-        full quality for calibration). A read failure (USB blip) is skipped, not fatal.
+        The camera in intrinsic capture (``_active_intrinsic``) gets board detection,
+        burn-in overlay and ~10 Hz coverage telemetry; the others push raw frames. A
+        read failure (USB blip) is skipped, not fatal.
         """
+        detector: BoardDetector | None = None
+        last_telemetry = 0.0
         while not publisher.is_disconnected():
             frame = await loop.run_in_executor(None, camera.read)
             if frame is None:
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
                 continue
+
+            if self._active_intrinsic == target.name:
+                if detector is None:
+                    detector = self._build_detector()
+                if detector is not None:
+                    preview, detection = await loop.run_in_executor(
+                        None, _process_frame, detector, frame.image
+                    )
+                    publisher.push(target.name, preview)
+                    now = loop.time()
+                    if now - last_telemetry >= _TELEMETRY_PERIOD_S:
+                        last_telemetry = now
+                        payload = json.dumps(coverage_metrics_payload(target.name, detection))
+                        await publisher.send_data(payload, TELEMETRY_TOPIC)
+                    await asyncio.sleep(0)
+                    continue
+            else:
+                detector = None  # released when this camera is no longer the active one
+
             publisher.push(target.name, frame.image)
             await asyncio.sleep(0)  # yield to the event loop
         logger.info("capture loop %s exiting (disconnected)", target.name)

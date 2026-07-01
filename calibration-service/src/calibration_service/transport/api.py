@@ -258,6 +258,19 @@ async def board_dictionaries() -> list[str]:
     return list(SUPPORTED_DICTIONARIES)
 
 
+class ActiveIntrinsicRequest(BaseModel):
+    camera: str | None  # track name (e.g. "cam_0"), or null to stop
+
+
+@router.post("/intrinsic/active")
+async def set_active_intrinsic(request: Request, body: ActiveIntrinsicRequest) -> dict[str, object]:
+    """Select which camera runs board detection/overlay/telemetry (Phase 3.5)."""
+    service = get_publish_service(request)
+    if service is not None:
+        service.set_active_intrinsic(body.camera)
+    return {"active": body.camera}
+
+
 @router.post("/board", response_model=SessionOut)
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
     try:
