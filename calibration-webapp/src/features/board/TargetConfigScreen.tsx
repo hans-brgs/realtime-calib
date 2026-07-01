@@ -281,7 +281,7 @@ export function TargetConfigScreen() {
                 <Text span fw={600} inherit>
                   NxN
                 </Text>{' '}
-                = marker bit grid: 4×4 reads from farther / lower resolution, 6×6 is more robust but
+                = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but
                 needs more pixels.
               </Text>
 

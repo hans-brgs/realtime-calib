@@ -9,14 +9,15 @@ from __future__ import annotations
 
 import cv2
 
-# Curated set (one per useful bit size): the meaningful choice is the marker bit
-# grid (4x4 reads from farther / lower resolution, 6x6 is more robust but needs
-# more pixels). Capacity is fixed at a sensible value per size. Same-dimension
-# predefined dictionaries are nested, so extra capacities add no distinct markers.
+# Curated set (one per bit size, uniform capacity): the meaningful choice is the
+# marker bit grid (4x4 reads from farther / lower resolution, 7x7 is more robust
+# but needs more pixels). Same-dimension predefined dictionaries are nested, so a
+# larger capacity would add no distinct markers — 100 ids is plenty here.
 SUPPORTED_DICTIONARIES: tuple[str, ...] = (
     "DICT_4X4_100",
     "DICT_5X5_100",
-    "DICT_6X6_250",
+    "DICT_6X6_100",
+    "DICT_7X7_100",
 )
 
 # Special-case capacities that are not encoded in the constant name.
