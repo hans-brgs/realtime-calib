@@ -3,19 +3,23 @@ import { IconCube, IconDownload, IconFocusCentered, IconLayoutGrid, IconTopology
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { CameraSetupScreen } from '@/features/cameras/CameraSetupScreen';
 import { DashboardScreen } from '@/features/session/DashboardScreen';
-import type { ViewId } from '@/features/session/selectors';
+import { LoadFromFilesScreen } from '@/features/session/LoadFromFilesScreen';
+import type { NavTarget } from '@/features/session/selectors';
 
 interface ScreenRouterProps {
-  view: ViewId;
-  onNavigate: (id: ViewId) => void;
+  view: NavTarget;
+  onNavigate: (id: NavTarget) => void;
 }
 
-// Maps the active rail view to its screen. Dashboard and Camera Setup are live; the
-// remaining stages render styled placeholders until their high-fidelity pass.
+// Maps the active view to its screen. Dashboard and Camera Setup are live; the Load
+// entry is a gated screen (Phase 3.5); the remaining stages render styled
+// placeholders until their high-fidelity pass.
 export function StepContent({ view, onNavigate }: ScreenRouterProps) {
   switch (view) {
     case 'session':
       return <DashboardScreen onNavigate={onNavigate} />;
+    case 'load':
+      return <LoadFromFilesScreen onNavigate={onNavigate} />;
     case 'cameras':
       return <CameraSetupScreen />;
     case 'boards':

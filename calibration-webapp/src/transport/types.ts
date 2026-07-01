@@ -10,7 +10,8 @@ export type WizardStep =
   | 'review_3d'
   | 'export';
 
-export type SessionMode = 'new' | 'resume' | 'load_intrinsic' | 'load_full';
+// ADR-0019: two entry modes replace new/resume/load_intrinsic/load_full.
+export type SessionMode = 'new-realtime' | 'load-from-files';
 
 export type CameraStatus = 'detected' | 'configured' | 'intrinsic_done' | 'extrinsic_done';
 

@@ -8,31 +8,23 @@ import { selectSessionStatus } from '@/features/session/sessionSlice';
 import {
   selectActiveView,
   selectStages,
-  type StageId,
+  type NavTarget,
   type ViewId,
 } from '@/features/session/selectors';
 import { StepContent } from '@/features/session/StepContent';
 import { WizardRail, type RailItem } from '@/features/session/WizardRail';
 
-const STAGE_LABELS: Record<StageId, string> = {
-  cameras: 'Camera Setup',
-  boards: 'Target Config',
-  intrinsic: 'Intrinsics',
-  extrinsic: 'Extrinsics',
-  review: 'Review 3D',
-  export: 'Export',
-};
-
 // Top-level shell: persistent Topbar + FSM rail + scrollable main. The rail replaces
 // the horizontal Stepper. `view` is volatile UI state (free navigation between
-// non-locked stages); it syncs to the persisted FSM step on load/transition but does
-// not itself mutate server state (ADR-0010, spec wizard-navigation).
+// non-locked stages, plus the transient 'load' entry); it syncs to the persisted FSM
+// step on load/transition but does not itself mutate server state (ADR-0010, spec
+// wizard-navigation).
 export function WizardShell() {
   const status = useAppSelector(selectSessionStatus);
   const stages = useAppSelector(selectStages);
   const persistedView = useAppSelector(selectActiveView);
 
-  const [view, setView] = useState<ViewId>(persistedView);
+  const [view, setView] = useState<NavTarget>(persistedView);
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false);
 
@@ -45,15 +37,19 @@ export function WizardShell() {
     { id: 'session', label: 'Session', status: 'home' },
     ...stages.map((stage) => ({
       id: stage.id,
-      label: STAGE_LABELS[stage.id],
+      label: stage.label,
       status: stage.status,
     })),
   ];
 
-  const navigate = (id: ViewId) => {
+  const navigate = (id: NavTarget) => {
     setView(id);
     closeDrawer();
   };
+
+  // The Load screen is a sub-flow of the session entry — no rail item of its own, so
+  // keep 'Session' highlighted while it is showing.
+  const railActiveView: ViewId = view === 'load' ? 'session' : view;
 
   return (
     <Flex direction="column" style={{ height: '100dvh', overflow: 'hidden' }}>
@@ -72,7 +68,7 @@ export function WizardShell() {
         >
           <WizardRail
             items={items}
-            activeView={view}
+            activeView={railActiveView}
             onNavigate={navigate}
             collapsed={collapsed}
             onToggleCollapse={() => setCollapsed((c) => !c)}
@@ -84,7 +80,7 @@ export function WizardShell() {
             <Center h="100%">
               <Text c="red">Failed to load the session.</Text>
             </Center>
-          ) : status === 'ready' || view === 'session' ? (
+          ) : status === 'ready' || view === 'session' || view === 'load' ? (
             <StepContent view={view} onNavigate={navigate} />
           ) : (
             <Center h="100%">
@@ -105,7 +101,7 @@ export function WizardShell() {
         styles={{ body: { height: '100%', padding: 0 }, content: { background: 'var(--rc-bar)' } }}
         zIndex={1000}
       >
-        <WizardRail items={items} activeView={view} onNavigate={navigate} collapsed={false} />
+        <WizardRail items={items} activeView={railActiveView} onNavigate={navigate} collapsed={false} />
       </Drawer>
     </Flex>
   );

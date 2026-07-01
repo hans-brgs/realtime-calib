@@ -25,7 +25,7 @@ function session(overrides: Partial<Session> = {}): Session {
   return {
     session_id: 'default',
     step: 'camera_setup',
-    mode: 'new',
+    mode: 'new-realtime',
     intrinsic_fps: 30,
     optimization_strategy: 'coverage-aware',
     cameras: [],
@@ -60,10 +60,10 @@ describe('selectStages (completion-driven)', () => {
     expect(stages[2]).toMatchObject({ id: 'intrinsic', status: 'locked' });
   });
 
-  it('load_full at review_3d with all done: stages complete, review active', () => {
+  it('load-from-files at review_3d with all done: stages complete, review active', () => {
     const done = session({
       step: 'review_3d',
-      mode: 'load_full',
+      mode: 'load-from-files',
       cameras: [camera({ status: 'extrinsic_done' })],
     });
     const stages = selectStages(stateWith(done));
