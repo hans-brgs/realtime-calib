@@ -19,10 +19,10 @@ import {
 } from '@/features/telemetry/telemetrySlice';
 import { fetchToken, setActiveIntrinsic } from '@/transport/httpClient';
 
-// Instantaneous fill → colour band (mirrors the backend burn-in bands).
+// Board span (distance proxy) → colour band (mirrors the backend burn-in bands).
 function fillColor(fill: number): string {
-  if (fill < 0.1) return 'var(--rc-error)';
-  if (fill < 0.25) return '#fb923c';
+  if (fill < 0.25) return 'var(--rc-error)';
+  if (fill < 0.4) return '#fb923c';
   if (fill < 0.55) return 'var(--rc-warning)';
   return 'var(--rc-success)';
 }
@@ -76,7 +76,7 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
       </Group>
 
       <Gauge
-        label="Sensor fill (distance)"
+        label="Board span (distance)"
         value={`${Math.round(fill * 100)}%`}
         pct={fill}
         color={fillColor(fill)}
