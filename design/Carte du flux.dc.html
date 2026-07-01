@@ -1,0 +1,420 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #2b2b30; border-radius: 6px; }
+  @keyframes pulseDot { 0%, 100% { opacity: 1; transform: scale(1); } 50% { opacity: .4; transform: scale(.82); } }
+  @keyframes shake { 10%, 90% { transform: translateX(-2px); } 30%, 70% { transform: translateX(3px); } 50% { transform: translateX(-4px); } }
+  @keyframes bannerIn { from { opacity: 0; transform: translateY(-6px); } to { opacity: 1; transform: translateY(0); } }
+</style>
+</helmet>
+<div style="min-height:100vh;background:#0a0a0b;color:#ededed;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.5;padding:28px 32px 40px;">
+
+  <!-- HEADER -->
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;flex-wrap:wrap;gap:16px;max-width:1400px;margin:0 auto 22px;">
+    <div>
+      <div style="display:flex;align-items:center;gap:10px;">
+        <div style="width:8px;height:8px;border-radius:2px;background:#22d3ee;box-shadow:0 0 12px #22d3ee;"></div>
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;letter-spacing:.08em;color:#71717a;text-transform:uppercase;">realtime-calib · livrable 01</span>
+      </div>
+      <h1 style="margin:8px 0 4px;font-size:26px;font-weight:600;letter-spacing:-.02em;">Carte du flux de calibration</h1>
+      <p style="margin:0;color:#a1a1aa;max-width:680px;">Navigation <strong style="color:#ededed;font-weight:600;">pilotée par la complétion</strong> — pas un curseur séquentiel. Choisis une entrée, puis clique les étapes et les actions pour voir les <em style="color:#22d3ee;font-style:normal;">gates</em> de prérequis s'ouvrir et la <em style="color:#f59e0b;font-style:normal;">cascade d'invalidation</em> se propager.</p>
+    </div>
+    <div style="display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:#a1a1aa;">
+      <div style="display:flex;align-items:center;gap:7px;"><span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #10b981;color:#10b981;display:flex;align-items:center;justify-content:center;font-size:11px;">✓</span> Fait</div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #22d3ee;color:#22d3ee;display:flex;align-items:center;justify-content:center;font-size:9px;">●</span> En cours</div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #3f3f46;color:#a1a1aa;display:flex;align-items:center;justify-content:center;font-size:10px;">○</span> À faire</div>
+      <div style="display:flex;align-items:center;gap:7px;"><span style="width:20px;height:20px;border-radius:50%;border:1.5px solid #27272a;color:#52525b;display:flex;align-items:center;justify-content:center;"><svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></span> Verrouillé</div>
+    </div>
+  </div>
+
+  <!-- ENTRY MODES -->
+  <div style="max-width:1400px;margin:0 auto 10px;">
+    <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#71717a;text-transform:uppercase;margin-bottom:9px;">Entrée — 3 cas</div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px;">
+      <sc-for list="{{ modes }}" as="m" hint-placeholder-count="3">
+        <button onClick="{{ m.onClick }}" style="text-align:left;cursor:pointer;border-radius:12px;padding:14px 16px;border:1px solid {{ m.border }};background:{{ m.bg }};font-family:inherit;color:inherit;transition:all .14s;display:flex;flex-direction:column;gap:5px;">
+          <div style="display:flex;align-items:center;gap:9px;">
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;padding:2px 7px;border-radius:5px;color:{{ m.tagColor }};background:{{ m.tagBg }};">{{ m.tag }}</span>
+            <span style="font-weight:600;font-size:14.5px;">{{ m.label }}</span>
+          </div>
+          <span style="color:#a1a1aa;font-size:12.5px;">{{ m.desc }}</span>
+        </button>
+      </sc-for>
+    </div>
+  </div>
+
+  <!-- MAIN GRID -->
+  <div style="max-width:1400px;margin:18px auto 0;display:grid;grid-template-columns:minmax(0,1fr) 372px;gap:20px;align-items:start;">
+
+    <!-- LEFT: GRAPH + ACTIONS -->
+    <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
+
+      <!-- PIPELINE -->
+      <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:16px;padding:20px 18px;">
+        <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#71717a;text-transform:uppercase;margin-bottom:16px;">Pipeline · 6 étapes (FSM)</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:stretch;">
+          <sc-for list="{{ nodes }}" as="n" hint-placeholder-count="6">
+            <div style="display:flex;align-items:stretch;gap:6px;flex:1 1 150px;min-width:150px;">
+              <button onClick="{{ n.onClick }}" style="flex:1;text-align:left;cursor:pointer;background:#131316;border:1px solid {{ n.ring }};border-radius:13px;padding:13px 13px 14px;display:flex;flex-direction:column;gap:9px;font-family:inherit;color:inherit;position:relative;transition:border-color .14s;min-width:0;box-shadow:{{ n.glow }};animation:{{ n.cardAnim }};">
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">
+                  <span style="width:26px;height:26px;flex:none;border-radius:50%;border:1.6px solid {{ n.ring }};color:{{ n.fg }};display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:600;">
+                    <sc-if value="{{ n.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if>
+                    <sc-if value="{{ n.isCurrent }}" hint-placeholder-val="{{ false }}"><span style="font-size:9px;animation:pulseDot 1.6s ease-in-out infinite;">●</span></sc-if>
+                    <sc-if value="{{ n.showGlyph }}" hint-placeholder-val="{{ true }}">{{ n.glyph }}</sc-if>
+                  </span>
+                  <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:9.5px;letter-spacing:.05em;text-transform:uppercase;color:{{ n.fg }};">{{ n.statusLabel }}</span>
+                </div>
+                <div style="font-weight:600;font-size:14px;letter-spacing:-.01em;">{{ n.title }}</div>
+                <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;line-height:1.45;color:#71717a;">{{ n.rule }}</div>
+              </button>
+              <sc-if value="{{ n.showConnector }}" hint-placeholder-val="{{ true }}">
+                <div style="display:flex;align-items:center;justify-content:center;width:18px;flex:none;color:{{ n.connColor }};">
+                  <sc-if value="{{ n.connectorLocked }}" hint-placeholder-val="{{ false }}"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if>
+                  <sc-if value="{{ n.connectorOpen }}" hint-placeholder-val="{{ true }}"><span style="font-size:18px;line-height:1;">›</span></sc-if>
+                </div>
+              </sc-if>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:14px;font-size:12px;color:#52525b;display:flex;gap:6px;align-items:flex-start;">
+          <span style="color:#71717a;">↺</span>
+          <span>Le statut de chaque étape est <strong style="color:#a1a1aa;font-weight:600;">dérivé des données de session</strong>, jamais du chemin parcouru. Avance verrouillée par les prérequis · retour libre vers toute étape complète.</span>
+        </div>
+      </div>
+
+      <!-- CASCADE BANNER -->
+      <sc-if value="{{ cascadeActive }}" hint-placeholder-val="{{ false }}">
+        <div style="background:rgba(245,158,11,.07);border:1px solid rgba(245,158,11,.35);border-radius:13px;padding:14px 16px;animation:bannerIn .25s ease;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;">
+            <div style="display:flex;gap:11px;align-items:flex-start;">
+              <span style="color:#f59e0b;font-size:18px;line-height:1.1;">⚠</span>
+              <div>
+                <div style="font-weight:600;color:#fbbf24;">{{ cascadeMsg }}</div>
+                <div style="margin-top:7px;display:flex;flex-wrap:wrap;gap:6px;">
+                  <sc-for list="{{ cascadeList }}" as="c" hint-placeholder-count="4">
+                    <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;padding:3px 8px;border-radius:6px;background:rgba(245,158,11,.12);color:#fbbf24;">{{ c }}</span>
+                  </sc-for>
+                </div>
+              </div>
+            </div>
+            <button onClick="{{ dismissCascade }}" style="flex:none;cursor:pointer;background:transparent;border:1px solid rgba(245,158,11,.3);color:#fbbf24;border-radius:7px;padding:5px 11px;font-family:inherit;font-size:12px;">Compris</button>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- DEMO ACTIONS -->
+      <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:16px;padding:18px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap;">
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#71717a;text-transform:uppercase;">Simulateur — fais avancer la session</div>
+          <button onClick="{{ onReset }}" style="cursor:pointer;background:transparent;border:1px solid #27272a;color:#a1a1aa;border-radius:7px;padding:6px 12px;font-family:inherit;font-size:12px;">↺ Réinitialiser</button>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <sc-for list="{{ actions }}" as="a" hint-placeholder-count="5">
+            <button onClick="{{ a.onClick }}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;cursor:{{ a.cursor }};border-radius:10px;padding:11px 14px;border:1px solid {{ a.border }};background:{{ a.bg }};color:{{ a.color }};opacity:{{ a.opacity }};font-family:inherit;font-size:13.5px;transition:all .14s;min-height:44px;">
+              <span style="display:flex;align-items:center;gap:10px;"><span style="color:{{ a.iconColor }};">{{ a.icon }}</span>{{ a.label }}</span>
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:{{ a.hintColor }};">{{ a.hint }}</span>
+            </button>
+          </sc-for>
+        </div>
+        <div style="margin-top:12px;padding-top:14px;border-top:1px solid #1f1f23;">
+          <button onClick="{{ onCascade }}" style="width:100%;display:flex;align-items:center;justify-content:space-between;gap:10px;text-align:left;cursor:pointer;border-radius:10px;padding:11px 14px;border:1px solid rgba(245,158,11,.3);background:rgba(245,158,11,.05);color:#fbbf24;font-family:inherit;font-size:13.5px;min-height:44px;">
+            <span style="display:flex;align-items:center;gap:10px;"><span>⟲</span>Reconfigurer cam_2 (résolution)</span>
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:#a16207;">déclenche la cascade →</span>
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- RIGHT: INSPECTOR -->
+    <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:16px;padding:20px;position:sticky;top:20px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-bottom:4px;">
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.1em;color:#71717a;text-transform:uppercase;">{{ sel.kicker }}</span>
+        <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10px;padding:3px 8px;border-radius:6px;color:{{ sel.fg }};border:1px solid {{ sel.ring }};">{{ sel.statusLabel }}</span>
+      </div>
+      <h2 style="margin:6px 0 0;font-size:20px;font-weight:600;letter-spacing:-.02em;">{{ sel.title }}</h2>
+      <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#52525b;margin-top:3px;">{{ sel.fsmId }}</div>
+
+      <!-- gate / lock reason -->
+      <sc-if value="{{ sel.isLocked }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:14px;display:flex;gap:9px;align-items:flex-start;background:rgba(245,158,11,.06);border:1px solid rgba(245,158,11,.25);border-radius:10px;padding:11px 12px;">
+          <span style="color:#52525b;flex:none;margin-top:1px;"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></span>
+          <div><div style="font-size:12px;font-weight:600;color:#fbbf24;">Étape verrouillée</div><div style="font-size:12.5px;color:#a1a1aa;margin-top:2px;">Prérequis : {{ sel.lock }}</div></div>
+        </div>
+      </sc-if>
+
+      <!-- rule + prereq + persist -->
+      <div style="margin-top:16px;display:flex;flex-direction:column;gap:11px;">
+        <div style="display:flex;gap:12px;">
+          <div style="width:84px;flex:none;font-size:11.5px;color:#52525b;padding-top:1px;">Complète ssi</div>
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#d4d4d8;">{{ sel.rule }}</div>
+        </div>
+        <div style="display:flex;gap:12px;">
+          <div style="width:84px;flex:none;font-size:11.5px;color:#52525b;padding-top:1px;">Verrou si</div>
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#d4d4d8;">{{ sel.lock }}</div>
+        </div>
+        <div style="display:flex;gap:12px;">
+          <div style="width:84px;flex:none;font-size:11.5px;color:#52525b;padding-top:1px;">Persiste</div>
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#22d3ee;">{{ sel.persists }}</div>
+        </div>
+      </div>
+
+      <!-- description bullets -->
+      <div style="margin-top:18px;padding-top:16px;border-top:1px solid #1f1f23;">
+        <div style="font-size:11.5px;color:#71717a;margin-bottom:9px;">Ce qui se passe ici</div>
+        <div style="display:flex;flex-direction:column;gap:8px;">
+          <sc-for list="{{ sel.desc }}" as="d" hint-placeholder-count="4">
+            <div style="display:flex;gap:9px;align-items:flex-start;font-size:13px;color:#d4d4d8;"><span style="color:#3f3f46;flex:none;">—</span><span>{{ d }}</span></div>
+          </sc-for>
+        </div>
+      </div>
+
+      <!-- per-camera sub-loop (intrinsic) -->
+      <sc-if value="{{ sel.showCams }}" hint-placeholder-val="{{ false }}">
+        <div style="margin-top:18px;padding-top:16px;border-top:1px solid #1f1f23;">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;">
+            <span style="font-size:11.5px;color:#71717a;">Sous-navigation · boucle caméra par caméra</span>
+            <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:{{ sel.camCountColor }};">{{ sel.camDoneText }}</span>
+          </div>
+          <div style="display:flex;flex-direction:column;gap:7px;">
+            <sc-for list="{{ sel.cams }}" as="c" hint-placeholder-count="4">
+              <button onClick="{{ c.onToggle }}" style="display:flex;align-items:center;justify-content:space-between;gap:10px;cursor:pointer;border:1px solid #27272a;background:#131316;border-radius:9px;padding:9px 12px;font-family:inherit;color:inherit;min-height:44px;text-align:left;">
+                <span style="display:flex;align-items:center;gap:9px;"><span style="width:16px;height:16px;border-radius:50%;border:1.5px solid {{ c.color }};color:{{ c.color }};display:flex;align-items:center;justify-content:center;font-size:9px;">{{ c.glyph }}</span><span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;">{{ c.name }}</span></span>
+                <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;color:{{ c.color }};">{{ c.statusText }}</span>
+              </button>
+            </sc-for>
+          </div>
+          <div style="margin-top:9px;font-size:11.5px;color:#52525b;">Toggle une caméra : l'étape n'est complète que lorsque <strong style="color:#a1a1aa;font-weight:600;">toutes</strong> sont <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">intrinsic_done</span>.</div>
+        </div>
+      </sc-if>
+    </div>
+  </div>
+
+  <!-- FOOTNOTE -->
+  <div style="max-width:1400px;margin:22px auto 0;display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:12px;">
+    <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:12px;padding:14px 16px;">
+      <div style="font-size:12px;font-weight:600;color:#22d3ee;margin-bottom:5px;">Reprise transparente</div>
+      <div style="font-size:12.5px;color:#a1a1aa;">Au montage, <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#d4d4d8;">GET /session</span> rehydrate la FSM → atterrissage sur la <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#d4d4d8;">step</span> persistée. Bascule desktop ↔ tablette sans perte d'état.</div>
+    </div>
+    <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:12px;padding:14px 16px;">
+      <div style="font-size:12px;font-weight:600;color:#f59e0b;margin-bottom:5px;">Invalidation en cascade</div>
+      <div style="font-size:12.5px;color:#a1a1aa;">Refaire une étape amont invalide l'aval (porté par les données). L'UI <strong style="color:#d4d4d8;font-weight:600;">avertit</strong> avant toute action invalidante.</div>
+    </div>
+    <div style="background:#0e0e10;border:1px solid #1f1f23;border-radius:12px;padding:14px 16px;">
+      <div style="font-size:12px;font-weight:600;color:#a1a1aa;margin-bottom:5px;">Données incohérentes</div>
+      <div style="font-size:12.5px;color:#a1a1aa;">Si <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#d4d4d8;">step</span> contredit les données, la FSM re-dérive et ramène à la première étape incomplète plutôt que d'y faire confiance.</div>
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  state = {
+    mode: 'new',
+    current: 'cameras',
+    selected: 'cameras',
+    shakeId: null,
+    cascade: null,
+    flags: { camerasConfigured: false, boardDefined: false, extrinsicDone: false, exportDone: false },
+    cams: [
+      { name: 'cam_0', intrinsicDone: false },
+      { name: 'cam_1', intrinsicDone: false },
+      { name: 'cam_2', intrinsicDone: false },
+      { name: 'cam_3', intrinsicDone: false },
+    ],
+  };
+
+  defs() {
+    return [
+      { id: 'cameras', num: '1', title: 'Caméras', fsmId: 'camera_setup', rule: 'cameras.status ≥ configured (toutes)', lock: '— (point de départ)', persists: 'cameras[] · session.toml',
+        desc: ['Détection USB V4L2 — capacités pré-remplies (résolutions, fps, formats)', 'Résolution native OU facteur s : K_out = s·K_native, distorsions inchangées', 'Réorganisation des index — index 0 = ancre extrinsèque', 'prefix → name = prefix_index ; device_path stable'] },
+      { id: 'boards', num: '2', title: 'Boards', fsmId: 'intrinsic_board', rule: 'board(s) défini(s)', lock: '① Caméras incomplète', persists: 'config.toml',
+        desc: ['ChArUco (recommandé, RMSE plus bas) ou ArUco', 'square_size_mm = échelle métrique de toute la scène 3D', 'Board intrinsèque et extrinsèque possiblement distinctes', 'PNG imprimable à l\u2019échelle exacte (vérifier impression 100%)'] },
+      { id: 'intrinsic', num: '3', title: 'Intrinsèque', fsmId: 'intrinsic_capture', rule: 'TOUTES les caméras intrinsic_done', lock: '② Boards incomplète', persists: 'intrinsic/cam_i/ · matrix + distortions',
+        desc: ['Boucle caméra par caméra (cam_0 → cam_N)', 'Burn-in couleur (fill) + jauges live (couverture, diversité, netteté)', 'Keyframes retenues par diversité de pose + rejet du flou', 'Calcul + stratégie d\u2019optimisation, résumé RMSE / couverture'] },
+      { id: 'extrinsic', num: '4', title: 'Extrinsèque', fsmId: 'extrinsic_capture', rule: 'rotation + translation présents', lock: '③ Intrinsèque incomplète', persists: 'extrinsic/ · camera_array.toml (R, t)',
+        desc: ['Capture synchronisée multi-caméras (quorum ≥ 2)', 'Co-visibilité par paire + couverture du volume partagé (live)', 'Init pairwise depuis l\u2019ancre (index 0), chaînage transitif', 'Bundle adjustment (scipy least_squares), échelle via square_size_mm'] },
+      { id: 'review', num: '5', title: 'Revue 3D', fsmId: 'review_3d', rule: 'extrinsèque présente', lock: '④ Extrinsèque incomplète', persists: '— (état UI volatile)',
+        desc: ['Frustums caméras nommés dans un repère commun', 'Scrub image par image du déplacement de la board', 'Sélection de l\u2019origine + réorientation ±x ±y ±z', 'Visualiser la reprojection · minimiser l\u2019erreur (relancer le BA)'] },
+      { id: 'export', num: '6', title: 'Export', fsmId: 'export', rule: 'camera_array.toml écrit', lock: '④ Extrinsèque incomplète', persists: 'camera_array.toml + _aniposelib.toml',
+        desc: ['Format compatible Caliscope (+ extensions additives)', 'Variante camera_array_aniposelib.toml', 'Écrit dans le dossier de session ou téléchargeable'] },
+    ];
+  }
+
+  derive() {
+    const f = this.state.flags;
+    const cams = this.state.cams;
+    const complete = {
+      cameras: f.camerasConfigured,
+      boards: f.boardDefined,
+      intrinsic: cams.length > 0 && cams.every(c => c.intrinsicDone),
+      extrinsic: f.extrinsicDone,
+      review: f.extrinsicDone,
+      export: f.exportDone,
+    };
+    const locked = {
+      cameras: false,
+      boards: !complete.cameras,
+      intrinsic: !complete.boards,
+      extrinsic: !complete.intrinsic,
+      review: !complete.extrinsic,
+      export: !complete.extrinsic,
+    };
+    return { complete, locked };
+  }
+
+  statusOf(id) {
+    const { complete, locked } = this.derive();
+    if (locked[id]) return 'locked';
+    if (id === this.state.current) return 'current';
+    if (complete[id]) return 'done';
+    return 'todo';
+  }
+
+  go(id) {
+    const { locked } = this.derive();
+    if (locked[id]) {
+      this.setState({ selected: id, shakeId: id });
+      setTimeout(() => this.setState({ shakeId: null }), 440);
+    } else {
+      this.setState({ selected: id, current: id });
+    }
+  }
+
+  setMode(m) {
+    const base = { mode: m, cascade: null, shakeId: null };
+    if (m === 'new') {
+      this.setState({ ...base, current: 'cameras', selected: 'cameras',
+        flags: { camerasConfigured: false, boardDefined: false, extrinsicDone: false, exportDone: false },
+        cams: this.state.cams.map(c => ({ ...c, intrinsicDone: false })) });
+    } else if (m === 'load_intrinsic') {
+      this.setState({ ...base, current: 'extrinsic', selected: 'extrinsic',
+        flags: { camerasConfigured: true, boardDefined: true, extrinsicDone: false, exportDone: false },
+        cams: this.state.cams.map(c => ({ ...c, intrinsicDone: true })) });
+    } else if (m === 'load_full') {
+      this.setState({ ...base, current: 'review', selected: 'review',
+        flags: { camerasConfigured: true, boardDefined: true, extrinsicDone: true, exportDone: true },
+        cams: this.state.cams.map(c => ({ ...c, intrinsicDone: true })) });
+    }
+  }
+
+  toggleCam(i) {
+    const cams = this.state.cams.map((c, j) => j === i ? { ...c, intrinsicDone: !c.intrinsicDone } : c);
+    const allDone = cams.every(c => c.intrinsicDone);
+    const flags = { ...this.state.flags };
+    if (!allDone) { flags.extrinsicDone = false; flags.exportDone = false; }
+    this.setState({ cams, flags, selected: 'intrinsic' });
+  }
+
+  doCascade() {
+    const cams = this.state.cams.map((c, j) => j === 2 ? { ...c, intrinsicDone: false } : c);
+    this.setState({
+      cams,
+      flags: { ...this.state.flags, extrinsicDone: false, exportDone: false },
+      current: 'intrinsic', selected: 'intrinsic',
+      cascade: { msg: 'Reconfigurer cam_2 a invalidé l\u2019aval :', list: ['Intrinsèque · cam_2', 'Extrinsèque', 'Revue 3D', 'Export'] },
+    });
+  }
+
+  renderVals() {
+    const { complete, locked } = this.derive();
+    const cur = this.state.current;
+    const sel = this.state.selected;
+
+    const palette = {
+      done: { ring: '#10b981', fg: '#10b981' },
+      current: { ring: '#22d3ee', fg: '#22d3ee' },
+      todo: { ring: '#3f3f46', fg: '#a1a1aa' },
+      locked: { ring: '#27272a', fg: '#52525b' },
+    };
+    const labels = { done: 'Fait', current: 'En cours', todo: 'À faire', locked: 'Verrouillé' };
+    const defs = this.defs();
+
+    const nodes = defs.map((d, i) => {
+      const s = this.statusOf(d.id);
+      const col = palette[s];
+      const next = defs[i + 1];
+      const nextLocked = next ? locked[next.id] : false;
+      return {
+        ...d,
+        status: s, ring: col.ring, fg: col.fg, statusLabel: labels[s],
+        isLocked: s === 'locked', isCurrent: s === 'current',
+        showGlyph: s !== 'locked' && s !== 'current',
+        glyph: s === 'done' ? '✓' : d.num,
+        glow: s === 'current' ? '0 0 0 1px rgba(34,211,238,.5), 0 12px 44px -14px rgba(34,211,238,.5)' : 'none',
+        cardAnim: this.state.shakeId === d.id ? 'shake .42s ease' : 'none',
+        showConnector: i < defs.length - 1,
+        connectorLocked: nextLocked, connectorOpen: !nextLocked,
+        connColor: nextLocked ? '#3f3f46' : '#52525b',
+        onClick: () => this.go(d.id),
+      };
+    });
+
+    // selected detail
+    const sd = defs.find(d => d.id === sel) || defs[0];
+    const ss = this.statusOf(sd.id);
+    const scol = palette[ss];
+    const doneCount = this.state.cams.filter(c => c.intrinsicDone).length;
+    const selDetail = {
+      ...sd,
+      kicker: 'Étape ' + sd.num,
+      status: ss, ring: scol.ring, fg: scol.fg, statusLabel: labels[ss], isLocked: ss === 'locked',
+      showCams: sd.id === 'intrinsic',
+      cams: this.state.cams.map((c, i) => ({
+        name: c.name, glyph: c.intrinsicDone ? '✓' : '', statusText: c.intrinsicDone ? 'intrinsic_done' : 'à calibrer',
+        color: c.intrinsicDone ? '#10b981' : '#52525b', onToggle: () => this.toggleCam(i),
+      })),
+      camDoneText: doneCount + ' / ' + this.state.cams.length,
+      camCountColor: doneCount === this.state.cams.length ? '#10b981' : '#a1a1aa',
+    };
+
+    // entry modes
+    const mk = (id, tag, label, desc, tagColor, tagBg) => {
+      const active = this.state.mode === id;
+      return { tag, label, desc, tagColor, tagBg, border: active ? '#22d3ee' : '#27272a', bg: active ? 'rgba(34,211,238,.07)' : '#131316', onClick: () => this.setMode(id) };
+    };
+    const modes = [
+      mk('new', 'new', 'Nouvelle calibration', 'Démarre à zéro → étape Caméras', '#22d3ee', 'rgba(34,211,238,.12)'),
+      mk('load_intrinsic', 'load_intrinsic', 'Charger intrinsèque seule', 'Réutilise K → saute à Extrinsèque', '#10b981', 'rgba(16,185,129,.12)'),
+      mk('load_full', 'load_full', 'Charger calibration complète', 'Tout chargé → ouvre la Revue 3D', '#a78bfa', 'rgba(167,139,250,.14)'),
+    ];
+
+    // actions
+    const act = (label, icon, enabled, fn, hint) => ({
+      label, icon, hint, onClick: enabled ? fn : (() => {}),
+      border: enabled ? '#27272a' : '#1a1a1f', bg: enabled ? '#131316' : '#0e0e10',
+      color: enabled ? '#ededed' : '#52525b', iconColor: enabled ? '#22d3ee' : '#3f3f46',
+      hintColor: enabled ? '#52525b' : '#3f3f46', cursor: enabled ? 'pointer' : 'not-allowed', opacity: enabled ? '1' : '.55',
+    });
+    const actions = [
+      act('Configurer les caméras', '▸', !complete.cameras, () => this.setState({ flags: { ...this.state.flags, camerasConfigured: true }, current: 'boards', selected: 'boards', cascade: null }), '→ ①'),
+      act('Définir le board', '▸', complete.cameras && !complete.boards, () => this.setState({ flags: { ...this.state.flags, boardDefined: true }, current: 'intrinsic', selected: 'intrinsic', cascade: null }), '→ ②'),
+      act('Calibrer toutes les intrinsèques', '▸', complete.boards && !complete.intrinsic, () => this.setState({ cams: this.state.cams.map(c => ({ ...c, intrinsicDone: true })), current: 'extrinsic', selected: 'extrinsic', cascade: null }), '→ ③'),
+      act('Calculer l\u2019extrinsèque', '▸', complete.intrinsic && !complete.extrinsic, () => this.setState({ flags: { ...this.state.flags, extrinsicDone: true }, current: 'review', selected: 'review', cascade: null }), '→ ④'),
+      act('Écrire l\u2019export', '▸', complete.extrinsic && !complete.export, () => this.setState({ flags: { ...this.state.flags, exportDone: true }, current: 'export', selected: 'export', cascade: null }), '→ ⑥'),
+    ];
+
+    return {
+      modes, nodes, actions, sel: selDetail,
+      cascadeActive: !!this.state.cascade,
+      cascadeMsg: this.state.cascade ? this.state.cascade.msg : '',
+      cascadeList: this.state.cascade ? this.state.cascade.list : [],
+      dismissCascade: () => this.setState({ cascade: null }),
+      onReset: () => this.setMode('new'),
+      onCascade: () => this.doCascade(),
+    };
+  }
+}
+</script>
+</body>
+</html>
