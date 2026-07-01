@@ -28,7 +28,7 @@ class BoardDetection:
     found: bool
     corners: NDArray[np.float32] | None  # (N, 2) sub-pixel corner positions
     ids: NDArray[np.int32] | None  # (N,) corner / marker ids
-    fill_fraction: float  # convex-hull area of corners / frame area
+    fill_fraction: float  # board span along its limiting axis / frame — a distance proxy
     sharpness: float  # variance of the Laplacian over the board ROI
 
     @property
@@ -47,8 +47,17 @@ def _to_gray(image: NDArray[np.uint8]) -> NDArray[np.uint8]:
 
 
 def _fill_fraction(corners: NDArray[np.float32], width: int, height: int) -> float:
-    area = float(cv2.contourArea(cv2.convexHull(corners)))
-    return area / float(width * height) if width and height else 0.0
+    """Board span along its limiting axis, as a fraction of the frame.
+
+    The bounding-box larger side ratio is a robust distance proxy: unlike the
+    corner-hull *area* (which saturates well below 1 and swings with the board's
+    aspect ratio), the linear extent reaches ~0.7 up close for both ChArUco and a
+    single ArUco marker, so a common colour ramp works for both.
+    """
+    if not width or not height:
+        return 0.0
+    _, _, w, h = cv2.boundingRect(corners.astype(np.int32))
+    return max(w / width, h / height)
 
 
 def _sharpness(gray: NDArray[np.uint8], corners: NDArray[np.float32]) -> float:

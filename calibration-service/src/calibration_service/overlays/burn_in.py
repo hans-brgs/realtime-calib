@@ -26,10 +26,14 @@ _FILL_ALPHA = 0.22  # translucency of the filled polygon
 
 
 def fill_color(fill_fraction: float) -> tuple[int, int, int]:
-    """Map an instantaneous fill fraction to a burn-in colour (BGR)."""
-    if fill_fraction < 0.10:
-        return _RED
+    """Map the board span (distance proxy) to a burn-in colour (BGR).
+
+    Bands tuned to the linear extent, which tops out near 0.7 up close for both
+    board types (see BoardDetection.fill_fraction).
+    """
     if fill_fraction < 0.25:
+        return _RED
+    if fill_fraction < 0.40:
         return _ORANGE
     if fill_fraction < 0.55:
         return _YELLOW

@@ -18,10 +18,10 @@ def _charuco() -> CalibrationBoard:
 
 
 def test_fill_color_bands() -> None:
-    assert fill_color(0.05) != fill_color(0.20)  # red vs orange
-    assert fill_color(0.20) != fill_color(0.40)  # orange vs yellow
-    assert fill_color(0.40) != fill_color(0.80)  # yellow vs green
-    assert fill_color(0.80) == fill_color(0.60)  # both green (>= 0.55)
+    assert fill_color(0.10) != fill_color(0.32)  # red vs orange
+    assert fill_color(0.32) != fill_color(0.48)  # orange vs yellow
+    assert fill_color(0.48) != fill_color(0.70)  # yellow vs green
+    assert fill_color(0.70) == fill_color(0.60)  # both green (>= 0.55)
 
 
 def test_overlay_downscales_and_draws() -> None:
