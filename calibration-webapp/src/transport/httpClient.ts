@@ -53,6 +53,9 @@ export const configureCameras = (request: ConfigRequest): Promise<Session> =>
 export const fetchBoardDictionaries = (): Promise<string[]> =>
   getJson<string[]>('/board/dictionaries');
 
+export const setActiveIntrinsic = (camera: string | null): Promise<{ active: string | null }> =>
+  postJson<{ active: string | null }>('/intrinsic/active', { camera });
+
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
 
