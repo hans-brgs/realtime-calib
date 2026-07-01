@@ -22,7 +22,7 @@ def test_get_session_returns_fresh_session(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["step"] == "camera_setup"
+    assert body["step"] == "intrinsic_board"
     assert body["mode"] == "new-realtime"
     assert body["cameras"] == []
 
@@ -83,7 +83,7 @@ def test_configure_cameras_persists_and_advances(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["step"] == "intrinsic_board"
+    assert body["step"] == "intrinsic_capture"
     assert [c["name"] for c in body["cameras"]] == ["cam_0", "cam_1"]
 
     # Persisted to disk: a fresh load reflects the config.
@@ -128,6 +128,6 @@ def test_list_sessions_summaries(tmp_path: Path) -> None:
     summaries = client.get("/sessions").json()
     assert summaries[0]["camera_count"] == 1
     assert summaries[0]["status"] == "in_progress"
-    assert summaries[0]["step"] == "intrinsic_board"
+    assert summaries[0]["step"] == "intrinsic_capture"
     # modified_at is ISO 8601.
     assert "T" in summaries[0]["modified_at"]

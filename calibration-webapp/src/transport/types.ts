@@ -28,6 +28,27 @@ export interface CameraConfig {
   status: CameraStatus;
 }
 
+export type BoardType = 'charuco' | 'aruco';
+
+export interface Board {
+  board_type: BoardType;
+  dictionary: string;
+  columns: number; // ChArUco grid (ignored for a single ArUco marker)
+  rows: number;
+  marker_ratio: number; // ChArUco marker/square, render-only
+  marker_id: number; // ArUco single-marker id
+  square_size_mm: number; // ChArUco measured square (metric scale)
+  marker_size_mm: number; // measured marker side; metric scale for ArUco
+  inverted: boolean;
+}
+
+export type BoardTarget = 'intrinsic' | 'extrinsic';
+
+export interface BoardConfigRequest {
+  target: BoardTarget;
+  board: Board;
+}
+
 export interface Session {
   session_id: string;
   step: WizardStep;
@@ -35,6 +56,8 @@ export interface Session {
   intrinsic_fps: number;
   optimization_strategy: string;
   cameras: CameraConfig[];
+  intrinsic_board: Board | null;
+  extrinsic_board: Board | null;
 }
 
 export interface CameraMode {

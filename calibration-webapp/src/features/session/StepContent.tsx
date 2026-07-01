@@ -1,6 +1,7 @@
-import { IconCube, IconDownload, IconFocusCentered, IconLayoutGrid, IconTopologyStar3 } from '@tabler/icons-react';
+import { IconCube, IconDownload, IconFocusCentered, IconTopologyStar3 } from '@tabler/icons-react';
 
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
+import { TargetConfigScreen } from '@/features/board/TargetConfigScreen';
 import { CameraSetupScreen } from '@/features/cameras/CameraSetupScreen';
 import { DashboardScreen } from '@/features/session/DashboardScreen';
 import { LoadFromFilesScreen } from '@/features/session/LoadFromFilesScreen';
@@ -20,16 +21,10 @@ export function StepContent({ view, onNavigate }: ScreenRouterProps) {
       return <DashboardScreen onNavigate={onNavigate} />;
     case 'load':
       return <LoadFromFilesScreen onNavigate={onNavigate} />;
+    case 'boards':
+      return <TargetConfigScreen />;
     case 'cameras':
       return <CameraSetupScreen />;
-    case 'boards':
-      return (
-        <PlaceholderScreen
-          icon={IconLayoutGrid}
-          title="Target Config"
-          description="Define the ChArUco/ArUco board and its metric scale. High-fidelity screen coming in a later pass."
-        />
-      );
     case 'intrinsic':
       return (
         <PlaceholderScreen

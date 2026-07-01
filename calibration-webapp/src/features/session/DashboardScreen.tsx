@@ -186,7 +186,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       desc: 'Run the full wizard from scratch. Each intrinsic sweep is recorded to the session folder, so it can be replayed and recomputed later.',
       cta: 'START WIZARD',
       accent: true,
-      onClick: () => onNavigate('cameras'),
+      onClick: () => onNavigate('boards'),
     },
     {
       icon: IconFolder,

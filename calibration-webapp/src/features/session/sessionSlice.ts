@@ -1,8 +1,14 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
 import type { RootState } from '@/app/store';
-import { configureCameras, fetchSession, fetchSessions } from '@/transport/httpClient';
-import type { ConfigRequest, Session, SessionSummary, WizardStep } from '@/transport/types';
+import { configureCameras, defineBoard, fetchSession, fetchSessions } from '@/transport/httpClient';
+import type {
+  BoardConfigRequest,
+  ConfigRequest,
+  Session,
+  SessionSummary,
+  WizardStep,
+} from '@/transport/types';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -29,6 +35,10 @@ export const applyCameraConfig = createAsyncThunk('session/applyConfig', (reques
   configureCameras(request),
 );
 
+export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request: BoardConfigRequest) =>
+  defineBoard(request),
+);
+
 const sessionSlice = createSlice({
   name: 'session',
   initialState,
@@ -48,6 +58,9 @@ const sessionSlice = createSlice({
         state.error = action.error.message ?? 'failed';
       })
       .addCase(applyCameraConfig.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(applyBoardConfig.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(fetchRecentSessions.fulfilled, (state, action) => {
