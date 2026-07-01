@@ -6,10 +6,13 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from typing import Literal
 
-from fastapi import APIRouter, Request
+from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
+from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
+from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
     CalibrationSession,
@@ -67,6 +70,26 @@ class CameraConfigOut(BaseModel):
     status: str
 
 
+class BoardIn(BaseModel):
+    board_type: str
+    dictionary: str
+    columns: int
+    rows: int
+    marker_ratio: float = 0.75
+    square_size_mm: float = 40.0
+    marker_size_mm: float = 30.0
+    inverted: bool = False
+
+
+class BoardConfigRequest(BaseModel):
+    target: Literal["intrinsic", "extrinsic"]
+    board: BoardIn
+
+
+class BoardOut(BoardIn):
+    pass
+
+
 class SessionOut(BaseModel):
     session_id: str
     step: str
@@ -74,6 +97,8 @@ class SessionOut(BaseModel):
     intrinsic_fps: int
     optimization_strategy: str
     cameras: list[CameraConfigOut]
+    intrinsic_board: BoardOut | None
+    extrinsic_board: BoardOut | None
 
 
 class SessionSummaryOut(BaseModel):
@@ -104,6 +129,34 @@ def _device_out(device: CameraDevice) -> DetectedCameraOut:
     )
 
 
+def _board_out(board: CalibrationBoard | None) -> BoardOut | None:
+    if board is None:
+        return None
+    return BoardOut(
+        board_type=board.board_type,
+        dictionary=board.dictionary,
+        columns=board.columns,
+        rows=board.rows,
+        marker_ratio=board.marker_ratio,
+        square_size_mm=board.square_size_mm,
+        marker_size_mm=board.marker_size_mm,
+        inverted=board.inverted,
+    )
+
+
+def _to_board(item: BoardIn) -> CalibrationBoard:
+    return CalibrationBoard(
+        board_type=BoardType(item.board_type),
+        dictionary=item.dictionary,
+        columns=item.columns,
+        rows=item.rows,
+        marker_ratio=item.marker_ratio,
+        square_size_mm=item.square_size_mm,
+        marker_size_mm=item.marker_size_mm,
+        inverted=item.inverted,
+    )
+
+
 def _session_out(session: CalibrationSession) -> SessionOut:
     return SessionOut(
         session_id=session.session_id,
@@ -126,6 +179,8 @@ def _session_out(session: CalibrationSession) -> SessionOut:
             )
             for c in session.cameras
         ],
+        intrinsic_board=_board_out(session.intrinsic_board),
+        extrinsic_board=_board_out(session.extrinsic_board),
     )
 
 
@@ -193,3 +248,41 @@ async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut
         await publish_service.refresh()
 
     return _session_out(session)
+
+
+@router.get("/board/dictionaries", response_model=list[str])
+async def board_dictionaries() -> list[str]:
+    return list(SUPPORTED_DICTIONARIES)
+
+
+@router.post("/board", response_model=SessionOut)
+async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
+    try:
+        board = _to_board(body.board)
+        validate_board(board)
+        session = get_manager(request).define_board(body.target, board)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _session_out(session)
+
+
+@router.post("/board/preview")
+async def preview_board(body: BoardIn) -> Response:
+    try:
+        png = render_board_png(_to_board(body))
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return Response(content=png, media_type="image/png")
+
+
+@router.get("/board/{target}/image.png")
+async def board_image(request: Request, target: Literal["intrinsic", "extrinsic"]) -> Response:
+    session = get_manager(request).current()
+    board = (
+        session.intrinsic_board
+        if target == "intrinsic"
+        else session.effective_extrinsic_board()
+    )
+    if board is None:
+        raise HTTPException(status_code=404, detail=f"no {target} board defined")
+    return Response(content=render_board_png(board), media_type="image/png")

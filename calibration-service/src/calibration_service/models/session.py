@@ -10,14 +10,20 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from enum import StrEnum
 
+from calibration_service.models.board import CalibrationBoard
+
 
 class WizardStep(StrEnum):
-    """Current wizard step (FSM state, see wizard-navigation)."""
+    """Current wizard step (FSM state, see wizard-navigation).
+
+    Board definition comes first so the operator can print early, before wiring
+    cameras (ADR-0020 workflow).
+    """
 
     ENTRY = "entry"
-    CAMERA_SETUP = "camera_setup"
     INTRINSIC_BOARD = "intrinsic_board"
     EXTRINSIC_BOARD_CHOICE = "extrinsic_board_choice"
+    CAMERA_SETUP = "camera_setup"
     INTRINSIC_CAPTURE = "intrinsic_capture"
     EXTRINSIC_CAPTURE = "extrinsic_capture"
     REVIEW_3D = "review_3d"
@@ -63,14 +69,24 @@ class CameraConfig:
 
 @dataclass
 class CalibrationSession:
-    """The full wizard state needed to resume after interruption."""
+    """The full wizard state needed to resume after interruption.
+
+    Boards live in ``config.toml`` (loaded/merged by the session manager); the
+    rest of this state is persisted in ``session.toml`` (ADR-0016).
+    """
 
     session_id: str
-    step: WizardStep = WizardStep.CAMERA_SETUP
+    step: WizardStep = WizardStep.INTRINSIC_BOARD
     mode: SessionMode = SessionMode.NEW_REALTIME
     cameras: list[CameraConfig] = field(default_factory=list)
     intrinsic_fps: int = 30
     optimization_strategy: str = "coverage-aware"
+    intrinsic_board: CalibrationBoard | None = None
+    extrinsic_board: CalibrationBoard | None = None
+
+    def effective_extrinsic_board(self) -> CalibrationBoard | None:
+        """Extrinsic board, inheriting the intrinsic one when not set explicitly."""
+        return self.extrinsic_board or self.intrinsic_board
 
 
 @dataclass(frozen=True)
