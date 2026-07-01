@@ -24,11 +24,11 @@ https://:443 {
 		reverse_proxy livekit-token-server:8080
 	}
 
-	# LiveKit signaling (WebSocket). LiveKit runs on the host network, so reach it
-	# via host.docker.internal (mapped to host-gateway in docker-compose.yml).
+	# LiveKit signaling (WebSocket), reverse-proxied to the bridge service (same as
+	# vision-services). Media goes direct to the published UDP/TCP ports at HOST_IP.
 	handle /livekit* {
 		uri strip_prefix /livekit
-		reverse_proxy host.docker.internal:7880
+		reverse_proxy livekit:7880
 	}
 
 	# Static webapp (SPA) — catch-all, must be last.
