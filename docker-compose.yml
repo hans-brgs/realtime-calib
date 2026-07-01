@@ -19,9 +19,6 @@ services:
       - ./caddy/certs:/certs:ro
     env_file:
       - ./.env
-    # Reach the host-network LiveKit signaling (7880) from this bridge container.
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
     networks:
       - calib-network
     logging: &default-logging
@@ -38,11 +35,8 @@ services:
     container_name: calibration-service
     restart: unless-stopped
     env_file:
+      # LIVEKIT_URL=ws://livekit:7880 — reaches LiveKit over the shared bridge.
       - ./.env
-    environment:
-      # LiveKit runs on the host network (see below); reach it at HOST_IP. A bridge
-      # container can no longer use the "livekit" service name. Overrides .env.
-      - LIVEKIT_URL=ws://${HOST_IP}:7880
     expose:
       - "8000"
     volumes:
@@ -71,24 +65,27 @@ services:
       - calib-network
     logging: *default-logging
 
-  # LiveKit SFU (upstream). Caddy proxies wss signaling; media goes direct.
+  # LiveKit SFU (upstream), on the bridge with the publisher — same structure as
+  # vision-services (proven on this host). The in-container publisher reaches it over
+  # the shared bridge; the LAN browser reaches the media via the published UDP range
+  # + TCP fallback at HOST_IP (NODE_IP). Caddy proxies the wss signaling. No host
+  # networking — it was fragile across restarts (ICE hairpin broke on every restart).
   livekit:
     image: livekit/livekit-server:latest
     container_name: calib-livekit
     restart: unless-stopped
-    # Host network: LiveKit binds 7880/7882/7883 directly on the host. This is what
-    # lets BOTH a LAN browser AND the in-container publisher reach it at HOST_IP — a
-    # bridge container cannot hairpin to a *published* port (UDP or TCP), but it CAN
-    # reach a *real* host listener at HOST_IP. Ports come from livekit.yaml /
-    # --udp-port; no port mapping is used in host mode.
-    network_mode: host
-    command: --config /etc/livekit.yaml --udp-port ${LIVEKIT_UDP_PORT:-7882}
+    command: --config /etc/livekit.yaml
+    ports:
+      - "7881:7881/tcp" # ICE-TCP fallback (must match livekit.yaml rtc.tcp_port)
+      - "50000-50010:50000-50010/udp" # WebRTC media (must match rtc.port_range_*)
     environment:
       # Quoted: the ": " must stay part of the string, not be parsed as a YAML map.
       - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
       - NODE_IP=${HOST_IP} # LAN IP advertised for WebRTC media
     volumes:
       - ./livekit.yaml:/etc/livekit.yaml:ro
+    networks:
+      - calib-network
     logging: *default-logging
 
 networks:

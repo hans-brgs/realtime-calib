@@ -14,17 +14,13 @@ bind_addresses:
   - "0.0.0.0"
 
 rtc:
-  # Single muxed UDP port for all WebRTC media (simpler than a range, and easy to
-  # publish 1:1 / relocate). Overridable via --udp-port / LIVEKIT_UDP_PORT in
-  # docker-compose. LiveKit advertises THIS exact port to clients, so it must be
-  # published host==container and reachable at NODE_IP.
-  udp_port: 7882
-  # TCP fallback (published, host==container). REQUIRED: the in-container
-  # publisher (calibration-service) cannot UDP-hairpin to NODE_IP via the docker
-  # bridge, so it reaches LiveKit over ICE-TCP (Docker userland-proxy handles TCP
-  # hairpin). 7883 avoids a typical second LiveKit on 7881. Must match the
-  # published port in docker-compose.yml (no CLI flag for this — config only).
-  tcp_port: 7883
+  # WebRTC media UDP port range (published host==container in docker-compose.yml).
+  # Same structure as vision-services. The publisher reaches LiveKit over the shared
+  # bridge; the LAN browser reaches these ports at NODE_IP.
+  port_range_start: 50000
+  port_range_end: 50010
+  # ICE-TCP fallback if UDP is blocked (published, host==container).
+  tcp_port: 7881
   # Local network: advertise NODE_IP (injected), no external IP discovery.
   use_external_ip: false
   # Allow loopback candidates for same-machine testing.

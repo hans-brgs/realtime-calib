@@ -1,0 +1,68 @@
+/*
+ * Global baseline for the realtime-calib design system (imported in main.tsx,
+ * after Mantine's styles so these win). Surface tokens mirror theme.ts `other`;
+ * exposed as CSS vars for non-React usage (SVG overlays, raw style props).
+ */
+
+:root {
+  --rc-page: #09090b;
+  --rc-bar: #0c0c0f;
+  --rc-panel: #0f0f12;
+  --rc-input: #16161b;
+  --rc-border: #232329;
+
+  --rc-accent: #a78bfa;
+  --rc-accent-bright: #c4b5fd;
+  --rc-accent-deep: #8b5cf6;
+  --rc-success: #34d399;
+  --rc-warning: #fbbf24;
+  --rc-error: #f87171;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  height: 100%;
+}
+
+body {
+  background: var(--rc-page);
+  color: #ececf0;
+  font-family: 'Manrope Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+#root {
+  height: 100%;
+}
+
+/* Live numeric values (FPS, resolutions, errors) read better tabular. */
+.rc-tnum {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Camera Setup: preview + settings column side by side, stacking on narrow viewports. */
+@media (max-width: 62em) {
+  .rc-camsetup-grid {
+    grid-template-columns: minmax(0, 1fr) !important;
+  }
+}
+
+/* Cool, slim scrollbars to match the dark surfaces. */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-thumb {
+  background: #26262e;
+  border-radius: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}

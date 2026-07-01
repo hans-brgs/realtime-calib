@@ -2,21 +2,30 @@ import '@mantine/core/styles.css';
 import '@livekit/components-styles';
 
 import { MantineProvider } from '@mantine/core';
+import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 
+import { useAppDispatch } from '@/app/hooks';
 import { store } from '@/app/store';
-import { AppLayout } from '@/components/layout/AppLayout';
-import { PreviewGrid } from '@/features/preview/PreviewGrid';
+import { rehydrateSession } from '@/features/session/sessionSlice';
+import { WizardShell } from '@/features/session/WizardShell';
 import { theme } from '@/theme';
+
+// Rehydrate the wizard from the disk-owned session at mount (ADR-0011).
+function AppContent() {
+  const dispatch = useAppDispatch();
+  useEffect(() => {
+    dispatch(rehydrateSession());
+  }, [dispatch]);
+  return <WizardShell />;
+}
 
 // Dark mode is the default (ADR-0010 / vision-webapp design system).
 export default function App() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
       <Provider store={store}>
-        <AppLayout>
-          <PreviewGrid />
-        </AppLayout>
+        <AppContent />
       </Provider>
     </MantineProvider>
   );

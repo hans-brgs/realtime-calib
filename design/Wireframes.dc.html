@@ -1,0 +1,570 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #e8e8e5; }
+</style>
+</helmet>
+<div style="min-height:100vh;background:#e8e8e5;color:#2b2b29;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;padding:30px 24px 60px;">
+
+  <!-- DOC HEADER -->
+  <div style="max-width:1200px;margin:0 auto 26px;">
+    <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;letter-spacing:.12em;text-transform:uppercase;color:#9a9a93;">realtime-calib · livrable 02</div>
+    <h1 style="margin:6px 0 4px;font-size:25px;font-weight:600;letter-spacing:-.02em;">Wireframes — 7 écrans</h1>
+    <p style="margin:0;color:#6b6b64;max-width:760px;">Basse fidélité (structure, pas visuels). Le <strong>rail latéral persistant</strong> remplace le stepper linéaire : chaque étape y porte son statut dérivé de la session (<span style="color:#3b82f6;">●</span> en cours · <span style="color:#6b9e78;">✓</span> fait · ○ à faire · <span style="color:#a8a8a2;">🔒</span> verrouillé). On saute librement vers toute étape non verrouillée ; l'avance reste gated par les prérequis.</p>
+  </div>
+
+  <!-- ============ SCREEN 01 — SESSION / DASHBOARD ============ -->
+  <div style="max-width:1200px;margin:0 auto;">
+    <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">01</span> · SESSION / DASHBOARD — entrée (3 modes FSM)</div>
+  </div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;">
+      <span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span>
+      <span style="display:flex;gap:18px;"><span style="color:#2b2b29;border-bottom:2px solid #3b82f6;padding-bottom:13px;">Dashboard</span><span>Logs</span><span>Settings</span></span>
+      <span style="display:flex;gap:10px;color:#c0c0ba;">◔ ⚙ ◍</span>
+    </div>
+    <div style="display:flex;min-height:560px;">
+      <!-- RAIL -->
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;color:#2b2b29;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railEntry }}" as="r" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};">
+              <span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;">
+                <sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if>
+                <sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if>
+              </span>
+              <span>{{ r.label }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:10px;display:flex;flex-direction:column;gap:8px;">
+          <div style="height:34px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#3b82f6;font-weight:600;">Run Validation</div>
+          <div style="font-size:11px;color:#a8a8a2;padding-left:6px;">⊙ Help &nbsp; ▤ Documentation</div>
+        </div>
+      </div>
+      <!-- BODY -->
+      <div style="flex:1;padding:22px;min-width:0;">
+        <div style="height:26px;width:55%;background:#ececea;border-radius:5px;"></div>
+        <div style="height:13px;width:72%;background:#f1f1ef;border-radius:4px;margin-top:10px;"></div>
+        <div style="height:13px;width:60%;background:#f1f1ef;border-radius:4px;margin-top:6px;"></div>
+        <!-- entry cards -->
+        <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-top:22px;">
+          <sc-for list="{{ entryCards }}" as="c" hint-placeholder-count="3">
+            <div style="border:1px solid #e2e2de;border-radius:10px;padding:16px;background:#fcfcfb;min-height:170px;display:flex;flex-direction:column;">
+              <div style="width:40px;height:40px;border-radius:9px;background:#eef1f6;border:1px solid #e0e4ec;display:flex;align-items:center;justify-content:center;color:#94a0b4;font-size:18px;">{{ c.icon }}</div>
+              <div style="font-weight:600;margin-top:13px;font-size:14px;">{{ c.title }}</div>
+              <div style="height:11px;width:100%;background:#f0f0ee;border-radius:3px;margin-top:9px;"></div>
+              <div style="height:11px;width:82%;background:#f0f0ee;border-radius:3px;margin-top:5px;"></div>
+              <div style="margin-top:auto;padding-top:14px;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#3b82f6;">{{ c.cta }} →</div>
+            </div>
+          </sc-for>
+        </div>
+        <!-- recent sessions -->
+        <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:26px;">
+          <div style="font-weight:600;">Sessions récentes</div>
+          <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11px;color:#94a0b4;">VOIR TOUT</div>
+        </div>
+        <div style="margin-top:12px;border:1px solid #ececea;border-radius:9px;overflow:hidden;">
+          <div style="display:grid;grid-template-columns:1.4fr 1.4fr .8fr 1fr .6fr;gap:10px;padding:9px 14px;background:#f7f7f5;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:10.5px;letter-spacing:.05em;color:#a0a09a;text-transform:uppercase;">
+            <span>Session ID</span><span>Date</span><span>Caméras</span><span>Statut</span><span>Actions</span>
+          </div>
+          <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+            <div style="display:grid;grid-template-columns:1.4fr 1.4fr .8fr 1fr .6fr;gap:10px;padding:12px 14px;border-top:1px solid #f0f0ee;font-size:12.5px;align-items:center;">
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#3b82f6;">{{ s.id }}</span>
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;color:#6b6b64;">{{ s.date }}</span>
+              <span style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;">{{ s.cams }}</span>
+              <span><span style="font-size:10.5px;padding:3px 9px;border-radius:20px;background:#f0f0ee;color:#6b6b64;">{{ s.status }}</span></span>
+              <span style="color:#c0c0ba;">⤢</span>
+            </div>
+          </sc-for>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;">
+    <sc-for list="{{ notesEntry }}" as="n" hint-placeholder-count="3">
+      <div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div>
+    </sc-for>
+  </div>
+
+  <!-- ============ SCREEN 02 — CAMERA SETUP ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;">
+    <div style="font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">02</span> · CAMERA SETUP — détection USB, résolution (native / facteur s), réordre des index</div>
+  </div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;">
+      <span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span>
+      <span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span>
+      <span style="display:flex;gap:10px;color:#c0c0ba;">◔ ⚙ ◍</span>
+    </div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railCameras }}" as="r" hint-placeholder-count="7">
+            <div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};">
+              <span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span>
+              <span>{{ r.label }}</span>
+            </div>
+          </sc-for>
+        </div>
+        <div style="margin-top:10px;height:34px;border:1px solid #e0e0dc;background:#f4f4f1;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#a8a8a2;">Run Validation</div>
+      </div>
+      <div style="flex:1;padding:22px;min-width:0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div style="height:22px;width:200px;background:#ececea;border-radius:5px;"></div>
+          <div style="display:flex;gap:8px;">
+            <div style="height:34px;width:130px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#3b82f6;">↻ Détecter</div>
+            <div style="height:34px;width:140px;border:1px dashed #d4d4d0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#a8a8a2;font-family:ui-monospace,monospace;">prefix = cam</div>
+          </div>
+        </div>
+        <div style="display:grid;grid-template-columns:1.6fr 1fr;gap:18px;margin-top:18px;">
+          <!-- camera config rows -->
+          <div style="display:flex;flex-direction:column;gap:9px;">
+            <sc-for list="{{ cameraRows }}" as="c" hint-placeholder-count="4">
+              <div style="border:1px solid #e6e6e2;border-radius:9px;padding:11px 12px;display:flex;align-items:center;gap:11px;background:#fcfcfb;">
+                <span style="color:#c4c4be;cursor:grab;font-size:15px;">⋮⋮</span>
+                <span style="width:26px;height:26px;flex:none;border-radius:6px;background:{{ c.idxBg }};color:{{ c.idxColor }};display:flex;align-items:center;justify-content:center;font-family:ui-monospace,monospace;font-size:12px;font-weight:600;border:1px solid {{ c.idxBorder }};">{{ c.idx }}</span>
+                <div style="flex:1;min-width:0;">
+                  <div style="font-family:ui-monospace,monospace;font-size:12.5px;color:#2b2b29;">{{ c.name }} {{ c.anchor }}</div>
+                  <div style="font-family:ui-monospace,monospace;font-size:10.5px;color:#a8a8a2;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ c.path }}</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:4px;align-items:flex-end;flex:none;">
+                  <div style="height:26px;width:120px;border:1px solid #e0e0dc;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 8px;font-family:ui-monospace,monospace;font-size:10.5px;color:#6b6b64;">{{ c.res }} <span style="color:#c0c0ba;">▾</span></div>
+                  <div style="font-family:ui-monospace,monospace;font-size:10px;color:#94a0b4;">{{ c.out }}</div>
+                </div>
+              </div>
+            </sc-for>
+            <div style="font-size:11.5px;color:#9a9a93;margin-top:2px;">Glisser pour réordonner · <span style="font-family:ui-monospace,monospace;">index 0</span> = ancre extrinsèque</div>
+          </div>
+          <!-- preview grid for identification -->
+          <div>
+            <div style="font-size:11px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Preview · identifier physique ↔ index</div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+              <sc-for list="{{ camTiles }}" as="t" hint-placeholder-count="4">
+                <div style="aspect-ratio:4/3;border-radius:7px;background:repeating-linear-gradient(45deg,#2b2b2e,#2b2b2e 9px,#323236 9px,#323236 18px);position:relative;display:flex;align-items:flex-end;padding:6px;">
+                  <span style="font-family:ui-monospace,monospace;font-size:10px;color:#c8c8c4;background:rgba(0,0,0,.4);padding:2px 5px;border-radius:3px;">{{ t }}</span>
+                </div>
+              </sc-for>
+            </div>
+            <div style="height:32px;border:1px dashed #d4d4d0;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:11px;color:#a8a8a2;margin-top:8px;">⚡ Flash pour identifier</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;">
+    <sc-for list="{{ notesCameras }}" as="n" hint-placeholder-count="3"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for>
+  </div>
+
+  <!-- ============ SCREEN 03 — TARGET CONFIG ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;"><div style="font-family:ui-monospace,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">03</span> · TARGET CONFIG — board ChArUco/ArUco, échelle métrique, PNG imprimable</div></div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;"><span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span><span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span><span style="color:#c0c0ba;">◔ ⚙ ◍</span></div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railBoards }}" as="r" hint-placeholder-count="7"><div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};"><span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span><span>{{ r.label }}</span></div></sc-for>
+        </div>
+        <div style="margin-top:10px;height:34px;border:1px solid #e0e0dc;background:#f4f4f1;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#a8a8a2;">Run Validation</div>
+      </div>
+      <div style="flex:1;padding:22px;min-width:0;">
+        <div style="display:flex;gap:8px;margin-bottom:16px;">
+          <div style="padding:7px 14px;border-radius:7px;background:#eef3fb;border:1px solid #cfd9ea;font-size:12.5px;color:#3b82f6;">Board intrinsèque</div>
+          <div style="padding:7px 14px;border-radius:7px;border:1px solid #e4e4e0;font-size:12.5px;color:#8a8a83;">Board extrinsèque <span style="color:#b8b8b2;">(= ou distincte)</span></div>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:20px;">
+          <!-- form -->
+          <div style="display:flex;flex-direction:column;gap:13px;">
+            <div style="display:flex;gap:8px;">
+              <div style="flex:1;padding:9px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:7px;text-align:center;font-size:12.5px;color:#3b82f6;">ChArUco</div>
+              <div style="flex:1;padding:9px;border:1px solid #e4e4e0;border-radius:7px;text-align:center;font-size:12.5px;color:#8a8a83;">ArUco</div>
+            </div>
+            <sc-for list="{{ boardFields }}" as="f" hint-placeholder-count="6">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                <span style="font-size:12.5px;color:#52524c;">{{ f.label }}</span>
+                <div style="height:30px;width:150px;border:1px solid #e0e0dc;border-radius:6px;display:flex;align-items:center;justify-content:space-between;padding:0 9px;font-family:ui-monospace,monospace;font-size:11.5px;color:#6b6b64;">{{ f.value }} <span style="color:#c0c0ba;">▾</span></div>
+              </div>
+            </sc-for>
+          </div>
+          <!-- preview -->
+          <div>
+            <div style="font-size:11px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;">Aperçu à l'échelle</div>
+            <div style="aspect-ratio:4/3;border:1px solid #e0e0dc;border-radius:8px;background:repeating-conic-gradient(#dededa 0% 25%, #fff 0% 50%) 50%/40px 40px;"></div>
+            <div style="height:36px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#3b82f6;margin-top:10px;">⤓ Télécharger PNG (échelle réelle)</div>
+            <div style="margin-top:9px;font-size:11.5px;color:#b07a2a;background:#fdf6ec;border:1px solid #f2e3c8;border-radius:7px;padding:9px 11px;">⚠ Imprimer à 100% / taille réelle, puis <strong>mesurer un carré</strong> imprimé.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;"><sc-for list="{{ notesBoards }}" as="n" hint-placeholder-count="3"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for></div>
+
+  <!-- ============ SCREEN 04 — INTRINSIC ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;"><div style="font-family:ui-monospace,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">04</span> · INTRINSICS — boucle caméra par caméra, burn-in + jauges live</div></div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;"><span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span><span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span><span style="color:#c0c0ba;">◔ ⚙ ◍</span></div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railIntrinsic }}" as="r" hint-placeholder-count="7"><div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};"><span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span><span>{{ r.label }}</span></div></sc-for>
+        </div>
+        <div style="margin-top:10px;font-size:11px;color:#b07a2a;background:#fdf6ec;border:1px solid #f2e3c8;border-radius:7px;padding:8px 10px;">⚠ Modifier étape 1 ou 2 invalidera ces captures.</div>
+      </div>
+      <div style="flex:1;padding:18px;min-width:0;display:grid;grid-template-columns:1fr 250px;gap:16px;">
+        <!-- feed -->
+        <div style="min-width:0;">
+          <div style="position:relative;border-radius:9px;overflow:hidden;background:repeating-linear-gradient(45deg,#26262a,#26262a 11px,#2d2d31 11px,#2d2d31 22px);aspect-ratio:4/3;">
+            <div style="position:absolute;top:8px;left:8px;right:8px;display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:10px;color:#cfcfca;"><span style="background:rgba(0,0,0,.45);padding:2px 6px;border-radius:3px;">FEED LIVE · cam_0</span><span style="background:rgba(0,0,0,.45);padding:2px 6px;border-radius:3px;">FPS 59 · 2048×1536 · 12ms</span></div>
+            <!-- burn-in polygon -->
+            <svg viewBox="0 0 400 300" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;"><polygon points="150,120 250,110 265,200 140,210" fill="rgba(110,200,140,.12)" stroke="#6ec88c" stroke-width="2"></polygon><circle cx="150" cy="120" r="3" fill="#6ec88c"></circle><circle cx="250" cy="110" r="3" fill="#6ec88c"></circle><circle cx="265" cy="200" r="3" fill="#6ec88c"></circle><circle cx="140" cy="210" r="3" fill="#6ec88c"></circle></svg>
+            <div style="position:absolute;bottom:8px;left:8px;font-family:ui-monospace,monospace;font-size:10px;color:#9adcb0;background:rgba(0,0,0,.45);padding:2px 6px;border-radius:3px;">burn-in serveur · fill 62% 🟢</div>
+          </div>
+          <!-- controls -->
+          <div style="display:flex;gap:9px;margin-top:12px;">
+            <div style="flex:1;height:42px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#3b82f6;font-weight:600;">◉ Capturer (auto-keyframe)</div>
+            <div style="width:90px;height:42px;border:1px solid #e0e0dc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#8a8a83;">↺ Reset</div>
+            <div style="width:130px;height:42px;border:1px solid #e0e0dc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#8a8a83;">Calculer · cam →</div>
+          </div>
+        </div>
+        <!-- right metrics -->
+        <div style="display:flex;flex-direction:column;gap:14px;min-width:0;">
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;">Caméra active</div>
+            <div style="display:flex;gap:6px;margin-top:7px;"><div style="flex:1;padding:7px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:6px;text-align:center;font-size:11.5px;color:#3b82f6;">cam_0</div><div style="flex:1;padding:7px;border:1px solid #e4e4e0;border-radius:6px;text-align:center;font-size:11.5px;color:#8a8a83;">cam_1</div></div>
+          </div>
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;margin-bottom:8px;">Jauges de couverture</div>
+            <div style="display:flex;flex-direction:column;gap:9px;">
+              <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="3">
+                <div><div style="display:flex;justify-content:space-between;font-size:11.5px;color:#52524c;margin-bottom:3px;"><span>{{ g.label }}</span><span style="font-family:ui-monospace,monospace;color:#8a8a83;">{{ g.val }}</span></div><div style="height:7px;border-radius:4px;background:#ececea;overflow:hidden;"><div style="height:100%;width:{{ g.pct }};background:#9bbf9b;border-radius:4px;"></div></div></div>
+              </sc-for>
+              <div style="display:flex;align-items:center;gap:8px;font-size:11.5px;color:#52524c;"><span style="width:9px;height:9px;border-radius:50%;background:#6ec88c;"></span>Netteté OK (gate)</div>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Progression · 12 / 15 poses</div>
+            <div style="height:7px;border-radius:4px;background:#ececea;overflow:hidden;"><div style="height:100%;width:80%;background:#3b82f6;border-radius:4px;"></div></div>
+          </div>
+          <div style="border-top:1px solid #ececea;padding-top:11px;display:flex;flex-direction:column;gap:6px;">
+            <sc-for list="{{ intrinsicMetrics }}" as="m" hint-placeholder-count="4"><div style="display:flex;justify-content:space-between;font-family:ui-monospace,monospace;font-size:11.5px;"><span style="color:#94948e;">{{ m.k }}</span><span style="color:#2b2b29;">{{ m.v }}</span></div></sc-for>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;"><sc-for list="{{ notesIntrinsic }}" as="n" hint-placeholder-count="3"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for></div>
+
+  <!-- ============ SCREEN 05 — EXTRINSIC ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;"><div style="font-family:ui-monospace,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">05</span> · EXTRINSICS — capture synchronisée + matrice de co-visibilité</div></div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;"><span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span><span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span><span style="color:#c0c0ba;">◔ ⚙ ◍</span></div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railExtrinsic }}" as="r" hint-placeholder-count="7"><div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};"><span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span><span>{{ r.label }}</span></div></sc-for>
+        </div>
+        <div style="margin-top:10px;height:34px;border:1px solid #e0e0dc;background:#f4f4f1;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#a8a8a2;">Run Validation</div>
+      </div>
+      <div style="flex:1;padding:18px;min-width:0;display:grid;grid-template-columns:1fr 280px;gap:16px;">
+        <div style="min-width:0;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;"><div style="font-size:11px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.05em;">Vues synchronisées · quorum ≥ 2</div><div style="font-family:ui-monospace,monospace;font-size:11px;color:#6ec88c;">● SYNC · Δt &lt; 1/fps</div></div>
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <sc-for list="{{ syncTiles }}" as="t" hint-placeholder-count="4">
+              <div style="aspect-ratio:4/3;border-radius:7px;background:repeating-linear-gradient(45deg,#26262a,#26262a 10px,#2d2d31 10px,#2d2d31 20px);position:relative;">
+                <svg viewBox="0 0 200 150" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;"><polygon points="80,60 120,55 128,100 75,105" fill="rgba(110,200,140,.1)" stroke="#6ec88c" stroke-width="1.5"></polygon></svg>
+                <span style="position:absolute;bottom:6px;left:6px;font-family:ui-monospace,monospace;font-size:9.5px;color:#cfcfca;background:rgba(0,0,0,.4);padding:1px 5px;border-radius:3px;">{{ t }}</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;gap:9px;margin-top:12px;">
+            <div style="flex:1;height:42px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#3b82f6;font-weight:600;">▶ Démarrer la capture sync</div>
+            <div style="width:150px;height:42px;border:1px solid #e0e0dc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#8a8a83;">Calculer (init + BA)</div>
+          </div>
+        </div>
+        <!-- co-visibility matrix -->
+        <div>
+          <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;margin-bottom:9px;">Matrice de co-visibilité</div>
+          <div style="display:grid;grid-template-columns:auto repeat(4,1fr);gap:3px;">
+            <div></div>
+            <sc-for list="{{ camLabels }}" as="l" hint-placeholder-count="4"><div style="text-align:center;font-family:ui-monospace,monospace;font-size:9.5px;color:#94948e;">{{ l }}</div></sc-for>
+            <sc-for list="{{ covRows }}" as="row" hint-placeholder-count="4">
+              <div style="display:contents;">
+                <div style="font-family:ui-monospace,monospace;font-size:9.5px;color:#94948e;display:flex;align-items:center;justify-content:flex-end;padding-right:5px;">{{ row.label }}</div>
+                <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="4"><div style="aspect-ratio:1;border-radius:4px;background:{{ c.bg }};display:flex;align-items:center;justify-content:center;font-family:ui-monospace,monospace;font-size:9px;color:{{ c.fg }};">{{ c.v }}</div></sc-for>
+              </div>
+            </sc-for>
+          </div>
+          <div style="display:flex;align-items:center;gap:7px;margin-top:10px;font-size:10.5px;color:#94948e;"><span>faible</span><div style="flex:1;height:7px;border-radius:4px;background:linear-gradient(90deg,#f3dada,#e8c89a,#9bbf9b);"></div><span>fort</span></div>
+          <div style="margin-top:12px;font-size:11.5px;color:#52524c;border-top:1px solid #ececea;padding-top:10px;">Ancre = <span style="font-family:ui-monospace,monospace;">cam_0</span>. Une paire sous le plancher = lien faible (garde-fou).</div>
+          <div style="margin-top:10px;"><div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;margin-bottom:4px;">Couverture du volume partagé</div><div style="height:7px;border-radius:4px;background:#ececea;overflow:hidden;"><div style="height:100%;width:64%;background:#9bbf9b;"></div></div></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;"><sc-for list="{{ notesExtrinsic }}" as="n" hint-placeholder-count="3"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for></div>
+
+  <!-- ============ SCREEN 06 — REVIEW 3D ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;"><div style="font-family:ui-monospace,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">06</span> · REVIEW 3D — frustums, scrub, origine, réorientation, minimisation d'erreur</div></div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;"><span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span><span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span><span style="color:#c0c0ba;">◔ ⚙ ◍</span></div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railReview }}" as="r" hint-placeholder-count="7"><div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};"><span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span><span>{{ r.label }}</span></div></sc-for>
+        </div>
+        <div style="margin-top:10px;height:34px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#3b82f6;font-weight:600;">Run Validation</div>
+      </div>
+      <div style="flex:1;padding:18px;min-width:0;display:grid;grid-template-columns:1fr 250px;gap:16px;">
+        <div style="min-width:0;display:flex;flex-direction:column;">
+          <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+            <div style="display:flex;gap:6px;"><div style="padding:6px 11px;border:1px solid #e0e0dc;border-radius:6px;font-size:11.5px;color:#8a8a83;">Top</div><div style="padding:6px 11px;border:1px solid #e0e0dc;border-radius:6px;font-size:11.5px;color:#8a8a83;">Side</div><div style="padding:6px 11px;border:1px solid #e0e0dc;border-radius:6px;font-size:11.5px;color:#8a8a83;">Front</div></div>
+            <div style="padding:6px 11px;border:1px solid #e0e0dc;border-radius:6px;font-size:11.5px;color:#8a8a83;">↺ Reset View</div>
+          </div>
+          <div style="flex:1;border-radius:9px;background:#16161a;position:relative;overflow:hidden;min-height:330px;background-image:linear-gradient(#26262c 1px,transparent 1px),linear-gradient(90deg,#26262c 1px,transparent 1px);background-size:34px 34px;">
+            <div style="position:absolute;top:10px;left:10px;right:10px;background:#3a2424;border:1px solid #6b3a3a;border-radius:7px;padding:8px 11px;font-size:11px;color:#e8a0a0;">⚠ Optimization limit — cam_3 deviation &gt; 0.25px. Recommandé : refaire l'extrinsèque avec plus de prises.</div>
+            <svg viewBox="0 0 500 340" style="position:absolute;inset:0;width:100%;height:100%;">
+              <polygon points="120,150 160,130 165,200 118,215" fill="none" stroke="#7aa7d8" stroke-width="1.5"></polygon>
+              <polygon points="330,140 375,128 380,205 328,210" fill="none" stroke="#7aa7d8" stroke-width="1.5"></polygon>
+              <polygon points="220,200 260,185 268,250 215,258" fill="none" stroke="#7aa7d8" stroke-width="1.5"></polygon>
+              <text x="118" y="230" fill="#8aa4c4" font-size="9" font-family="monospace">cam_1_rear</text>
+              <text x="328" y="223" fill="#8aa4c4" font-size="9" font-family="monospace">cam_2_left</text>
+            </svg>
+            <div style="position:absolute;bottom:10px;left:10px;display:flex;align-items:center;gap:8px;font-size:11px;color:#9a9a96;"><span style="width:30px;height:16px;border-radius:9px;background:#2d6cdf;position:relative;"><span style="position:absolute;right:2px;top:2px;width:12px;height:12px;border-radius:50%;background:#fff;"></span></span> Show reprojection lines</div>
+          </div>
+          <div style="display:flex;align-items:center;gap:10px;margin-top:11px;"><span style="font-size:11px;color:#94948e;font-family:ui-monospace,monospace;">scrub</span><div style="flex:1;height:6px;border-radius:4px;background:#ececea;position:relative;"><div style="position:absolute;left:42%;top:-3px;width:12px;height:12px;border-radius:50%;background:#3b82f6;"></div></div><span style="font-size:11px;color:#94948e;font-family:ui-monospace,monospace;">frame 128/300</span></div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:14px;min-width:0;">
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;">Quality metrics</div>
+            <div style="border:1px solid #ececea;border-radius:8px;padding:11px;margin-top:7px;"><div style="font-size:10.5px;color:#94948e;">Reprojection error</div><div style="font-family:ui-monospace,monospace;font-size:24px;color:#2b2b29;">0.15 <span style="font-size:12px;color:#94948e;">px</span></div></div>
+            <div style="display:flex;gap:8px;margin-top:8px;"><div style="flex:1;border:1px solid #ececea;border-radius:8px;padding:9px;"><div style="font-size:10px;color:#94948e;">Points</div><div style="font-family:ui-monospace,monospace;font-size:14px;">4,281</div></div><div style="flex:1;border:1px solid #ececea;border-radius:8px;padding:9px;"><div style="font-size:10px;color:#94948e;">Mean dist</div><div style="font-family:ui-monospace,monospace;font-size:14px;">2.4m</div></div></div>
+          </div>
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Camera visibility</div>
+            <div style="display:flex;flex-direction:column;gap:5px;">
+              <sc-for list="{{ visRows }}" as="v" hint-placeholder-count="4"><div style="display:flex;align-items:center;justify-content:space-between;font-size:11.5px;"><span style="display:flex;align-items:center;gap:7px;"><span style="width:13px;height:13px;border-radius:3px;border:1px solid #cfd9ea;background:#eef3fb;"></span><span style="font-family:ui-monospace,monospace;">{{ v.name }}</span></span><span style="font-family:ui-monospace,monospace;font-size:10.5px;padding:1px 6px;border-radius:4px;background:{{ v.bg }};color:{{ v.fg }};">{{ v.err }}</span></div></sc-for>
+            </div>
+          </div>
+          <div>
+            <div style="font-size:10.5px;color:#a0a09a;font-family:ui-monospace,monospace;text-transform:uppercase;letter-spacing:.06em;margin-bottom:7px;">Repère 3D</div>
+            <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:5px;"><sc-for list="{{ axisBtns }}" as="a" hint-placeholder-count="6"><div style="padding:7px;border:1px solid #e0e0dc;border-radius:6px;text-align:center;font-family:ui-monospace,monospace;font-size:11.5px;color:#52524c;">{{ a }}</div></sc-for></div>
+            <div style="height:30px;border:1px solid #e0e0dc;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:11.5px;color:#8a8a83;margin-top:6px;">◎ Définir l'origine sur la board</div>
+          </div>
+          <div style="margin-top:auto;display:flex;flex-direction:column;gap:8px;">
+            <div style="height:38px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12.5px;color:#3b82f6;font-weight:600;">⤓ Download Calibration</div>
+            <div style="height:34px;border:1px solid #e0e0dc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8a8a83;">⟲ Minimiser l'erreur (relancer BA)</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 0;flex-wrap:wrap;"><sc-for list="{{ notesReview }}" as="n" hint-placeholder-count="3"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for></div>
+
+  <!-- ============ SCREEN 07 — EXPORT ============ -->
+  <div style="max-width:1200px;margin:46px auto 0;"><div style="font-family:ui-monospace,monospace;font-size:12px;color:#8a8a83;margin-bottom:8px;"><span style="color:#3b82f6;font-weight:700;">07</span> · EXPORT — camera_array.toml (compatible Caliscope) + aniposelib</div></div>
+  <div style="max-width:1200px;margin:0 auto;background:#fff;border:1px solid #d8d8d4;border-radius:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.05);">
+    <div style="height:46px;background:#f4f4f1;border-bottom:1px solid #e4e4e0;display:flex;align-items:center;justify-content:space-between;padding:0 16px;font-size:12px;color:#8a8a85;"><span style="font-weight:700;color:#3b82f6;font-size:14px;">VisionCal <span style="color:#b8b8b2;font-weight:400;">· wireframe</span></span><span style="display:flex;gap:18px;"><span>Dashboard</span><span>Logs</span><span>Settings</span></span><span style="color:#c0c0ba;">◔ ⚙ ◍</span></div>
+    <div style="display:flex;min-height:560px;">
+      <div style="width:210px;flex:none;background:#fafaf8;border-right:1px solid #e8e8e4;padding:14px 12px;display:flex;flex-direction:column;">
+        <div style="padding:4px 8px 14px;"><div style="font-weight:700;font-size:13px;">Calibration Wizard</div><div style="font-size:11px;color:#a8a8a2;">Precision Workflow</div></div>
+        <div style="display:flex;flex-direction:column;gap:3px;flex:1;">
+          <sc-for list="{{ railExport }}" as="r" hint-placeholder-count="7"><div style="display:flex;align-items:center;gap:9px;padding:9px 10px;border-radius:7px;font-size:13px;background:{{ r.bg }};color:{{ r.text }};border-left:2px solid {{ r.bar }};"><span style="width:18px;flex:none;display:flex;align-items:center;justify-content:center;color:{{ r.glyphColor }};font-size:11px;"><sc-if value="{{ r.isLocked }}" hint-placeholder-val="{{ false }}"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><rect x="5" y="11" width="14" height="9" rx="2"></rect><path d="M8 11V8a4 4 0 0 1 8 0v3"></path></svg></sc-if><sc-if value="{{ r.showGlyph }}" hint-placeholder-val="{{ true }}">{{ r.glyph }}</sc-if></span><span>{{ r.label }}</span></div></sc-for>
+        </div>
+        <div style="margin-top:10px;height:34px;border:1px solid #e0e0dc;background:#f4f4f1;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#a8a8a2;">Run Validation</div>
+      </div>
+      <div style="flex:1;padding:22px;min-width:0;display:grid;grid-template-columns:1fr 280px;gap:18px;">
+        <div style="min-width:0;">
+          <div style="height:22px;width:240px;background:#ececea;border-radius:5px;"></div>
+          <div style="margin-top:14px;border:1px solid #ececea;border-radius:9px;overflow:hidden;">
+            <div style="padding:9px 13px;background:#f7f7f5;font-family:ui-monospace,monospace;font-size:10.5px;color:#a0a09a;text-transform:uppercase;letter-spacing:.05em;">Dossier de session</div>
+            <sc-for list="{{ files }}" as="f" hint-placeholder-count="4"><div style="display:flex;align-items:center;justify-content:space-between;padding:11px 13px;border-top:1px solid #f0f0ee;"><span style="display:flex;align-items:center;gap:9px;font-family:ui-monospace,monospace;font-size:12px;color:#2b2b29;"><span style="color:#94a0b4;">▤</span>{{ f.name }}</span><span style="font-family:ui-monospace,monospace;font-size:10.5px;color:{{ f.tagColor }};background:{{ f.tagBg }};padding:2px 8px;border-radius:5px;">{{ f.tag }}</span></div></sc-for>
+          </div>
+          <div style="margin-top:14px;background:#16161a;border-radius:9px;padding:14px;font-family:ui-monospace,monospace;font-size:11px;color:#9fb3cc;line-height:1.7;overflow:hidden;">
+            <div style="color:#6b7b8c;"># camera_array.toml</div>
+            <div>camera_count = 4</div>
+            <div style="color:#c08a5a;">[cam_0]</div>
+            <div>size = [2048, 1536]</div>
+            <div>matrix = [[fx,0,cx],[0,fy,cy],[0,0,1]]</div>
+            <div>distortions = [k1,k2,p1,p2,k3]</div>
+            <div>rotation = [rx, ry, rz]</div>
+            <div>translation = [tx, ty, tz]</div>
+            <div style="color:#6b9e78;">error = 0.21 · grid_count = 24</div>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:13px;">
+          <div style="border:1px solid #ececea;border-radius:9px;padding:13px;"><div style="font-size:11px;color:#94948e;">Format</div><div style="font-size:13px;font-weight:600;margin-top:3px;">Compatible Caliscope</div><div style="font-size:11.5px;color:#8a8a83;margin-top:5px;">Champs natifs inchangés · extensions purement additives (ignorées sans casse).</div></div>
+          <div style="border:1px solid #ececea;border-radius:9px;padding:13px;"><div style="font-size:11px;color:#94948e;">Emplacement</div><div style="font-family:ui-monospace,monospace;font-size:11.5px;color:#3b82f6;margin-top:4px;">~/calib/CAL-2023-4589/</div></div>
+          <div style="height:40px;border:1px solid #cfd9ea;background:#eef3fb;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:13px;color:#3b82f6;font-weight:600;">⤓ camera_array.toml</div>
+          <div style="height:36px;border:1px solid #e0e0dc;border-radius:8px;display:flex;align-items:center;justify-content:center;font-size:12px;color:#8a8a83;">⤓ aniposelib.toml</div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div style="display:flex;gap:10px;max-width:1200px;margin:10px auto 60px;flex-wrap:wrap;"><sc-for list="{{ notesExport }}" as="n" hint-placeholder-count="2"><div style="flex:1;min-width:240px;background:#fff;border:1px solid #e4e4e0;border-left:3px solid #3b82f6;border-radius:8px;padding:10px 12px;font-size:12px;color:#52524c;">{{ n }}</div></sc-for></div>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script>
+class Component extends DCLogic {
+  buildRail(states) {
+    const defs = [
+      { key: 'session', label: 'Session', num: null },
+      { key: 'cameras', label: 'Camera Setup', num: 1 },
+      { key: 'boards', label: 'Target Config', num: 2 },
+      { key: 'intrinsic', label: 'Intrinsics', num: 3 },
+      { key: 'extrinsic', label: 'Extrinsics', num: 4 },
+      { key: 'review', label: 'Review 3D', num: 5 },
+      { key: 'export', label: 'Export', num: 6 },
+    ];
+    return defs.map(d => {
+      const s = states[d.key] || 'locked';
+      const styleMap = {
+        current: { bg: '#e8effb', text: '#1f2a37', bar: '#3b82f6', glyphColor: '#3b82f6', glyph: '●' },
+        done:    { bg: 'transparent', text: '#52524c', bar: 'transparent', glyphColor: '#6b9e78', glyph: '✓' },
+        todo:    { bg: 'transparent', text: '#6b6b64', bar: 'transparent', glyphColor: '#b0b0aa', glyph: '○' },
+        locked:  { bg: 'transparent', text: '#b0b0aa', bar: 'transparent', glyphColor: '#c4c4be', glyph: '' },
+        home:    { bg: 'transparent', text: '#52524c', bar: 'transparent', glyphColor: '#94948e', glyph: '⌂' },
+      };
+      const st = styleMap[s];
+      return { ...d, ...st, isLocked: s === 'locked', showGlyph: s !== 'locked' };
+    });
+  }
+
+  cov(v) {
+    if (v === '—') return { v: '—', bg: '#f4f4f2', fg: '#c4c4be' };
+    const n = parseInt(v, 10);
+    let bg = '#f3dada', fg = '#a05050';
+    if (n >= 40) { bg = '#9bbf9b'; fg = '#2b4a2b'; }
+    else if (n >= 20) { bg = '#e8c89a'; fg = '#6b4a1a'; }
+    return { v, bg, fg };
+  }
+
+  renderVals() {
+    const R = (s) => this.buildRail(s);
+    return {
+      railEntry: R({ session: 'current', cameras: 'todo', boards: 'locked', intrinsic: 'locked', extrinsic: 'locked', review: 'locked', export: 'locked' }),
+      railCameras: R({ session: 'home', cameras: 'current', boards: 'locked', intrinsic: 'locked', extrinsic: 'locked', review: 'locked', export: 'locked' }),
+      railBoards: R({ session: 'home', cameras: 'done', boards: 'current', intrinsic: 'locked', extrinsic: 'locked', review: 'locked', export: 'locked' }),
+      railIntrinsic: R({ session: 'home', cameras: 'done', boards: 'done', intrinsic: 'current', extrinsic: 'locked', review: 'locked', export: 'locked' }),
+      railExtrinsic: R({ session: 'home', cameras: 'done', boards: 'done', intrinsic: 'done', extrinsic: 'current', review: 'locked', export: 'locked' }),
+      railReview: R({ session: 'home', cameras: 'done', boards: 'done', intrinsic: 'done', extrinsic: 'done', review: 'current', export: 'todo' }),
+      railExport: R({ session: 'home', cameras: 'done', boards: 'done', intrinsic: 'done', extrinsic: 'done', review: 'done', export: 'current' }),
+
+      entryCards: [
+        { icon: '＋', title: 'Nouvelle Calibration', cta: 'LANCER L\u2019ASSISTANT' },
+        { icon: '⤒', title: 'Charger Intrinsèques', cta: 'IMPORTER .toml' },
+        { icon: '☑', title: 'Charger Calibration Complète', cta: 'IMPORTER .zip' },
+      ],
+      sessions: [
+        { id: '#CAL-2023-4589', date: 'Oct 24, 2023 · 14:22', cams: '08', status: 'complet' },
+        { id: '#CAL-2023-4588', date: 'Oct 24, 2023 · 11:05', cams: '04', status: 'échec' },
+        { id: '#CAL-2023-4585', date: 'Oct 23, 2023 · 09:15', cams: '12', status: 'archivé' },
+      ],
+      notesEntry: [
+        '3 entrées = 3 modes de la FSM : new → Caméras · load_intrinsic → saute à Extrinsèque · load_full → ouvre la Revue 3D.',
+        'Reprise : cliquer une session = GET /session → on atterrit sur la step persistée (bascule desktop ↔ tablette).',
+        'Pas de localStorage : l\u2019UI rehydrate l\u2019état depuis le serveur au montage.',
+      ],
+
+      cameraRows: [
+        { idx: '0', name: 'cam_0', anchor: '★ ancre', path: '/dev/v4l/by-path/…usb-0:1.1:1.0', res: '2048×1536 native', out: 'sortie = native', idxBg: '#eef3fb', idxColor: '#3b82f6', idxBorder: '#cfd9ea' },
+        { idx: '1', name: 'cam_1', anchor: '', path: '/dev/v4l/by-path/…usb-0:1.2:1.0', res: '1920×1080 · s=0.5', out: 'sortie → 960×540', idxBg: '#f4f4f1', idxColor: '#6b6b64', idxBorder: '#e0e0dc' },
+        { idx: '2', name: 'cam_2', anchor: '', path: '/dev/v4l/by-path/…usb-0:1.3:1.0', res: '1280×720 native', out: 'sortie = native', idxBg: '#f4f4f1', idxColor: '#6b6b64', idxBorder: '#e0e0dc' },
+        { idx: '3', name: 'cam_3', anchor: '', path: '/dev/v4l/by-path/…usb-0:1.4:1.0', res: '1920×1080 · s=0.5', out: 'sortie → 960×540', idxBg: '#f4f4f1', idxColor: '#6b6b64', idxBorder: '#e0e0dc' },
+      ],
+      camTiles: ['cam_0', 'cam_1', 'cam_2', 'cam_3'],
+      notesCameras: [
+        'Résolution : 2 modes — native OU facteur s. La calibration reste en natif ; s s\u2019applique en post (K_out = s·K). Dimension de sortie affichée en live (paire).',
+        'Réordonner par glisser : index 0 = ancre extrinsèque. Le device_path ne change pas avec l\u2019ordre.',
+        'Changer la résolution d\u2019une caméra calibrée → avertissement + invalide son intrinsèque (cascade).',
+      ],
+
+      boardFields: [
+        { label: 'Dictionnaire', value: 'DICT_5X5_100' },
+        { label: 'Colonnes × Lignes', value: '8 × 5' },
+        { label: 'square_size_mm', value: '40.0' },
+        { label: 'marker_size_mm', value: '30.0' },
+        { label: 'target_size_mm', value: '[297, 210]' },
+        { label: 'Inversé (encre)', value: 'non' },
+      ],
+      notesBoards: [
+        'square_size_mm fixe l\u2019échelle métrique de toute la reconstruction 3D — une valeur fausse fausse toutes les distances.',
+        'Board intrinsèque et extrinsèque peuvent différer (plate/proche pour l\u2019intr., plus grande pour couvrir le volume).',
+        'PNG rendu au bon DPI : imprimer à 100% puis mesurer un carré pour valider l\u2019échelle physique.',
+      ],
+
+      gauges: [
+        { label: 'Couverture capteur', val: '78%', pct: '78%' },
+        { label: 'Diversité d\u2019orientation', val: '55%', pct: '55%' },
+        { label: 'Périphérie / coins', val: '61%', pct: '61%' },
+      ],
+      intrinsicMetrics: [
+        { k: 'Reproj error', v: '0.12 px' },
+        { k: 'Focal length', v: '824.12' },
+        { k: 'Center X', v: '1021.4' },
+        { k: 'Center Y', v: '768.9' },
+      ],
+      notesIntrinsic: [
+        'Burn-in gravé côté serveur : couleur du polygone = fill_fraction (proxy distance, rouge→vert). Alignement pixel garanti.',
+        'Jauges cumulées : couverture (pondérée périphérie), diversité d\u2019orientation, voyant netteté qui sert de gate (rejet du flou).',
+        'Boucle cam par cam ; l\u2019étape n\u2019est complète que lorsque TOUTES les caméras sont intrinsic_done.',
+      ],
+
+      syncTiles: ['cam_0 · ★', 'cam_1', 'cam_2', 'cam_3'],
+      camLabels: ['c0', 'c1', 'c2', 'c3'],
+      covRows: [
+        { label: 'c0', cells: [this.cov('—'), this.cov('41'), this.cov('28'), this.cov('12')] },
+        { label: 'c1', cells: [this.cov('41'), this.cov('—'), this.cov('46'), this.cov('33')] },
+        { label: 'c2', cells: [this.cov('28'), this.cov('46'), this.cov('—'), this.cov('39')] },
+        { label: 'c3', cells: [this.cov('12'), this.cov('33'), this.cov('39'), this.cov('—')] },
+      ],
+      notesExtrinsic: [
+        'Matrice de co-visibilité (façon Caliscope) : nb de frames synchronisées où chaque paire voit la board ensemble. Cellule rouge = lien faible.',
+        'Capture synchronisée par FrameSynchronizer (Δt < 1/fps, quorum ≥ 2). Init pairwise depuis l\u2019ancre cam_0 puis bundle adjustment.',
+        'Garde-fou : si l\u2019ancre est faiblement connectée (ligne c0 pâle), proposer de réorganiser ou un fallback caméra centrale.',
+      ],
+
+      visRows: [
+        { name: 'cam_0_rear', err: '0.08px', bg: '#e8f3ec', fg: '#2f7a4f' },
+        { name: 'cam_1_left', err: '0.12px', bg: '#e8f3ec', fg: '#2f7a4f' },
+        { name: 'cam_2_right', err: '0.26px', bg: '#fbeaea', fg: '#a84a4a' },
+        { name: 'cam_3_top', err: '0.14px', bg: '#e8f3ec', fg: '#2f7a4f' },
+      ],
+      axisBtns: ['+x', '−x', '+y', '−y', '+z', '−z'],
+      notesReview: [
+        'Vue R3F/drei : frustums caméras nommés, scrub image par image du déplacement de la board, sélection de l\u2019origine du repère.',
+        'Réorientation ±x ±y ±z (façon Caliscope) ; visualiser la reprojection et « minimiser l\u2019erreur » = relancer le BA.',
+        'Contrôles tactiles (pinch/rotate) pour pilotage tablette. Un per-cam au-dessus du seuil est signalé en rouge.',
+      ],
+
+      files: [
+        { name: 'camera_array.toml', tag: 'écrit', tagColor: '#2f7a4f', tagBg: '#e8f3ec' },
+        { name: 'camera_array_aniposelib.toml', tag: 'écrit', tagColor: '#2f7a4f', tagBg: '#e8f3ec' },
+        { name: 'config.toml', tag: 'board', tagColor: '#6b6b64', tagBg: '#f0f0ee' },
+        { name: 'session.toml', tag: 'FSM', tagColor: '#6b6b64', tagBg: '#f0f0ee' },
+      ],
+      notesExport: [
+        'Format compatible Caliscope / aniposelib / Pose2Sim. size fait partie de l\u2019intrinsèque (résolution gravée).',
+        'Écrit dans le dossier de session (source de vérité) ou téléchargeable. Rechargeable plus tard pour reprendre.',
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

@@ -1,0 +1,131 @@
+"""Read/write the session folder on disk (ADR-0016).
+
+Layout (per session):
+    <sessions_dir>/<session_id>/
+    ├── session.toml      # this state (atomic write)
+    ├── intrinsic/
+    └── extrinsic/
+
+``session.toml`` is written atomically (temp file + ``os.replace``); a transition
+is persisted before it is considered acquired (ADR-0011).
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from collections.abc import Mapping
+from pathlib import Path
+from typing import Any
+
+import rtoml
+
+from calibration_service.models.session import (
+    CalibrationSession,
+    CameraConfig,
+    CameraStatus,
+    SessionMode,
+    WizardStep,
+)
+
+logger = logging.getLogger(__name__)
+
+SESSION_FILE = "session.toml"
+_INTRINSIC_DIR = "intrinsic"
+_EXTRINSIC_DIR = "extrinsic"
+
+
+def session_dir(sessions_dir: Path, session_id: str) -> Path:
+    return sessions_dir / session_id
+
+
+def create_session(
+    sessions_dir: Path, session_id: str, mode: SessionMode = SessionMode.NEW
+) -> CalibrationSession:
+    """Create the session folder structure and persist a fresh session."""
+    target = session_dir(sessions_dir, session_id)
+    (target / _INTRINSIC_DIR).mkdir(parents=True, exist_ok=True)
+    (target / _EXTRINSIC_DIR).mkdir(parents=True, exist_ok=True)
+    session = CalibrationSession(session_id=session_id, mode=mode)
+    save_session(sessions_dir, session)
+    return session
+
+
+def save_session(sessions_dir: Path, session: CalibrationSession) -> None:
+    """Persist ``session.toml`` atomically (temp file + rename)."""
+    target = session_dir(sessions_dir, session.session_id)
+    target.mkdir(parents=True, exist_ok=True)
+    tmp = target / (SESSION_FILE + ".tmp")
+    tmp.write_text(rtoml.dumps(_to_dict(session)))
+    os.replace(tmp, target / SESSION_FILE)
+
+
+def load_session(sessions_dir: Path, session_id: str) -> CalibrationSession:
+    """Read ``session.toml`` back into a ``CalibrationSession``."""
+    path = session_dir(sessions_dir, session_id) / SESSION_FILE
+    return _from_dict(rtoml.loads(path.read_text()))
+
+
+def list_sessions(sessions_dir: Path) -> list[str]:
+    """List session ids (folders containing a ``session.toml``)."""
+    if not sessions_dir.is_dir():
+        return []
+    return sorted(
+        p.name for p in sessions_dir.iterdir() if (p / SESSION_FILE).is_file()
+    )
+
+
+def session_mtime(sessions_dir: Path, session_id: str) -> float:
+    """Last-modified time of ``session.toml`` (epoch seconds)."""
+    return (session_dir(sessions_dir, session_id) / SESSION_FILE).stat().st_mtime
+
+
+def _to_dict(session: CalibrationSession) -> dict[str, object]:
+    return {
+        "session_id": session.session_id,
+        "step": session.step.value,
+        "mode": session.mode.value,
+        "intrinsic_fps": session.intrinsic_fps,
+        "optimization_strategy": session.optimization_strategy,
+        "cameras": [
+            {
+                "index": c.index,
+                "name": c.name,
+                "prefix": c.prefix,
+                "device_path": c.device_path,
+                "device_node": c.device_node,
+                "width": c.width,
+                "height": c.height,
+                "resize_factor": c.resize_factor,
+                "fps": c.fps,
+                "status": c.status.value,
+            }
+            for c in session.cameras
+        ],
+    }
+
+
+def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
+    cameras = [
+        CameraConfig(
+            index=int(c["index"]),
+            name=str(c["name"]),
+            prefix=str(c["prefix"]),
+            device_path=str(c["device_path"]),
+            device_node=str(c["device_node"]),
+            width=int(c["width"]),
+            height=int(c["height"]),
+            resize_factor=float(c["resize_factor"]),
+            fps=int(c["fps"]),
+            status=CameraStatus(c["status"]),
+        )
+        for c in data.get("cameras", [])
+    ]
+    return CalibrationSession(
+        session_id=str(data["session_id"]),
+        step=WizardStep(data["step"]),
+        mode=SessionMode(data["mode"]),
+        cameras=cameras,
+        intrinsic_fps=int(data["intrinsic_fps"]),
+        optimization_strategy=str(data["optimization_strategy"]),
+    )

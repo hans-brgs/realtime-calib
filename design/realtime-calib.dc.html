@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Manrope:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; background: #09090b; }
+  ::-webkit-scrollbar { width: 10px; height: 10px; }
+  ::-webkit-scrollbar-thumb { background: #26262e; border-radius: 6px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  @keyframes pulseDot { 0%,100% { opacity: 1; } 50% { opacity: .35; } }
+  @keyframes spin { to { transform: rotate(360deg); } }
+</style>
+</helmet>
+<div style="height:100vh;display:flex;flex-direction:column;background:#09090b;color:#ececf0;font-family:'Manrope',-apple-system,BlinkMacSystemFont,sans-serif;font-size:14px;overflow:hidden;">
+
+  <!-- TOPBAR -->
+  <div style="height:54px;flex:none;background:#0d0d10;border-bottom:1px solid #1c1c22;display:flex;align-items:center;justify-content:space-between;padding:0 18px;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <img src="assets/logo.png" alt="realtime-calib" style="height:22px;width:auto;opacity:.95;" />
+      <span style="font-family:'Sora',sans-serif;font-weight:600;font-size:15.5px;letter-spacing:-.01em;">realtime<span style="color:#a78bfa;">-</span>calib</span>
+    </div>
+    <div style="display:flex;gap:26px;font-size:13.5px;color:#7a7a85;">
+      <span style="color:#ececf0;position:relative;">Dashboard<span style="position:absolute;left:0;right:0;bottom:-18px;height:2px;background:#a78bfa;border-radius:2px;"></span></span>
+      <span>Logs</span>
+      <span>Settings</span>
+    </div>
+    <div style="width:120px;"></div>
+  </div>
+
+  <!-- BODY -->
+  <div style="flex:1;display:flex;min-height:0;">
+
+    <!-- SIDEBAR -->
+    <div style="width:{{ sidebarWidth }};flex:none;background:#0c0c0f;border-right:1px solid #1c1c22;display:flex;flex-direction:column;transition:width .18s ease;overflow:hidden;">
+      <!-- header -->
+      <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;padding:16px 14px 14px;">
+        <div style="display:{{ labelDisplay }};min-width:0;">
+          <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:13.5px;white-space:nowrap;">Calibration Wizard</div>
+          <div style="font-size:11px;color:#6a6a74;white-space:nowrap;">Precision Workflow</div>
+        </div>
+        <button onClick="{{ toggleCollapse }}" title="Collapse" style="flex:none;width:30px;height:30px;border-radius:8px;border:1px solid #26262e;background:#15151a;color:#9a9aa5;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .18s;transform:rotate({{ chevronRot }});">‹</button>
+      </div>
+
+      <!-- nav -->
+      <div style="display:flex;flex-direction:column;gap:3px;padding:6px 10px;flex:1;overflow-y:auto;">
+        <!-- Session -->
+        <button onClick="{{ nSession.onClick }}" title="Session" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nSession.bg }};color:{{ nSession.textColor }};border-left:2px solid {{ nSession.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nSession.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 11l9-8 9 8"></path><path d="M5 9.5V21h14V9.5"></path></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Session</span>
+          <span style="display:{{ labelDisplay }};color:{{ nSession.glyphColor }};font-size:11px;">{{ nSession.glyph }}</span>
+        </button>
+        <!-- Camera Setup -->
+        <button onClick="{{ nCameras.onClick }}" title="Camera Setup" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nCameras.bg }};color:{{ nCameras.textColor }};border-left:2px solid {{ nCameras.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nCameras.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M3 8.5A1.5 1.5 0 0 1 4.5 7h2L8 5h8l1.5 2h2A1.5 1.5 0 0 1 21 8.5v9A1.5 1.5 0 0 1 19.5 19h-15A1.5 1.5 0 0 1 3 17.5z"></path><circle cx="12" cy="13" r="3.2"></circle></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Camera Setup</span>
+          <span style="display:{{ labelDisplay }};color:{{ nCameras.glyphColor }};font-size:11px;">{{ nCameras.glyph }}</span>
+        </button>
+        <!-- Target Config -->
+        <button onClick="{{ nBoards.onClick }}" title="Target Config" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nBoards.bg }};color:{{ nBoards.textColor }};border-left:2px solid {{ nBoards.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nBoards.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="3" y="3" width="7" height="7" rx="1"></rect><rect x="14" y="3" width="7" height="7" rx="1"></rect><rect x="3" y="14" width="7" height="7" rx="1"></rect><rect x="14" y="14" width="7" height="7" rx="1"></rect></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Target Config</span>
+          <span style="display:{{ labelDisplay }};color:{{ nBoards.glyphColor }};font-size:11px;">{{ nBoards.glyph }}</span>
+        </button>
+        <!-- Intrinsics -->
+        <button onClick="{{ nIntrinsic.onClick }}" title="Intrinsics" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nIntrinsic.bg }};color:{{ nIntrinsic.textColor }};border-left:2px solid {{ nIntrinsic.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nIntrinsic.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="12" cy="12" r="9"></circle><path d="M12 3v6M21 12h-6M12 21v-6M3 12h6"></path></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Intrinsics</span>
+          <span style="display:{{ labelDisplay }};color:{{ nIntrinsic.glyphColor }};font-size:11px;">{{ nIntrinsic.glyph }}</span>
+        </button>
+        <!-- Extrinsics -->
+        <button onClick="{{ nExtrinsic.onClick }}" title="Extrinsics" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nExtrinsic.bg }};color:{{ nExtrinsic.textColor }};border-left:2px solid {{ nExtrinsic.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nExtrinsic.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><circle cx="6" cy="6" r="2.5"></circle><circle cx="18" cy="7" r="2.5"></circle><circle cx="12" cy="18" r="2.5"></circle><path d="M8 7.5l3 8M16 9l-3 7"></path></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Extrinsics</span>
+          <span style="display:{{ labelDisplay }};color:{{ nExtrinsic.glyphColor }};font-size:11px;">{{ nExtrinsic.glyph }}</span>
+        </button>
+        <!-- Review 3D -->
+        <button onClick="{{ nReview.onClick }}" title="Review 3D" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nReview.bg }};color:{{ nReview.textColor }};border-left:2px solid {{ nReview.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nReview.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 2.5l8.5 4.8v9.4L12 21.5 3.5 16.7V7.3z"></path><path d="M12 2.5v19M3.5 7.3L12 12l8.5-4.7"></path></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Review 3D</span>
+          <span style="display:{{ labelDisplay }};color:{{ nReview.glyphColor }};font-size:11px;">{{ nReview.glyph }}</span>
+        </button>
+        <!-- Export -->
+        <button onClick="{{ nExport.onClick }}" title="Export" style="display:flex;align-items:center;gap:11px;justify-content:{{ navJustify }};padding:10px 11px;border-radius:9px;border:none;cursor:pointer;font-family:inherit;font-size:13.5px;background:{{ nExport.bg }};color:{{ nExport.textColor }};border-left:2px solid {{ nExport.bar }};min-height:42px;text-align:left;">
+          <span style="flex:none;display:flex;color:{{ nExport.iconColor }};"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg></span>
+          <span style="display:{{ labelDisplay }};flex:1;white-space:nowrap;">Export</span>
+          <span style="display:{{ labelDisplay }};color:{{ nExport.glyphColor }};font-size:11px;">{{ nExport.glyph }}</span>
+        </button>
+      </div>
+
+      <!-- footer -->
+      <div style="padding:12px 12px 14px;border-top:1px solid #16161b;display:flex;flex-direction:column;gap:8px;">
+        <button title="Run Validation" style="display:flex;align-items:center;justify-content:center;gap:8px;min-height:40px;border-radius:9px;border:1px solid #2c2640;background:linear-gradient(180deg,rgba(167,139,250,.16),rgba(139,92,246,.1));color:#c4b5fd;cursor:pointer;font-family:inherit;font-size:13px;font-weight:600;">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6L9 17l-5-5"></path></svg>
+          <span style="display:{{ labelDisplay }};white-space:nowrap;">Run Validation</span>
+        </button>
+        <div style="display:{{ labelDisplay }};font-size:11.5px;color:#5a5a64;padding-left:4px;white-space:nowrap;">⊙ Help &nbsp;·&nbsp; ▤ Docs</div>
+      </div>
+    </div>
+
+    <!-- MAIN -->
+    <div style="flex:1;min-width:0;overflow-y:auto;background:#09090b;">
+
+      <!-- ===== DASHBOARD ===== -->
+      <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
+        <div style="padding:30px 34px;max-width:1180px;">
+          <h1 style="font-family:'Sora',sans-serif;font-size:27px;font-weight:600;letter-spacing:-.02em;margin:0;">Welcome to the calibration bench</h1>
+          <p style="color:#9a9aa5;margin:9px 0 0;max-width:600px;font-size:14.5px;">Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow to begin — or resume a recent session.</p>
+
+          <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-top:26px;">
+            <sc-for list="{{ entryCards }}" as="c" hint-placeholder-count="3">
+              <div style="border:1px solid #232329;border-radius:14px;padding:20px;background:linear-gradient(180deg,#131317,#0f0f12);display:flex;flex-direction:column;min-height:208px;cursor:pointer;transition:border-color .15s;" style-hover="border-color:#3a3550;">
+                <div style="width:46px;height:46px;border-radius:11px;background:{{ c.iconBg }};border:1px solid {{ c.iconBorder }};display:flex;align-items:center;justify-content:center;color:{{ c.iconColor }};">{{ c.icon }}</div>
+                <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:16px;margin-top:16px;">{{ c.title }}</div>
+                <div style="color:#8a8a95;font-size:13px;margin-top:8px;line-height:1.55;">{{ c.desc }}</div>
+                <div style="margin-top:auto;padding-top:16px;display:flex;align-items:center;gap:6px;font-family:'Sora',sans-serif;font-size:12px;font-weight:600;letter-spacing:.02em;color:{{ c.ctaColor }};">{{ c.cta }} →</div>
+              </div>
+            </sc-for>
+          </div>
+
+          <div style="display:flex;justify-content:space-between;align-items:baseline;margin-top:34px;">
+            <h2 style="font-family:'Sora',sans-serif;font-size:16px;font-weight:600;margin:0;">Recent sessions</h2>
+            <span style="font-size:12px;color:#a78bfa;cursor:pointer;font-weight:600;">VIEW ALL</span>
+          </div>
+          <div style="margin-top:14px;border:1px solid #1f1f25;border-radius:13px;overflow:hidden;background:#0f0f12;">
+            <div style="display:grid;grid-template-columns:1.5fr 1.6fr .8fr 1fr .5fr;gap:12px;padding:11px 18px;background:#121216;font-size:10.5px;letter-spacing:.08em;color:#6a6a74;text-transform:uppercase;font-weight:600;">
+              <span>Session ID</span><span>Date</span><span>Cameras</span><span>Status</span><span style="text-align:right;">Open</span>
+            </div>
+            <sc-for list="{{ sessions }}" as="s" hint-placeholder-count="3">
+              <div style="display:grid;grid-template-columns:1.5fr 1.6fr .8fr 1fr .5fr;gap:12px;padding:15px 18px;border-top:1px solid #18181d;align-items:center;font-size:13px;cursor:pointer;">
+                <span style="font-family:'Manrope';font-variant-numeric:tabular-nums;color:#a78bfa;font-weight:600;">{{ s.id }}</span>
+                <span style="color:#9a9aa5;font-variant-numeric:tabular-nums;">{{ s.date }}</span>
+                <span style="font-variant-numeric:tabular-nums;">{{ s.cams }}</span>
+                <span><span style="display:inline-flex;align-items:center;gap:6px;font-size:11.5px;padding:3px 10px 3px 8px;border-radius:20px;background:{{ s.bg }};color:{{ s.fg }};"><span style="width:6px;height:6px;border-radius:50%;background:{{ s.dot }};"></span>{{ s.status }}</span></span>
+                <span style="text-align:right;color:#5a5a64;">⤢</span>
+              </div>
+            </sc-for>
+          </div>
+          <div style="margin-top:18px;font-family:'Manrope';font-size:11.5px;color:#4a4a54;letter-spacing:.04em;">ENGINE STATUS: <span style="color:#34d399;">OPTIMIZED</span> · CPU-ONLY · LIVEKIT CONNECTED</div>
+        </div>
+      </sc-if>
+
+      <!-- ===== CAMERA SETUP ===== -->
+      <sc-if value="{{ isCameras }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:26px 30px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;">
+            <div>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Camera Setup</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Detect USB cameras, set the shared capture format, and order the indices. <span style="color:#c4b5fd;">Index 0 is the extrinsic anchor.</span></p>
+            </div>
+            <div style="display:flex;gap:9px;align-items:center;">
+              <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">prefix <span style="font-family:'Manrope';color:#ececf0;font-weight:600;">cam</span></div>
+              <button style="display:flex;align-items:center;gap:8px;height:38px;padding:0 15px;border-radius:9px;border:1px solid #2c2640;background:linear-gradient(180deg,rgba(167,139,250,.18),rgba(139,92,246,.1));color:#c4b5fd;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg> Re-detect</button>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 348px;gap:24px;margin-top:22px;align-items:start;">
+
+            <!-- LEFT: preview (primary) -->
+            <div style="min-width:0;">
+              <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">Preview · map physical ↔ index</div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+                <sc-for list="{{ camTiles }}" as="t" hint-placeholder-count="4">
+                  <div style="aspect-ratio:16/10;border-radius:12px;border:1px solid #1f1f25;background:repeating-linear-gradient(45deg,#16161a,#16161a 11px,#1b1b20 11px,#1b1b20 22px);position:relative;display:flex;align-items:flex-end;padding:11px;">
+                    <span style="font-family:'Manrope';font-size:11px;color:#cfcfd6;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">{{ t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <button style="width:100%;margin-top:12px;height:44px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12z"></path></svg> Flash to identify</button>
+            </div>
+
+            <!-- RIGHT: settings column -->
+            <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
+
+              <!-- capture configuration -->
+              <div style="border:1px solid #232329;border-radius:14px;background:#101014;padding:16px;">
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:14px;">Capture configuration <span style="color:#5a5a64;text-transform:none;letter-spacing:0;">· all cameras</span></div>
+                <div style="display:flex;flex-direction:column;gap:13px;">
+                  <div>
+                    <div style="font-size:11px;color:#8a8a95;margin-bottom:6px;">Resolution <span style="color:#5a5a64;">· V4L2 native modes</span></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">1920×1080 <span style="color:#5a5a64;">▾</span></div>
+                  </div>
+                  <div>
+                    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;"><span style="font-size:11px;color:#8a8a95;">Resize factor <span style="color:#5a5a64;">· s</span></span><span style="font-family:'Manrope';font-size:11px;color:#a78bfa;font-variant-numeric:tabular-nums;">output → 960×540</span></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">s = 0.5 <span style="color:#5a5a64;">▾</span></div>
+                  </div>
+                  <div>
+                    <div style="font-size:11px;color:#8a8a95;margin-bottom:6px;">Capture FPS</div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">30 fps <span style="color:#5a5a64;">▾</span></div>
+                    <div style="font-size:10.5px;color:#6a6a74;margin-top:6px;line-height:1.5;">Top value = slowest sensor (<span style="color:#fbbf24;">cam_2 @ 30 fps</span>), stepping down by 5.</div>
+                  </div>
+                </div>
+                <div style="margin-top:13px;padding-top:13px;border-top:1px solid #1c1c22;font-size:10.5px;color:#6a6a74;display:flex;gap:7px;line-height:1.5;"><span style="color:#a78bfa;flex:none;">ⓘ</span><span>Calibrated in native; factor applies on export (<span style="font-family:'Manrope';color:#9a9aa5;">K_out = s·K</span>). Changing resolution invalidates all intrinsics (cascade).</span></div>
+              </div>
+
+              <!-- reorder cameras (simplified) -->
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:10px;">Reorder cameras <span style="color:#5a5a64;text-transform:none;letter-spacing:0;">· drag · index 0 = anchor</span></div>
+                <div style="display:flex;flex-direction:column;gap:8px;">
+                  <sc-for list="{{ cameraRows }}" as="c" hint-placeholder-count="4">
+                    <div style="border:1px solid #232329;border-radius:11px;padding:10px 12px;background:#101014;display:flex;align-items:center;gap:10px;">
+                      <span style="color:#4a4a54;cursor:grab;font-size:15px;line-height:1;">⠿</span>
+                      <span style="width:26px;height:26px;flex:none;border-radius:7px;background:{{ c.idxBg }};color:{{ c.idxColor }};display:flex;align-items:center;justify-content:center;font-family:'Sora';font-size:12.5px;font-weight:600;border:1px solid {{ c.idxBorder }};">{{ c.idx }}</span>
+                      <div style="flex:1;min-width:0;">
+                        <div style="display:flex;align-items:center;gap:7px;"><span style="font-family:'Manrope';font-weight:600;font-size:13px;">{{ c.name }}</span><span style="font-size:10px;color:{{ c.anchorColor }};white-space:nowrap;">{{ c.anchor }}</span></div>
+                        <div style="font-family:'Manrope';font-size:10px;color:#6a6a74;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;margin-top:1px;">{{ c.path }}</div>
+                      </div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== INTRINSICS ===== -->
+      <sc-if value="{{ isIntrinsic }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:16px;">
+            <div>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Intrinsics</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Calibrate each camera one at a time — capture varied, sharp board views until coverage is full.</p>
+            </div>
+            <div style="display:flex;align-items:center;gap:8px;height:36px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">strategy <span style="color:#c4b5fd;font-weight:600;">coverage-aware</span> <span style="color:#5a5a64;">▾</span></div>
+          </div>
+
+          <!-- camera tabs -->
+          <div style="display:flex;gap:7px;margin-bottom:14px;flex-wrap:wrap;">
+            <sc-for list="{{ intrinsicTabs }}" as="t" hint-placeholder-count="4">
+              <div style="padding:7px 15px;border-radius:8px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};font-family:'Manrope';font-size:12.5px;font-weight:600;cursor:pointer;">{{ t.name }}</div>
+            </sc-for>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:18px;align-items:start;">
+            <!-- feed -->
+            <div style="min-width:0;">
+              <div style="position:relative;border-radius:13px;overflow:hidden;border:1px solid #1f1f25;background:#0d0d10;width:100%;aspect-ratio:4/3;max-height:64vh;">
+                <div style="position:absolute;inset:0;background:repeating-linear-gradient(45deg,#141418,#141418 12px,#191920 12px,#191920 24px);"></div>
+                <div style="position:absolute;top:11px;left:12px;right:12px;display:flex;justify-content:space-between;font-family:'Manrope';font-size:10.5px;color:#cfcfd6;">
+                  <span style="background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">● FEED LIVE · cam_0</span>
+                  <span style="background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;font-variant-numeric:tabular-nums;">59 FPS · 2048×1536 · 12 ms</span>
+                </div>
+                <svg viewBox="0 0 400 300" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;">
+                  <polygon points="150,118 252,108 268,205 138,214" fill="rgba(52,211,153,.1)" stroke="#34d399" stroke-width="2"></polygon>
+                  <circle cx="150" cy="118" r="3.5" fill="#34d399"></circle><circle cx="252" cy="108" r="3.5" fill="#34d399"></circle><circle cx="268" cy="205" r="3.5" fill="#34d399"></circle><circle cx="138" cy="214" r="3.5" fill="#34d399"></circle>
+                </svg>
+                <div style="position:absolute;bottom:11px;left:12px;display:flex;gap:7px;">
+                  <span style="font-family:'Manrope';font-size:10.5px;color:#9ce8c0;background:rgba(0,0,0,.55);padding:3px 8px;border-radius:6px;">burn-in · server</span>
+                  <span style="font-family:'Manrope';font-size:10.5px;color:#34d399;background:rgba(52,211,153,.14);padding:3px 8px;border-radius:6px;">fill 62% · good distance</span>
+                </div>
+              </div>
+              <!-- controls -->
+              <div style="display:flex;gap:10px;margin-top:13px;">
+                <button style="flex:1;min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"></circle><circle cx="12" cy="12" r="3.5" fill="currentColor"></circle></svg> Capture pose</button>
+                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">↺ Reset</button>
+                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">Compute · next →</button>
+              </div>
+            </div>
+
+            <!-- metrics panel -->
+            <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:10px;">Coverage gauges</div>
+                <div style="display:flex;flex-direction:column;gap:11px;">
+                  <sc-for list="{{ gauges }}" as="g" hint-placeholder-count="3">
+                    <div>
+                      <div style="display:flex;justify-content:space-between;font-size:12px;color:#bcbcc6;margin-bottom:5px;"><span>{{ g.label }}</span><span style="font-family:'Manrope';color:{{ g.color }};font-weight:600;font-variant-numeric:tabular-nums;">{{ g.val }}</span></div>
+                      <div style="height:8px;border-radius:5px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ g.pct }};background:{{ g.color }};border-radius:5px;"></div></div>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;gap:9px;font-size:12px;color:#bcbcc6;margin-top:1px;"><span style="width:9px;height:9px;border-radius:50%;background:#34d399;box-shadow:0 0 8px #34d399;"></span>Sharpness OK <span style="color:#6a6a74;">· gate passes</span></div>
+                </div>
+              </div>
+
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:10px;">Calibration progress</div>
+                <div style="display:flex;flex-direction:column;gap:9px;">
+                  <sc-for list="{{ intrinsicProgress }}" as="p" hint-placeholder-count="4">
+                    <div style="opacity:{{ p.fade }};">
+                      <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:11.5px;margin-bottom:4px;"><span style="color:#bcbcc6;">{{ p.name }}</span><span style="color:#8a8a95;font-variant-numeric:tabular-nums;">{{ p.label }} poses</span></div>
+                      <div style="height:6px;border-radius:4px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ p.pct }};background:{{ p.color }};border-radius:4px;"></div></div>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div style="border-top:1px solid #1c1c22;padding-top:14px;display:flex;flex-direction:column;gap:8px;">
+                <sc-for list="{{ intrinsicMetrics }}" as="m" hint-placeholder-count="4">
+                  <div style="display:flex;justify-content:space-between;font-family:'Manrope';font-size:12.5px;font-variant-numeric:tabular-nums;"><span style="color:#7a7a85;">{{ m.k }}</span><span style="color:#ececf0;font-weight:600;">{{ m.v }}</span></div>
+                </sc-for>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== REVIEW 3D ===== -->
+      <sc-if value="{{ isReview }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px;display:flex;flex-direction:column;height:100%;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:14px;">
+            <div>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Review 3D</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Inspect camera frustums, set the origin, reorient the frame, and minimize reprojection error.</p>
+            </div>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 286px;gap:18px;flex:1;min-height:0;">
+            <!-- viewport -->
+            <div style="display:flex;flex-direction:column;min-width:0;">
+              <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
+                <div style="display:flex;gap:6px;">
+                  <div style="padding:7px 13px;border-radius:8px;border:1px solid rgba(167,139,250,.3);background:rgba(167,139,250,.12);font-size:12px;color:#c4b5fd;cursor:pointer;">Top</div>
+                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">Side</div>
+                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">Front</div>
+                </div>
+                <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">↺ Reset view</div>
+              </div>
+              <div style="flex:1;border-radius:13px;border:1px solid #1f1f25;position:relative;overflow:hidden;min-height:340px;background-color:#0b0b0e;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:36px 36px;">
+                <div style="position:absolute;top:12px;left:12px;right:12px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:9px;padding:9px 12px;font-size:11.5px;color:#f0a0a0;display:flex;gap:9px;"><span>⚠</span><span><strong style="color:#f87171;">Optimization limit</strong> — cam_2 deviation exceeds 0.25px. Re-run Extrinsics with more shared views, or minimize below.</span></div>
+                <svg viewBox="0 0 520 360" style="position:absolute;inset:0;width:100%;height:100%;">
+                  <polygon points="130,160 178,138 184,212 126,226" fill="rgba(139,159,232,.06)" stroke="#8b9fe8" stroke-width="1.6"></polygon>
+                  <line x1="152" y1="186" x2="270" y2="250" stroke="#3a3a48" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <polygon points="350,150 398,134 404,214 346,222" fill="rgba(139,159,232,.06)" stroke="#8b9fe8" stroke-width="1.6"></polygon>
+                  <line x1="372" y1="184" x2="270" y2="250" stroke="#3a3a48" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <polygon points="232,96 286,88 292,150 228,156" fill="rgba(248,113,113,.06)" stroke="#f87171" stroke-width="1.6"></polygon>
+                  <line x1="258" y1="124" x2="270" y2="250" stroke="#3a3a48" stroke-width="1" stroke-dasharray="3 3"></line>
+                  <g stroke="#a78bfa" stroke-width="1.4" fill="rgba(167,139,250,.12)"><polygon points="248,238 296,228 304,266 252,276"></polygon></g>
+                  <text x="120" y="244" fill="#8a8aa0" font-size="10" font-family="Manrope">cam_1_left</text>
+                  <text x="346" y="240" fill="#8a8aa0" font-size="10" font-family="Manrope">cam_3_top</text>
+                  <text x="226" y="80" fill="#d09090" font-size="10" font-family="Manrope">cam_2_right ⚠</text>
+                  <text x="250" y="294" fill="#b6a6e8" font-size="9.5" font-family="Manrope">board · origin</text>
+                </svg>
+                <div style="position:absolute;bottom:12px;left:12px;display:flex;align-items:center;gap:9px;font-size:11.5px;color:#9a9aa5;">
+                  <span style="width:34px;height:18px;border-radius:10px;background:#8b5cf6;position:relative;display:inline-block;"><span style="position:absolute;right:2px;top:2px;width:14px;height:14px;border-radius:50%;background:#fff;"></span></span> Show reprojection lines
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:11px;margin-top:12px;">
+                <span style="font-family:'Manrope';font-size:11px;color:#7a7a85;">scrub</span>
+                <div style="flex:1;height:6px;border-radius:4px;background:#1c1c22;position:relative;"><div style="position:absolute;left:0;width:42%;height:100%;background:#8b5cf6;border-radius:4px;"></div><div style="position:absolute;left:42%;top:-4px;width:14px;height:14px;border-radius:50%;background:#c4b5fd;border:2px solid #0b0b0e;"></div></div>
+                <span style="font-family:'Manrope';font-size:11px;color:#7a7a85;font-variant-numeric:tabular-nums;">frame 128 / 300</span>
+              </div>
+            </div>
+
+            <!-- right panel -->
+            <div style="display:flex;flex-direction:column;gap:16px;min-width:0;overflow-y:auto;">
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Quality metrics</div>
+                <div style="border:1px solid #232329;border-radius:11px;padding:13px 14px;background:#101014;">
+                  <div style="font-size:11px;color:#7a7a85;">Reprojection error</div>
+                  <div style="font-family:'Sora';font-size:28px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;">0.15 <span style="font-size:13px;color:#7a7a85;font-weight:400;">px</span></div>
+                </div>
+                <div style="display:flex;gap:9px;margin-top:9px;">
+                  <div style="flex:1;border:1px solid #232329;border-radius:11px;padding:11px 12px;background:#101014;"><div style="font-size:10.5px;color:#7a7a85;">Points</div><div style="font-family:'Sora';font-size:16px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;">4,281</div></div>
+                  <div style="flex:1;border:1px solid #232329;border-radius:11px;padding:11px 12px;background:#101014;"><div style="font-size:10.5px;color:#7a7a85;">Mean dist</div><div style="font-family:'Sora';font-size:16px;font-weight:600;margin-top:2px;font-variant-numeric:tabular-nums;">2.4 m</div></div>
+                </div>
+              </div>
+
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Camera visibility</div>
+                <div style="display:flex;flex-direction:column;gap:6px;">
+                  <sc-for list="{{ visRows }}" as="v" hint-placeholder-count="4">
+                    <div style="display:flex;align-items:center;justify-content:space-between;font-size:12.5px;">
+                      <span style="display:flex;align-items:center;gap:9px;"><span style="width:15px;height:15px;border-radius:4px;border:1px solid rgba(167,139,250,.4);background:rgba(167,139,250,.18);display:flex;align-items:center;justify-content:center;color:#c4b5fd;font-size:10px;">✓</span><span style="font-family:'Manrope';color:#cfcfd6;">{{ v.name }}</span></span>
+                      <span style="font-family:'Manrope';font-size:11px;padding:2px 8px;border-radius:5px;background:{{ v.bg }};color:{{ v.fg }};font-variant-numeric:tabular-nums;">{{ v.err }}</span>
+                    </div>
+                  </sc-for>
+                </div>
+              </div>
+
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Coordinate frame</div>
+                <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
+                  <sc-for list="{{ axisBtns }}" as="a" hint-placeholder-count="6">
+                    <div style="padding:9px;border:1px solid #2a2a32;border-radius:8px;text-align:center;font-family:'Manrope';font-size:12.5px;color:#bcbcc6;background:#15151a;cursor:pointer;min-height:40px;display:flex;align-items:center;justify-content:center;">{{ a }}</div>
+                  </sc-for>
+                </div>
+                <button style="width:100%;margin-top:7px;min-height:40px;border:1px solid #2a2a32;border-radius:8px;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">◎ Set origin on board</button>
+              </div>
+
+              <div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding-top:6px;">
+                <button style="min-height:44px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> Download calibration</button>
+                <button style="min-height:40px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">⟲ Minimize error (re-run BA)</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== TARGET CONFIG ===== -->
+      <sc-if value="{{ isBoards }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px;">
+          <div style="margin-bottom:16px;">
+            <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Target Config</h1>
+            <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Define the calibration board. <span style="color:#c4b5fd;">Square size sets the metric scale</span> of the whole 3D reconstruction.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 340px;gap:24px;align-items:start;">
+            <!-- LEFT: board preview -->
+            <div style="min-width:0;">
+              <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">Board preview · printed to scale</div>
+              <div style="border:1px solid #232329;border-radius:13px;padding:22px;background:#0e0e12;display:flex;align-items:center;justify-content:center;">
+                <div style="width:100%;max-width:520px;aspect-ratio:297/210;border-radius:4px;background:repeating-conic-gradient(#e9e9ec 0% 25%, #18181c 0% 50%) 50%/12.5% 17.6%;border:1px solid #2a2a32;"></div>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:13px;">
+                <button style="flex:1;min-height:44px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> Download PNG (real scale)</button>
+              </div>
+              <div style="margin-top:12px;border:1px solid rgba(251,191,36,.22);background:rgba(251,191,36,.05);border-radius:10px;padding:11px 12px;font-size:12px;color:#d9b86a;display:flex;gap:9px;"><span>⚠</span><span>Print at 100% / actual size, then <strong>measure a printed square</strong> to confirm the physical scale. Board must be perfectly flat.</span></div>
+            </div>
+
+            <!-- RIGHT: board settings -->
+            <div style="display:flex;flex-direction:column;gap:16px;min-width:0;">
+              <div style="display:flex;gap:7px;">
+                <sc-for list="{{ boardTabs }}" as="t" hint-placeholder-count="2">
+                  <div style="flex:1;text-align:center;padding:8px;border-radius:9px;border:1px solid {{ t.border }};background:{{ t.bg }};color:{{ t.color }};font-size:12px;font-weight:600;cursor:pointer;">{{ t.name }}</div>
+                </sc-for>
+              </div>
+              <div style="border:1px solid #232329;border-radius:14px;background:#101014;padding:16px;">
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:13px;">Board type</div>
+                <div style="display:flex;gap:8px;margin-bottom:15px;">
+                  <div style="flex:1;text-align:center;padding:9px;border-radius:8px;border:1px solid rgba(167,139,250,.35);background:rgba(167,139,250,.14);color:#c4b5fd;font-size:12.5px;font-weight:600;cursor:pointer;">ChArUco</div>
+                  <div style="flex:1;text-align:center;padding:9px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-size:12.5px;cursor:pointer;">ArUco</div>
+                </div>
+                <div style="display:flex;flex-direction:column;gap:11px;">
+                  <sc-for list="{{ boardFields }}" as="f" hint-placeholder-count="5">
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
+                      <span style="font-size:12.5px;color:#9a9aa5;">{{ f.label }}</span>
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:34px;min-width:148px;padding:0 12px;border:1px solid #2a2a32;border-radius:8px;background:#16161b;font-family:'Manrope';font-size:12px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">{{ f.value }} <span style="color:#5a5a64;">▾</span></div>
+                    </div>
+                  </sc-for>
+                  <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:3px;">
+                    <span style="font-size:12.5px;color:#9a9aa5;">Inverted (ink saving)</span>
+                    <span style="width:42px;height:23px;border-radius:12px;background:#2a2a32;position:relative;cursor:pointer;"><span style="position:absolute;left:2px;top:2px;width:19px;height:19px;border-radius:50%;background:#6a6a74;"></span></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== EXTRINSICS ===== -->
+      <sc-if value="{{ isExtrinsic }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px;">
+          <div style="margin-bottom:16px;">
+            <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Extrinsics</h1>
+            <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Move the board through the shared volume. Synchronized views feed pairwise init from the anchor, then bundle adjustment.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start;">
+            <!-- LEFT: synchronized feeds -->
+            <div style="min-width:0;">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:11px;">
+                <span style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;">Synchronized views · quorum ≥ 2</span>
+                <span style="font-family:'Manrope';font-size:11px;color:#34d399;display:flex;align-items:center;gap:6px;"><span style="width:7px;height:7px;border-radius:50%;background:#34d399;box-shadow:0 0 7px #34d399;"></span>SYNC · Δt &lt; 1/fps</span>
+              </div>
+              <div style="display:grid;grid-template-columns:1fr 1fr;gap:11px;">
+                <sc-for list="{{ syncTiles }}" as="t" hint-placeholder-count="4">
+                  <div style="aspect-ratio:16/10;border-radius:11px;border:1px solid #1f1f25;background:repeating-linear-gradient(45deg,#141418,#141418 11px,#191920 11px,#191920 22px);position:relative;">
+                    <svg viewBox="0 0 200 125" preserveAspectRatio="none" style="position:absolute;inset:0;width:100%;height:100%;"><polygon points="78,50 118,45 126,86 74,90" fill="rgba(52,211,153,.1)" stroke="#34d399" stroke-width="1.5"></polygon></svg>
+                    <span style="position:absolute;bottom:8px;left:8px;font-family:'Manrope';font-size:10px;color:#cfcfd6;background:rgba(0,0,0,.5);padding:2px 7px;border-radius:5px;">{{ t }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="display:flex;gap:10px;margin-top:13px;">
+                <button style="flex:1;min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg> Start synchronized capture</button>
+                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">Compute · init + BA</button>
+              </div>
+            </div>
+
+            <!-- RIGHT: co-visibility -->
+            <div style="display:flex;flex-direction:column;gap:18px;min-width:0;">
+              <div>
+                <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">Co-visibility matrix</div>
+                <div style="display:grid;grid-template-columns:auto repeat(4,1fr);gap:4px;">
+                  <div></div>
+                  <sc-for list="{{ camLabels }}" as="l" hint-placeholder-count="4"><div style="text-align:center;font-family:'Manrope';font-size:10px;color:#7a7a85;padding-bottom:2px;">{{ l }}</div></sc-for>
+                  <sc-for list="{{ covRows }}" as="row" hint-placeholder-count="4">
+                    <div style="display:contents;">
+                      <div style="font-family:'Manrope';font-size:10px;color:#7a7a85;display:flex;align-items:center;justify-content:flex-end;padding-right:6px;">{{ row.label }}</div>
+                      <sc-for list="{{ row.cells }}" as="c" hint-placeholder-count="4"><div style="aspect-ratio:1;border-radius:5px;background:{{ c.bg }};display:flex;align-items:center;justify-content:center;font-family:'Manrope';font-size:10px;color:{{ c.fg }};font-variant-numeric:tabular-nums;">{{ c.v }}</div></sc-for>
+                    </div>
+                  </sc-for>
+                </div>
+                <div style="display:flex;align-items:center;gap:8px;margin-top:11px;font-size:10.5px;color:#7a7a85;"><span>weak</span><div style="flex:1;height:7px;border-radius:4px;background:linear-gradient(90deg,rgba(248,113,113,.5),rgba(251,191,36,.5),rgba(52,211,153,.6));"></div><span>strong</span></div>
+              </div>
+              <div style="border-top:1px solid #1c1c22;padding-top:15px;">
+                <div style="font-size:12.5px;color:#bcbcc6;display:flex;align-items:flex-start;gap:8px;"><span style="color:#c4b5fd;">★</span><span>Anchor = <span style="font-family:'Manrope';color:#ececf0;">cam_0</span>. A pair below the floor (red) is a weak graph link — reorder or use a central fallback.</span></div>
+              </div>
+              <div>
+                <div style="display:flex;justify-content:space-between;font-size:11.5px;color:#9a9aa5;margin-bottom:6px;"><span>Shared volume coverage</span><span style="font-family:'Manrope';color:#34d399;font-weight:600;">64%</span></div>
+                <div style="height:8px;border-radius:5px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:64%;background:#34d399;border-radius:5px;"></div></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== EXPORT ===== -->
+      <sc-if value="{{ isExport }}" hint-placeholder-val="{{ false }}">
+        <div style="padding:22px 26px;">
+          <div style="margin-bottom:16px;">
+            <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Export</h1>
+            <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Calibration written to the session folder — Caliscope-compatible, reloadable to resume later.</p>
+          </div>
+
+          <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start;">
+            <!-- LEFT: files + toml -->
+            <div style="min-width:0;">
+              <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">Session folder</div>
+              <div style="border:1px solid #232329;border-radius:13px;overflow:hidden;background:#0f0f12;">
+                <sc-for list="{{ exportFiles }}" as="f" hint-placeholder-count="4">
+                  <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid #18181d;">
+                    <span style="display:flex;align-items:center;gap:10px;font-family:'Manrope';font-size:13px;color:#ececf0;"><span style="color:#7a7a85;">▤</span>{{ f.name }}</span>
+                    <span style="font-family:'Manrope';font-size:10.5px;color:{{ f.tagColor }};background:{{ f.tagBg }};padding:2px 9px;border-radius:6px;">{{ f.tag }}</span>
+                  </div>
+                </sc-for>
+              </div>
+              <div style="margin-top:14px;background:#0c0c0f;border:1px solid #1f1f25;border-radius:13px;padding:16px;font-family:'Manrope';font-size:11.5px;line-height:1.8;color:#9fb3cc;font-variant-numeric:tabular-nums;overflow-x:auto;">
+                <div style="color:#5a6b7c;"># camera_array.toml</div>
+                <div><span style="color:#7a8a9c;">camera_count</span> = 4</div>
+                <div><span style="color:#7a8a9c;">camera_prefix</span> = "cam"</div>
+                <div style="color:#c4b5fd;margin-top:6px;">[cam_0]</div>
+                <div><span style="color:#7a8a9c;">size</span> = [1920, 1080]</div>
+                <div><span style="color:#7a8a9c;">matrix</span> = [[fx,0,cx],[0,fy,cy],[0,0,1]]</div>
+                <div><span style="color:#7a8a9c;">distortions</span> = [k1,k2,p1,p2,k3]</div>
+                <div><span style="color:#7a8a9c;">rotation</span> = [rx, ry, rz]</div>
+                <div><span style="color:#7a8a9c;">translation</span> = [tx, ty, tz]</div>
+                <div style="color:#7fe8b4;"><span style="color:#7a8a9c;">error</span> = 0.21 · <span style="color:#7a8a9c;">grid_count</span> = 24</div>
+              </div>
+            </div>
+
+            <!-- RIGHT: format + downloads -->
+            <div style="display:flex;flex-direction:column;gap:14px;min-width:0;">
+              <div style="border:1px solid #232329;border-radius:13px;padding:14px;background:#101014;">
+                <div style="font-size:11px;color:#7a7a85;">Format</div>
+                <div style="font-family:'Sora';font-size:14px;font-weight:600;margin-top:3px;">Caliscope-compatible</div>
+                <div style="font-size:12px;color:#8a8a95;margin-top:6px;line-height:1.55;">Native fields unchanged; extensions are purely additive (ignored without breaking).</div>
+              </div>
+              <div style="border:1px solid #232329;border-radius:13px;padding:14px;background:#101014;">
+                <div style="font-size:11px;color:#7a7a85;">Location</div>
+                <div style="font-family:'Manrope';font-size:12px;color:#c4b5fd;margin-top:4px;word-break:break-all;">~/calib/CAL-2026-4589/</div>
+              </div>
+              <button style="min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> camera_array.toml</button>
+              <button style="min-height:42px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">⤓ aniposelib.toml</button>
+            </div>
+          </div>
+        </div>
+      </sc-if>
+
+      <!-- ===== PLACEHOLDER SCREENS (built next passes) ===== -->
+      <sc-if value="{{ isPlaceholder }}" hint-placeholder-val="{{ false }}">
+        <div style="height:100%;display:flex;align-items:center;justify-content:center;padding:60px;">
+          <div style="text-align:center;max-width:420px;">
+            <div style="width:54px;height:54px;border-radius:14px;border:1px solid #2a2a32;background:#131317;display:flex;align-items:center;justify-content:center;margin:0 auto;color:#a78bfa;">{{ placeholderIcon }}</div>
+            <h2 style="font-family:'Sora',sans-serif;font-size:18px;font-weight:600;margin:18px 0 6px;">{{ placeholderTitle }}</h2>
+            <p style="color:#7a7a85;font-size:13.5px;margin:0;">High-fidelity screen coming in the next pass. Navigation, layout and the collapsible rail are already wired.</p>
+          </div>
+        </div>
+      </sc-if>
+
+    </div>
+  </div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:860}}">
+class Component extends DCLogic {
+  state = { collapsed: false, screen: 'dashboard' };
+
+  // canonical loaded session: steps 1-5 done, export still to write
+  progress() {
+    return { session: 'home', cameras: 'done', boards: 'done', intrinsic: 'done', extrinsic: 'done', review: 'done', export: 'todo' };
+  }
+
+  navItem(key) {
+    const active = this.state.screen === key;
+    const st = this.progress()[key];
+    const glyphMap = {
+      done: { glyph: '✓', glyphColor: '#34d399' },
+      current: { glyph: '●', glyphColor: '#a78bfa' },
+      todo: { glyph: '○', glyphColor: '#6a6a74' },
+      locked: { glyph: '', glyphColor: '#4a4a54' },
+      home: { glyph: '', glyphColor: '#6a6a74' },
+    };
+    const g = glyphMap[st] || glyphMap.todo;
+    return {
+      onClick: () => this.setState({ screen: key }),
+      bg: active ? 'rgba(167,139,250,.12)' : 'transparent',
+      bar: active ? '#a78bfa' : 'transparent',
+      textColor: active ? '#ececf0' : '#9a9aa5',
+      iconColor: active ? '#c4b5fd' : '#7a7a85',
+      glyph: g.glyph,
+      glyphColor: g.glyphColor,
+    };
+  }
+
+  cov(v) {
+    if (v === '—') return { v: '—', bg: '#0e0e12', fg: '#3a3a44' };
+    const n = parseInt(v, 10);
+    let bg = 'rgba(248,113,113,.18)', fg = '#f0a0a0';
+    if (n >= 40) { bg = 'rgba(52,211,153,.22)'; fg = '#7fe8b4'; }
+    else if (n >= 20) { bg = 'rgba(251,191,36,.18)'; fg = '#e8c478'; }
+    return { v, bg, fg };
+  }
+
+  renderVals() {
+    const collapsed = this.state.collapsed;
+    const screen = this.state.screen;
+    const placeholders = {};
+    const ph = placeholders[screen];
+
+    return {
+      sidebarWidth: collapsed ? '70px' : '236px',
+      labelDisplay: collapsed ? 'none' : 'block',
+      navJustify: collapsed ? 'center' : 'flex-start',
+      chevronRot: collapsed ? '180deg' : '0deg',
+      toggleCollapse: () => this.setState({ collapsed: !this.state.collapsed }),
+
+      nSession: this.navItem('session'),
+      nCameras: this.navItem('cameras'),
+      nBoards: this.navItem('boards'),
+      nIntrinsic: this.navItem('intrinsic'),
+      nExtrinsic: this.navItem('extrinsic'),
+      nReview: this.navItem('review'),
+      nExport: this.navItem('export'),
+
+      isDashboard: screen === 'session' || screen === 'dashboard',
+      isCameras: screen === 'cameras',
+      isIntrinsic: screen === 'intrinsic',
+      isReview: screen === 'review',
+      isBoards: screen === 'boards',
+      isExtrinsic: screen === 'extrinsic',
+      isExport: screen === 'export',
+      isPlaceholder: !!ph,
+      placeholderTitle: ph ? ph.title : '',
+      placeholderIcon: ph ? ph.icon : '',
+
+      entryCards: [
+        { icon: '＋', title: 'New Calibration', desc: 'Run the full intrinsic + extrinsic workflow from scratch.', cta: 'START WIZARD', ctaColor: '#a78bfa', iconBg: 'rgba(167,139,250,.12)', iconBorder: 'rgba(167,139,250,.3)', iconColor: '#c4b5fd' },
+        { icon: '⤒', title: 'Load Intrinsics', desc: 'Reuse existing optics to skip straight to spatial alignment.', cta: 'IMPORT .toml', ctaColor: '#9a9aa5', iconBg: '#1a1a20', iconBorder: '#2a2a32', iconColor: '#9a9aa5' },
+        { icon: '☑', title: 'Load Full Calibration', desc: 'Import a complete calibration to inspect metrics and the 3D model.', cta: 'IMPORT .zip', ctaColor: '#9a9aa5', iconBg: '#1a1a20', iconBorder: '#2a2a32', iconColor: '#9a9aa5' },
+      ],
+      sessions: [
+        { id: '#CAL-2026-4589', date: 'Jun 30, 2026 · 14:22', cams: '08', status: 'complete', bg: 'rgba(52,211,153,.1)', fg: '#34d399', dot: '#34d399' },
+        { id: '#CAL-2026-4588', date: 'Jun 30, 2026 · 11:05', cams: '04', status: 'failed', bg: 'rgba(248,113,113,.1)', fg: '#f87171', dot: '#f87171' },
+        { id: '#CAL-2026-4585', date: 'Jun 29, 2026 · 09:15', cams: '12', status: 'archived', bg: '#1a1a20', fg: '#9a9aa5', dot: '#6a6a74' },
+      ],
+
+      cameraRows: [
+        { idx: '0', name: 'cam_0', anchor: '★ anchor', anchorColor: '#c4b5fd', path: '/dev/v4l/by-path/…usb-0:1.1:1.0', fps: '60 fps', fpsColor: '#ececf0', support: '✓ supports 1920×1080', supportColor: '#34d399', idxBg: 'rgba(167,139,250,.14)', idxColor: '#c4b5fd', idxBorder: 'rgba(167,139,250,.35)' },
+        { idx: '1', name: 'cam_1', anchor: '', anchorColor: '#6a6a74', path: '/dev/v4l/by-path/…usb-0:1.2:1.0', fps: '60 fps', fpsColor: '#ececf0', support: '✓ supports 1920×1080', supportColor: '#34d399', idxBg: '#1a1a20', idxColor: '#9a9aa5', idxBorder: '#2a2a32' },
+        { idx: '2', name: 'cam_2', anchor: '', anchorColor: '#6a6a74', path: '/dev/v4l/by-path/…usb-0:1.3:1.0', fps: '30 fps', fpsColor: '#fbbf24', support: 'caps the capture rate', supportColor: '#9a7a3a', idxBg: '#1a1a20', idxColor: '#9a9aa5', idxBorder: '#2a2a32' },
+        { idx: '3', name: 'cam_3', anchor: '', anchorColor: '#6a6a74', path: '/dev/v4l/by-path/…usb-0:1.4:1.0', fps: '60 fps', fpsColor: '#ececf0', support: '✓ supports 1920×1080', supportColor: '#34d399', idxBg: '#1a1a20', idxColor: '#9a9aa5', idxBorder: '#2a2a32' },
+      ],
+      camTiles: ['cam_0 · anchor', 'cam_1', 'cam_2', 'cam_3'],
+
+      intrinsicTabs: [
+        { name: 'cam_0', bg: 'rgba(167,139,250,.14)', border: 'rgba(167,139,250,.35)', color: '#c4b5fd' },
+        { name: 'cam_1', bg: '#16161b', border: '#2a2a32', color: '#9a9aa5' },
+        { name: 'cam_2', bg: '#16161b', border: '#2a2a32', color: '#9a9aa5' },
+        { name: 'cam_3', bg: '#16161b', border: '#2a2a32', color: '#9a9aa5' },
+      ],
+      gauges: [
+        { label: 'Sensor coverage', val: '78%', pct: '78%', color: '#34d399' },
+        { label: 'Orientation diversity', val: '55%', pct: '55%', color: '#fbbf24' },
+        { label: 'Periphery / corners', val: '61%', pct: '61%', color: '#34d399' },
+      ],
+      intrinsicProgress: [
+        { name: 'cam_0', pct: '80%', label: '12 / 15', color: '#a78bfa', fade: '1' },
+        { name: 'cam_1', pct: '0%', label: '0 / 15', color: '#34d399', fade: '.5' },
+        { name: 'cam_2', pct: '0%', label: '0 / 15', color: '#34d399', fade: '.5' },
+        { name: 'cam_3', pct: '0%', label: '0 / 15', color: '#34d399', fade: '.5' },
+      ],
+      intrinsicMetrics: [
+        { k: 'Reproj error', v: '0.12 px' },
+        { k: 'Focal length', v: '824.12' },
+        { k: 'Center X', v: '1021.4' },
+        { k: 'Center Y', v: '768.9' },
+      ],
+
+      visRows: [
+        { name: 'cam_0_rear', err: '0.08px', bg: 'rgba(52,211,153,.12)', fg: '#34d399' },
+        { name: 'cam_1_left', err: '0.12px', bg: 'rgba(52,211,153,.12)', fg: '#34d399' },
+        { name: 'cam_2_right', err: '0.26px', bg: 'rgba(248,113,113,.12)', fg: '#f87171' },
+        { name: 'cam_3_top', err: '0.14px', bg: 'rgba(52,211,153,.12)', fg: '#34d399' },
+      ],
+      axisBtns: ['+x', '−x', '+y', '−y', '+z', '−z'],
+
+      boardTabs: [
+        { name: 'Intrinsic board', bg: 'rgba(167,139,250,.14)', border: 'rgba(167,139,250,.35)', color: '#c4b5fd' },
+        { name: 'Extrinsic board', bg: '#15151a', border: '#2a2a32', color: '#9a9aa5' },
+      ],
+      boardFields: [
+        { label: 'Dictionary', value: 'DICT_5X5_100' },
+        { label: 'Columns × Rows', value: '8 × 5' },
+        { label: 'Square size', value: '40.0 mm', accent: true },
+        { label: 'Marker size', value: '30.0 mm' },
+        { label: 'Print target size', value: '297 × 210 mm' },
+      ],
+
+      syncTiles: ['cam_0 · anchor', 'cam_1', 'cam_2', 'cam_3'],
+      camLabels: ['c0', 'c1', 'c2', 'c3'],
+      covRows: [
+        { label: 'c0', cells: [this.cov('—'), this.cov('41'), this.cov('28'), this.cov('12')] },
+        { label: 'c1', cells: [this.cov('41'), this.cov('—'), this.cov('46'), this.cov('33')] },
+        { label: 'c2', cells: [this.cov('28'), this.cov('46'), this.cov('—'), this.cov('39')] },
+        { label: 'c3', cells: [this.cov('12'), this.cov('33'), this.cov('39'), this.cov('—')] },
+      ],
+
+      exportFiles: [
+        { name: 'camera_array.toml', tag: 'written', tagColor: '#34d399', tagBg: 'rgba(52,211,153,.12)' },
+        { name: 'camera_array_aniposelib.toml', tag: 'written', tagColor: '#34d399', tagBg: 'rgba(52,211,153,.12)' },
+        { name: 'config.toml', tag: 'board', tagColor: '#9a9aa5', tagBg: '#1a1a20' },
+        { name: 'session.toml', tag: 'FSM state', tagColor: '#9a9aa5', tagBg: '#1a1a20' },
+      ],
+    };
+  }
+}
+</script>
+</body>
+</html>

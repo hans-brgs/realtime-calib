@@ -8,6 +8,7 @@ crashing the loop. Stamps each frame with a host-monotonic timestamp.
 from __future__ import annotations
 
 import logging
+import subprocess
 import time
 from types import TracebackType
 from typing import cast
@@ -18,6 +19,28 @@ from calibration_service.capture.source import VideoSource
 from calibration_service.models.frame import Frame
 
 logger = logging.getLogger(__name__)
+
+# V4L2 controls applied BEFORE opening (samvision pattern): auto-exposure on, and
+# lock the fps. exposure_dynamic_framerate=0 is required even though firmware
+# defaults to 0 — the device initialises to 1, which sacrifices fps for exposure
+# in low light and corrupts frames on slower (USB 2.0) links.
+_V4L2_EXPOSURE_CTRLS = ("auto_exposure=3", "exposure_dynamic_framerate=0")
+# Small capture buffer: avoids stale/corrupt accumulated frames without underrun.
+_CAPTURE_BUFFER_SIZE = 2
+
+
+def _configure_v4l2_exposure(device_node: str) -> None:
+    """Apply the V4L2 exposure controls before opening the device (best-effort)."""
+    for ctrl in _V4L2_EXPOSURE_CTRLS:
+        try:
+            subprocess.run(
+                ["v4l2-ctl", "--device", device_node, f"--set-ctrl={ctrl}"],
+                capture_output=True,
+                timeout=5,
+                check=False,
+            )
+        except (OSError, subprocess.SubprocessError):
+            logger.warning("v4l2-ctl --set-ctrl=%s failed for %s", ctrl, device_node)
 
 
 class CameraError(Exception):
@@ -99,6 +122,9 @@ def open_camera(
     precision matters). Resolution/fps are hints; the driver may pick the
     nearest supported mode.
     """
+    # Exposure/fps controls must be applied before opening (samvision pattern).
+    _configure_v4l2_exposure(device_node)
+
     source = cv2.VideoCapture(device_node, cv2.CAP_V4L2)
     if not source.isOpened():
         source.release()
@@ -113,6 +139,7 @@ def open_camera(
         source.set(cv2.CAP_PROP_FRAME_HEIGHT, height)
     if fps is not None:
         source.set(cv2.CAP_PROP_FPS, fps)
+    source.set(cv2.CAP_PROP_BUFFERSIZE, _CAPTURE_BUFFER_SIZE)
 
     # cv2.VideoCapture satisfies VideoSource at runtime; its overloaded, stubbed
     # read() signature does not match structurally, so cast at this boundary.

@@ -1,10 +1,14 @@
 import { configureStore } from '@reduxjs/toolkit';
 
+import camerasReducer from '@/features/cameras/camerasSlice';
 import connectionReducer from '@/features/connection/connectionSlice';
+import sessionReducer from '@/features/session/sessionSlice';
 
 export const store = configureStore({
   reducer: {
     connection: connectionReducer,
+    session: sessionReducer,
+    cameras: camerasReducer,
   },
 });
 

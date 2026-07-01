@@ -35,7 +35,8 @@ async def _run() -> None:
     token = mint_publish_token(config, identity=f"service-{track_name}", room=config.room_name)
     publisher = LiveKitPublisher()
     await publisher.connect(config.url, token)
-    await publisher.publish_camera_track(track_name, target.width, target.height)
+    await publisher.publish_camera_track(track_name, target.width, target.height, fps=30)
+    publisher.unmute(track_name)
 
     loop = asyncio.get_running_loop()
     deadline = loop.time() + PUBLISH_SECONDS
@@ -45,7 +46,7 @@ async def _run() -> None:
             frame = await loop.run_in_executor(None, camera.read)
             if frame is None:
                 continue
-            publisher.push(frame.image)
+            publisher.push(track_name, frame.image)
             pushed += 1
             await asyncio.sleep(0)  # yield to the event loop
     logger.info("pushed %d frames; closing", pushed)
