@@ -5,6 +5,7 @@ import {
   commonFps,
   commonResolutions,
   defaultCapture,
+  offeredFps,
   outputDimensions,
 } from '@/features/cameras/captureOptions';
 import type { DetectedCamera } from '@/transport/types';
@@ -45,6 +46,27 @@ describe('captureOptions', () => {
       cam(1, [[1920, 1080, [30]]]), // slower sensor
     ];
     expect(commonFps(cameras, 1920, 1080)).toEqual([30]);
+  });
+
+  it('offers the 60/30/15 ladder capped at the native max, even when only 60 is native', () => {
+    // Camera advertises only 60 fps natively; the service paces 30/15 in software.
+    const cameras = [cam(0, [[1920, 1080, [60]]])];
+    expect(offeredFps(cameras, 1920, 1080)).toEqual([60, 30, 15]);
+  });
+
+  it('caps the ladder at the native max (no rate above what the sensor delivers)', () => {
+    const cameras = [cam(0, [[1920, 1080, [30]]])];
+    expect(offeredFps(cameras, 1920, 1080)).toEqual([30, 15]);
+  });
+
+  it('falls back to the native max when it sits below the ladder floor', () => {
+    const cameras = [cam(0, [[1920, 1080, [10]]])];
+    expect(offeredFps(cameras, 1920, 1080)).toEqual([10]);
+  });
+
+  it('offers nothing when the resolution is unknown', () => {
+    const cameras = [cam(0, [[1920, 1080, [60]]])];
+    expect(offeredFps(cameras, 1280, 720)).toEqual([]);
   });
 
   it('rounds output dimensions to even values', () => {
