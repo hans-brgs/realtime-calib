@@ -14,7 +14,8 @@ def _detection(sharpness: float) -> BoardDetection:
         found=True,
         corners=corners,
         ids=np.arange(42, dtype=np.int32),
-        fill_fraction=0.6234,
+        outline=np.zeros((4, 2), np.float32),
+        board_coverage=0.6234,
         sharpness=sharpness,
     )
 
@@ -25,7 +26,7 @@ def test_payload_shape_and_gate() -> None:
     assert sharp["camera"] == "cam_0"
     assert sharp["phase"] == "intrinsic"
     assert sharp["grid_count"] == 42
-    assert sharp["fill_fraction"] == 0.6234
+    assert sharp["board_coverage"] == 0.6234
     assert sharp["sharpness_ok"] is True
 
     blurry = coverage_metrics_payload("cam_1", _detection(SHARPNESS_MIN - 10))

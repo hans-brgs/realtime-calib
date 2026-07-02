@@ -25,17 +25,17 @@ _GREEN = (153, 211, 52)  # #34d399 — good distance
 _FILL_ALPHA = 0.22  # translucency of the filled polygon
 
 
-def fill_color(fill_fraction: float) -> tuple[int, int, int]:
-    """Map the board span (distance proxy) to a burn-in colour (BGR).
+def fill_color(coverage: float) -> tuple[int, int, int]:
+    """Map board coverage (extrapolated board area / frame) to a burn-in colour (BGR).
 
-    Bands tuned to the linear extent, which tops out near 0.7 up close for both
-    board types (see BoardDetection.fill_fraction).
+    Green at >= 0.50 = the calib.io criterion ("at least half the image area,
+    fronto-parallel"). See BoardDetection.board_coverage.
     """
-    if fill_fraction < 0.25:
+    if coverage < 0.15:
         return _RED
-    if fill_fraction < 0.40:
+    if coverage < 0.30:
         return _ORANGE
-    if fill_fraction < 0.55:
+    if coverage < 0.50:
         return _YELLOW
     return _GREEN
 
@@ -65,15 +65,20 @@ def draw_overlay(
     if not detection.found or detection.corners is None:
         return preview
 
-    pts = np.round(detection.corners * resize_factor).astype(np.int32)
-    hull = cv2.convexHull(pts)
-    color = fill_color(detection.fill_fraction)
+    color = fill_color(detection.board_coverage)
+
+    # Outline = the extrapolated physical board contour (falls back to the corner hull).
+    if detection.outline is not None:
+        outline = np.round(detection.outline * resize_factor).astype(np.int32)
+    else:
+        hull = cv2.convexHull(np.round(detection.corners * resize_factor).astype(np.int32))
+        outline = cast("NDArray[np.int32]", hull).reshape(-1, 2)
 
     filled = preview.copy()
-    cv2.fillPoly(filled, [hull], color)
+    cv2.fillPoly(filled, [outline], color)
     cv2.addWeighted(filled, _FILL_ALPHA, preview, 1.0 - _FILL_ALPHA, 0, dst=preview)
-    cv2.polylines(preview, [hull], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
-    for x, y in pts:
+    cv2.polylines(preview, [outline], isClosed=True, color=color, thickness=2, lineType=cv2.LINE_AA)
+    for x, y in np.round(detection.corners * resize_factor).astype(np.int32):
         cv2.circle(preview, (int(x), int(y)), 3, color, -1, cv2.LINE_AA)
 
     return preview

@@ -23,12 +23,13 @@ _MIN_CORNERS = 4  # below this a frame is not useful for calibration
 
 @dataclass(frozen=True)
 class BoardDetection:
-    """One board detection in a frame (corners at native resolution)."""
+    """One board detection in a frame (corners/outline at native resolution)."""
 
     found: bool
     corners: NDArray[np.float32] | None  # (N, 2) sub-pixel corner positions
     ids: NDArray[np.int32] | None  # (N,) corner / marker ids
-    fill_fraction: float  # board span along its limiting axis / frame — a distance proxy
+    outline: NDArray[np.float32] | None  # (4, 2) physical board contour (extrapolated)
+    board_coverage: float  # outline area clipped to frame / frame area (calib.io >= 0.5)
     sharpness: float  # variance of the Laplacian over the board ROI
 
     @property
@@ -37,7 +38,9 @@ class BoardDetection:
 
     @staticmethod
     def empty() -> BoardDetection:
-        return BoardDetection(found=False, corners=None, ids=None, fill_fraction=0.0, sharpness=0.0)
+        return BoardDetection(
+            found=False, corners=None, ids=None, outline=None, board_coverage=0.0, sharpness=0.0
+        )
 
 
 def _to_gray(image: NDArray[np.uint8]) -> NDArray[np.uint8]:
@@ -46,18 +49,35 @@ def _to_gray(image: NDArray[np.uint8]) -> NDArray[np.uint8]:
     return cast("NDArray[np.uint8]", cv2.cvtColor(image, cv2.COLOR_BGR2GRAY))
 
 
-def _fill_fraction(corners: NDArray[np.float32], width: int, height: int) -> float:
-    """Board span along its limiting axis, as a fraction of the frame.
+def _charuco_outline(
+    corners: NDArray[np.float32], ids: NDArray[np.int32], columns: int, rows: int
+) -> NDArray[np.float32] | None:
+    """Extrapolate the physical board contour from the detected interior corners.
 
-    The bounding-box larger side ratio is a robust distance proxy: unlike the
-    corner-hull *area* (which saturates well below 1 and swings with the board's
-    aspect ratio), the linear extent reaches ~0.7 up close for both ChArUco and a
-    single ArUco marker, so a common colour ramp works for both.
+    ChArUco only detects the interior chessboard corners — a rectangle inset by one
+    square from the physical edge. We fit the plane→image homography from the known
+    grid indices (from corner ids) and project the 4 board-edge corners (one grid
+    step beyond the outermost interior corners). Works under perspective/tilt.
     """
+    nx, ny = columns - 1, rows - 1  # interior-corner grid dimensions
+    grid = np.column_stack([ids % nx, ids // nx]).astype(np.float32)
+    homography, _ = cv2.findHomography(grid, corners)
+    if homography is None:
+        return None
+    outline_grid = np.array([[[-1, -1], [nx, -1], [nx, ny], [-1, ny]]], np.float32)
+    return cast("NDArray[np.float32]", cv2.perspectiveTransform(outline_grid, homography)[0])
+
+
+def _coverage(outline: NDArray[np.float32], width: int, height: int) -> float:
+    """Area of the board outline clipped to the frame, as a fraction of the frame."""
     if not width or not height:
         return 0.0
-    _, _, w, h = cv2.boundingRect(corners.astype(np.int32))
-    return max(w / width, h / height)
+    rect = np.array([[0, 0], [width, 0], [width, height], [0, height]], np.float32)
+    try:
+        area, _ = cv2.intersectConvexConvex(outline.astype(np.float32), rect)
+    except cv2.error:
+        return 0.0
+    return float(area) / float(width * height)
 
 
 def _sharpness(gray: NDArray[np.uint8], corners: NDArray[np.float32]) -> float:
@@ -102,11 +122,20 @@ class BoardDetector:
         if corners is None or corners.shape[0] < _MIN_CORNERS:
             return BoardDetection.empty()
 
+        if self._charuco is not None and ids is not None:
+            outline = _charuco_outline(corners, ids, self._board.columns, self._board.rows)
+        else:
+            # Single ArUco marker: the 4 detected corners already are the board contour.
+            outline = corners if corners.shape[0] == 4 else None
+
+        coverage = _coverage(outline, width, height) if outline is not None else 0.0
+
         return BoardDetection(
             found=True,
             corners=corners,
             ids=ids,
-            fill_fraction=_fill_fraction(corners, width, height),
+            outline=outline,
+            board_coverage=coverage,
             sharpness=_sharpness(gray, corners),
         )
 

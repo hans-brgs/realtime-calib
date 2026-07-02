@@ -32,7 +32,9 @@ def test_detects_all_charuco_corners() -> None:
     assert det.found
     # A C x R ChArUco board has (C-1) x (R-1) interior corners.
     assert det.count == (7 - 1) * (8 - 1)
-    assert 0.0 < det.fill_fraction <= 1.0
+    # Extrapolated board outline + coverage (board fills the rendered frame).
+    assert det.outline is not None and det.outline.shape == (4, 2)
+    assert 0.0 < det.board_coverage <= 1.0
     assert det.sharpness > 0.0
 
 

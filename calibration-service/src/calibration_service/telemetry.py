@@ -26,7 +26,7 @@ def coverage_metrics_payload(
         "camera": camera,
         "phase": phase,
         "board_found": detection.found,
-        "fill_fraction": round(detection.fill_fraction, 4),
+        "board_coverage": round(detection.board_coverage, 4),
         "sharpness": round(detection.sharpness, 1),
         "sharpness_ok": bool(detection.sharpness >= SHARPNESS_MIN),
         "grid_count": detection.count,
