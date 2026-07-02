@@ -104,6 +104,18 @@ class LiveKitPublisher:
         if track is not None:
             track.unmute()
 
+    def mute(self, name: str) -> None:
+        """Stop sending media for a track without unpublishing it.
+
+        Used for on-demand capture (ADR-0021): when a camera leaves the live set we
+        mute its track and close the camera, rather than ``unpublish``-ing — the
+        LiveKit Python SDK leaks on frequent unpublish/republish cycles (~200 MB
+        each, issue #449). Tracks are published once and stay for the session.
+        """
+        track = self._tracks.get(name)
+        if track is not None:
+            track.mute()
+
     def push(self, name: str, image: NDArray[np.uint8]) -> None:
         """Push a BGR frame to the named track's source."""
         source = self._sources.get(name)
