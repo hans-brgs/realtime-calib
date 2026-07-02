@@ -45,8 +45,22 @@ def _process_frame(
     returned preview is the downscaled burn-in for LiveKit.
     """
     detection = detector.detect(image)
-    preview = draw_overlay(image, detection, resize_factor=1.0)
-    return _downscale(preview, preview_size), detection
+    return _draw_preview(image, detection, preview_size), detection
+
+
+def _draw_preview(
+    image: NDArray[np.uint8],
+    detection: BoardDetection | None,
+    preview_size: tuple[int, int],
+) -> NDArray[np.uint8]:
+    """Burn the (last known) detection overlay in and downscale — no re-detection.
+
+    Drawn on every published frame so the board overlay stays steady at the preview
+    rate instead of flickering at the (slower) detection rate. ``None`` -> raw preview.
+    """
+    if detection is None:
+        return _downscale(image, preview_size)
+    return _downscale(draw_overlay(image, detection, resize_factor=1.0), preview_size)
 
 _EMPTY_READ_BACKOFF_S = 0.005
 _FIRST_FRAME_ATTEMPTS = 60
@@ -388,6 +402,7 @@ class CameraPublishService:
         preview_size = _preview_size(target.width, target.height) if target.width else None
         capture_period = 1.0 / target.fps if target.fps else 0.0
         detector: BoardDetector | None = None
+        last_detection: BoardDetection | None = None
         last_telemetry = 0.0
         last_detect = 0.0
         last_record = 0.0
@@ -416,21 +431,25 @@ class CameraPublishService:
             # Publish the (downscaled) preview at a capped rate to spare the encoder.
             if now - last_push >= _PUSH_PERIOD_S:
                 last_push = now
-                if active and now - last_detect >= _DETECT_PERIOD_S:
+                if active:
                     if detector is None:
                         detector = self._build_detector()
-                    if detector is not None:
+                    if detector is not None and now - last_detect >= _DETECT_PERIOD_S:
                         last_detect = now
                         preview, detection = await loop.run_in_executor(
                             executor, _process_frame, detector, frame.image, preview_size
                         )
-                        publisher.push(target.name, preview)
+                        last_detection = detection
                         if now - last_telemetry >= _TELEMETRY_PERIOD_S:
                             last_telemetry = now
                             payload = json.dumps(coverage_metrics_payload(target.name, detection))
                             await publisher.send_data(payload, TELEMETRY_TOPIC)
                     else:
-                        publisher.push(target.name, _downscale(frame.image, preview_size))
+                        # Redraw the last detection (no re-detect) so the overlay is steady.
+                        preview = await loop.run_in_executor(
+                            executor, _draw_preview, frame.image, last_detection, preview_size
+                        )
+                    publisher.push(target.name, preview)
                 else:
                     small = await loop.run_in_executor(
                         executor, _downscale, frame.image, preview_size
