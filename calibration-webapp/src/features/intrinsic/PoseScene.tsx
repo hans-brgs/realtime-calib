@@ -44,7 +44,7 @@ export function PoseScene({ quads }: { quads: number[][][] }) {
   return (
     <Canvas
       camera={{ position: [meanDepth * 1.4, -meanDepth * 0.9, -meanDepth * 0.6], fov: 50 }}
-      style={{ borderRadius: 'var(--mantine-radius-md)', background: '#0a0a0c', height: '100%' }}
+      style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
     >
       <ambientLight intensity={0.8} />
       <Bounds fit clip observe margin={1.3}>
