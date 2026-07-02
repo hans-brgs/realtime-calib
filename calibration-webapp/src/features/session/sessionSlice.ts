@@ -1,7 +1,13 @@
 import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
 import type { RootState } from '@/app/store';
-import { configureCameras, defineBoard, fetchSession, fetchSessions } from '@/transport/httpClient';
+import {
+  computeIntrinsic,
+  configureCameras,
+  defineBoard,
+  fetchSession,
+  fetchSessions,
+} from '@/transport/httpClient';
 import type {
   BoardConfigRequest,
   ConfigRequest,
@@ -39,6 +45,10 @@ export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request:
   defineBoard(request),
 );
 
+export const computeIntrinsicThunk = createAsyncThunk('session/computeIntrinsic', (camera: string) =>
+  computeIntrinsic(camera),
+);
+
 const sessionSlice = createSlice({
   name: 'session',
   initialState,
@@ -61,6 +71,9 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(applyBoardConfig.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(computeIntrinsicThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(fetchRecentSessions.fulfilled, (state, action) => {

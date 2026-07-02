@@ -56,6 +56,15 @@ export const fetchBoardDictionaries = (): Promise<string[]> =>
 export const setActiveIntrinsic = (camera: string | null): Promise<{ active: string | null }> =>
   postJson<{ active: string | null }>('/intrinsic/active', { camera });
 
+export const startIntrinsic = (camera: string): Promise<{ recording: string }> =>
+  postJson<{ recording: string }>(`/intrinsic/${camera}/start`);
+
+export const stopIntrinsic = (camera: string): Promise<{ camera: string; frames: number }> =>
+  postJson<{ camera: string; frames: number }>(`/intrinsic/${camera}/stop`);
+
+export const computeIntrinsic = (camera: string): Promise<Session> =>
+  postJson<Session>(`/intrinsic/${camera}/compute`);
+
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
 
