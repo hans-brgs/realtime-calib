@@ -88,9 +88,23 @@ def _guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
 def _tilt_deg(
     object_points: NDArray[np.float32], image_points: NDArray[np.float32], width: int, height: int
 ) -> float | None:
-    """Board tilt vs the frontal plane (degrees) from a PnP pose with a guessed K."""
+    """Board tilt vs the frontal plane (degrees) from a planar PnP pose (guessed K).
+
+    Uses IPPE (planar, works from 4 coplanar points). Returns None when the points
+    are too few or collinear (degenerate pose) — the board points are always
+    coplanar, so a spread in both board axes is required.
+    """
+    if object_points.shape[0] < 4:
+        return None
+    if len(np.unique(object_points[:, 0])) < 2 or len(np.unique(object_points[:, 1])) < 2:
+        return None  # collinear → pose ill-defined
     camera_matrix = _guessed_camera_matrix(width, height)
-    ok, rvec, _ = cv2.solvePnP(object_points, image_points, camera_matrix, None)
+    try:
+        ok, rvec, _ = cv2.solvePnP(
+            object_points, image_points, camera_matrix, None, flags=cv2.SOLVEPNP_IPPE
+        )
+    except cv2.error:
+        return None
     if not ok:
         return None
     rotation, _ = cv2.Rodrigues(rvec)

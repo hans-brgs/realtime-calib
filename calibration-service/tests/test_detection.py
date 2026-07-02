@@ -7,6 +7,7 @@ import numpy as np
 
 from calibration_service.board import render_board_png
 from calibration_service.detection import BoardDetector
+from calibration_service.detection.detector import _tilt_deg
 from calibration_service.models.board import BoardType, CalibrationBoard
 
 
@@ -38,6 +39,21 @@ def test_detects_all_charuco_corners() -> None:
     assert det.sharpness > 0.0
     # A rendered board is fronto-parallel → tilt near 0.
     assert det.tilt_deg is not None and det.tilt_deg < 5.0
+
+
+def test_tilt_none_for_collinear_points() -> None:
+    # 4 corners on the same board row → collinear → pose ill-defined (no crash).
+    obj = np.array([[0, 0, 0], [1, 0, 0], [2, 0, 0], [3, 0, 0]], np.float32)
+    img = np.array([[0, 0], [10, 0], [20, 0], [30, 0]], np.float32)
+    assert _tilt_deg(obj, img, 640, 480) is None
+
+
+def test_tilt_frontal_square_near_zero() -> None:
+    # Axis-aligned square (4 non-collinear coplanar points) → frontal → ~0 deg, no crash.
+    obj = np.array([[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], np.float32)
+    img = np.array([[300, 220], [340, 220], [340, 260], [300, 260]], np.float32)
+    tilt = _tilt_deg(obj, img, 640, 480)
+    assert tilt is not None and tilt < 10.0
 
 
 def test_blank_frame_not_found() -> None:

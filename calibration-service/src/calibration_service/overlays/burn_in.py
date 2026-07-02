@@ -17,7 +17,7 @@ from numpy.typing import NDArray
 from calibration_service.detection import BoardDetection
 
 # Instantaneous fill → colour (BGR), from the coverage-metrics distance bands.
-_RED = (113, 113, 248)  # #f87171 — board too far
+_RED = (40, 40, 255)  # ~#ff2828 — board too far (saturated; the gauge red is softer)
 _ORANGE = (60, 146, 251)  # #fb923c — still far
 _YELLOW = (36, 191, 251)  # #fbbf24 — acceptable
 _GREEN = (153, 211, 52)  # #34d399 — good distance
