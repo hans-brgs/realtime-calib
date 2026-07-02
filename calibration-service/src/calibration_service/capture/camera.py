@@ -14,6 +14,8 @@ from types import TracebackType
 from typing import cast
 
 import cv2
+import numpy as np
+from numpy.typing import NDArray
 
 from calibration_service.capture.source import VideoSource
 from calibration_service.models.frame import Frame
@@ -77,12 +79,38 @@ class CameraCapture:
         if not ok or image is None:
             return None
 
-        timestamp = time.monotonic()
+        return self._stamp(image)
+
+    def grab(self) -> bool:
+        """Buffer the next frame **without decoding** it (cheap).
+
+        Paired with :meth:`retrieve`, this lets the capture loop drain frames it is
+        about to drop (pacing below the native rate) without paying the JPEG decode.
+        """
+        try:
+            return bool(self._source.grab())
+        except Exception:
+            logger.exception("camera %d: grab() raised", self._camera_index)
+            return False
+
+    def retrieve(self) -> Frame | None:
+        """Decode the most recently grabbed frame into a timestamped ``Frame``."""
+        try:
+            ok, image = self._source.retrieve()
+        except Exception:
+            logger.exception("camera %d: retrieve() raised", self._camera_index)
+            return None
+        if not ok or image is None:
+            return None
+        return self._stamp(image)
+
+    def _stamp(self, image: NDArray[np.uint8]) -> Frame:
+        """Wrap a decoded image in a monotonically-timestamped ``Frame``."""
         self._frame_id += 1
         return Frame(
             camera_index=self._camera_index,
             frame_id=self._frame_id,
-            timestamp=timestamp,
+            timestamp=time.monotonic(),
             image=image,
         )
 

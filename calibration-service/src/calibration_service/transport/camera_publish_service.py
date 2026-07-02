@@ -66,8 +66,10 @@ _TELEMETRY_PERIOD_S = 0.1
 # between so the preview stays smooth.
 _DETECT_PERIOD_S = 1 / 12
 # Recording rate: ~30 Hz of native frames is ample to select keyframes from, and
-# caps the encode load. Writes run off the event loop.
-_RECORD_PERIOD_S = 1 / 30
+# caps the encode load. Writes run off the event loop. The recorded file declares
+# min(capture fps, _RECORD_FPS) so its playback speed matches the write cadence.
+_RECORD_FPS = 30
+_RECORD_PERIOD_S = 1 / _RECORD_FPS
 # Preview published to LiveKit is downscaled + rate-capped (ADR-0015): capture stays
 # native (for recording/detection), but publishing 4x1080p@60 overloads the CPU VP8
 # encoder. Downscaling the preview cuts encode ~4x and the fps cap ~2x.
@@ -129,8 +131,11 @@ class CameraPublishService:
         if camera is None:
             raise ValueError(f"unknown camera {camera_name!r}")
         path = self._sessions.intrinsic_video_path(camera_name)
+        # Written frames are throttled to _RECORD_FPS; declare the true cadence so the
+        # replayed mkv plays at real time (not Nx fast) whatever the capture fps.
+        record_fps = min(camera.fps, _RECORD_FPS) if camera.fps else _RECORD_FPS
         async with self._recorder_lock:
-            self._recorder = VideoRecorder(path, camera.width, camera.height, camera.fps)
+            self._recorder = VideoRecorder(path, camera.width, camera.height, record_fps)
         logger.info("recording intrinsic sweep of %s -> %s", camera_name, path)
 
     async def stop_intrinsic_recording(self) -> int:
@@ -274,27 +279,40 @@ class CameraPublishService:
     ) -> None:
         """Read one camera and push every frame to its track until the room disconnects.
 
-        The preview published to LiveKit is downscaled + rate-capped (ADR-0015) to
-        keep the encoder from saturating. The camera in intrinsic capture
-        (``_active_intrinsic``) also gets board detection, burn-in overlay, ~10 Hz
-        coverage telemetry and disk recording (at native res); the others push raw.
-        A read failure (USB blip) is skipped, not fatal.
+        The pipeline is paced to the configured capture fps: every iteration cheaply
+        ``grab()``s a frame (blocking, so the loop runs at the camera's native rate),
+        but only ``retrieve()``s (decodes) one when the target interval has elapsed —
+        honouring the chosen fps even if the driver ignores ``CAP_PROP_FPS``, and
+        skipping the JPEG decode of frames we would drop. The preview published to
+        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder. The
+        camera in intrinsic capture (``_active_intrinsic``) also gets board detection,
+        burn-in overlay, ~10 Hz coverage telemetry and disk recording (native res); the
+        others push raw. A read failure (USB blip) is skipped, not fatal.
         """
         preview_size = _preview_size(target.width, target.height) if target.width else None
+        capture_period = 1.0 / target.fps if target.fps else 0.0
         detector: BoardDetector | None = None
         last_telemetry = 0.0
         last_detect = 0.0
         last_record = 0.0
         last_push = 0.0
+        last_capture = 0.0
         while not publisher.is_disconnected():
-            frame = await loop.run_in_executor(None, camera.read)
-            if frame is None:
+            if not await loop.run_in_executor(None, camera.grab):
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
+                continue
+            now = loop.time()
+            # Pace to the capture fps: drop this frame undecoded if we are early.
+            if now - last_capture < capture_period:
+                await asyncio.sleep(0)
+                continue
+            last_capture = now
+            frame = await loop.run_in_executor(None, camera.retrieve)
+            if frame is None:
                 continue
             if preview_size is None:
                 preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
 
-            now = loop.time()
             active = self._active_intrinsic == target.name
             if not active:
                 detector = None
