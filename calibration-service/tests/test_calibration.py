@@ -22,7 +22,13 @@ from calibration_service.calibration import (
     compute_intrinsic_from_video,
     select_keyframes,
 )
-from calibration_service.calibration.intrinsic import _cv_charuco_board, _is_well_spread
+from calibration_service.calibration.intrinsic import (
+    _COVERAGE_COLS,
+    _COVERAGE_ROWS,
+    _coverage_grid,
+    _cv_charuco_board,
+    _is_well_spread,
+)
 from calibration_service.detection import BoardDetection
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import VideoRecorder
@@ -152,6 +158,39 @@ def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:
             rec.write(gray)
     with pytest.raises(ValueError, match="usable views"):
         compute_intrinsic_from_video(path, board)
+
+
+def test_coverage_grid_normalises_to_the_busiest_cell() -> None:
+    # All corners land in the top-left cell -> that cell is 1.0, the rest 0.
+    points = [np.array([[1.0, 1.0], [2.0, 2.0], [3.0, 3.0]], np.float32)]
+    grid = _coverage_grid(points, (640, 480))
+    assert len(grid) == _COVERAGE_ROWS
+    assert all(len(row) == _COVERAGE_COLS for row in grid)
+    assert grid[0][0] == 1.0
+    assert sum(v for row in grid for v in row) == 1.0  # nothing else populated
+
+
+def test_coverage_grid_spreads_across_cells() -> None:
+    # A corner in each opposite corner of the frame -> two populated cells, equal weight.
+    points = [np.array([[1.0, 1.0]], np.float32), np.array([[639.0, 479.0]], np.float32)]
+    grid = _coverage_grid(points, (640, 480))
+    assert grid[0][0] == 1.0
+    assert grid[_COVERAGE_ROWS - 1][_COVERAGE_COLS - 1] == 1.0
+
+
+def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None:
+    # ADR-0022: a frame_start beyond the sweep trims everything -> nothing to detect.
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    gray = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    h, w = gray.shape[:2]
+    path = tmp_path / "capture.mkv"
+    with VideoRecorder(path, w, h, fps=30) as rec:
+        for _ in range(3):
+            rec.write(gray)
+    with pytest.raises(ValueError, match="no readable frames"):
+        compute_intrinsic_from_video(path, board, frame_start=10)
 
 
 @pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")

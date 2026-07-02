@@ -21,6 +21,7 @@ from calibration_service.models.session import (
     CameraConfig,
     CameraStatus,
 )
+from calibration_service.recording import frame_count, read_frame_jpeg
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -319,13 +320,48 @@ async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
     return {"camera": camera, "frames": frames}
 
 
+@router.get("/intrinsic/{camera}/frames")
+async def intrinsic_frame_count(request: Request, camera: str) -> dict[str, int]:
+    """Total frame count of the recorded sweep, for the Prepare scrubber (ADR-0022)."""
+    path = get_manager(request).intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+    total = await asyncio.get_running_loop().run_in_executor(None, frame_count, path)
+    return {"total": total}
+
+
+@router.get("/intrinsic/{camera}/frame/{index}")
+async def intrinsic_frame(request: Request, camera: str, index: int) -> Response:
+    """Serve frame ``index`` of the recorded sweep as JPEG (ADR-0022, frame-server)."""
+    path = get_manager(request).intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+    jpeg = await asyncio.get_running_loop().run_in_executor(None, read_frame_jpeg, path, index)
+    if jpeg is None:
+        raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+class ComputeRequest(BaseModel):
+    """Prepare-step knobs (ADR-0022); all optional — omitted fields use auto/defaults."""
+
+    stride: int | None = None  # "process every N frames" (read decimation); None = auto
+    cap: int | None = None  # keyframe cap (plafond); None = default
+    frame_start: int = 0  # trim start (frame index)
+    frame_end: int | None = None  # trim end (exclusive); None = end of recording
+
+
 @router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
-async def compute_intrinsic(request: Request, camera: str) -> SessionOut:
+async def compute_intrinsic(
+    request: Request, camera: str, body: ComputeRequest | None = None
+) -> SessionOut:
     """Compute intrinsics from the recorded sweep and store them (Phase 3.7).
 
+    The optional body carries the Prepare-step knobs (stride/cap/trim, ADR-0022).
     Reads the video off the capture loop (executor); the capture is released
     (overlay/telemetry off) while the solver runs (ADR-0019).
     """
+    params = body or ComputeRequest()
     manager = get_manager(request)
     board = manager.current().intrinsic_board
     if board is None:
@@ -343,7 +379,15 @@ async def compute_intrinsic(request: Request, camera: str) -> SessionOut:
     loop = asyncio.get_running_loop()
     try:
         result = await loop.run_in_executor(
-            None, lambda: compute_intrinsic_from_video(path, board)
+            None,
+            lambda: compute_intrinsic_from_video(
+                path,
+                board,
+                cap=params.cap,
+                stride=params.stride,
+                frame_start=params.frame_start,
+                frame_end=params.frame_end,
+            ),
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

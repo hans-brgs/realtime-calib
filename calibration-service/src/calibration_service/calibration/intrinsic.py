@@ -58,6 +58,9 @@ class IntrinsicResult:
     grid_count: int  # total corners used across keyframes
     view_count: int  # keyframes used
     image_size: tuple[int, int]  # (width, height)
+    # Normalised sensor occupancy by the used corners, rows x cols in [0, 1] (Results
+    # heatmap, ADR-0022). Scale-invariant, so ``scaled()`` leaves it unchanged.
+    coverage: tuple[tuple[float, ...], ...] = ()
 
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
@@ -81,6 +84,35 @@ class IntrinsicResult:
             per_view_errors=[e * factor for e in self.per_view_errors],
             image_size=(round(width * factor), round(height * factor)),
         )
+
+
+_COVERAGE_COLS = 12
+_COVERAGE_ROWS = 8
+
+
+def _coverage_grid(
+    image_points: list[NDArray[np.float32]],
+    image_size: tuple[int, int],
+    cols: int = _COVERAGE_COLS,
+    rows: int = _COVERAGE_ROWS,
+) -> tuple[tuple[float, ...], ...]:
+    """Normalised sensor occupancy by the used corners (Results heatmap, ADR-0022).
+
+    Bins every calibration corner into a ``rows`` x ``cols`` grid over the frame; each
+    cell is its share of the busiest cell (0..1), showing where the board did / did not
+    cover the field of view. Scale-invariant (relative bins).
+    """
+    width, height = image_size
+    counts = np.zeros((rows, cols), dtype=np.float64)
+    for pts in image_points:
+        xy = pts.reshape(-1, 2)
+        col = np.clip((xy[:, 0] / max(1, width) * cols).astype(int), 0, cols - 1)
+        row = np.clip((xy[:, 1] / max(1, height) * rows).astype(int), 0, rows - 1)
+        np.add.at(counts, (row, col), 1.0)
+    peak = counts.max()
+    if peak > 0:
+        counts /= peak
+    return tuple(tuple(float(v) for v in grid_row) for grid_row in counts)
 
 
 def _centroid(corners: NDArray[np.float32]) -> tuple[float, float]:
@@ -216,6 +248,7 @@ def calibrate_intrinsic(
         grid_count=grid_count,
         view_count=len(object_points),
         image_size=(width, height),
+        coverage=_coverage_grid(image_points, (width, height)),
     )
 
 
@@ -223,28 +256,41 @@ def compute_intrinsic_from_video(
     video_path: Path,
     board: CalibrationBoard,
     *,
-    cap: int = _DEFAULT_CAP,
+    cap: int | None = None,
+    stride: int | None = None,
+    frame_start: int = 0,
+    frame_end: int | None = None,
 ) -> IntrinsicResult:
-    """Recompute intrinsics from a recorded capture (ADR-0019 record → compute).
+    """Recompute intrinsics from a recorded capture (ADR-0019/0022 record → prepare → compute).
 
-    Detection (not the solve) dominates the cost on a long sweep, so an adaptive
-    read-stride caps how many frames are detected (spread across the whole video)
-    before the diverse keyframe subset is chosen. Raises ``ValueError`` on an
-    empty/unusable video (before the solver).
+    The operator bounds cost/quality in the *Prepare* step (ADR-0022): ``stride``
+    ("process every N frames") sub-samples the sweep, ``frame_start``/``frame_end``
+    trim it (frame indices), and ``cap`` limits the kept keyframes. Detection (not the
+    solve) dominates the cost, so ``stride`` is the read decimation; with no ``stride``
+    an adaptive read-stride caps detection at ``_MAX_DETECT_FRAMES`` over the trimmed
+    span. Raises ``ValueError`` on an empty/unusable range (before the solver).
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
     total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
-    read_stride = max(1, total // _MAX_DETECT_FRAMES) if total > 0 else 1
+    start = max(0, frame_start)
+    end = frame_end if frame_end is not None else (total if total > 0 else None)
+    span = (end - start) if end is not None else 0
+    # Operator "process every N frames" overrides the adaptive cap; else spread the
+    # detection budget over the (trimmed) span.
+    if stride and stride > 0:
+        read_stride = stride
+    else:
+        read_stride = max(1, span // _MAX_DETECT_FRAMES) if span > 0 else 1
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None
     index = 0
     try:
         while True:
             ok, frame = capture.read()
-            if not ok:
+            if not ok or (end is not None and index >= end):
                 break
-            if index % read_stride == 0:
+            if index >= start and (index - start) % read_stride == 0:
                 if image_size is None:
                     image_size = (frame.shape[1], frame.shape[0])
                 detections.append(detector.detect(cast("NDArray[np.uint8]", frame)))
@@ -254,5 +300,7 @@ def compute_intrinsic_from_video(
 
     if image_size is None:
         raise ValueError(f"no readable frames in {video_path}")
-    keyframes = select_keyframes(detections, image_size, cap=cap)
+    keyframes = select_keyframes(
+        detections, image_size, cap=cap if cap is not None else _DEFAULT_CAP
+    )
     return calibrate_intrinsic(keyframes, board, image_size)
