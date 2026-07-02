@@ -10,6 +10,7 @@ export interface CoverageMetrics {
   phase: string;
   board_found: boolean;
   board_coverage: number;
+  tilt_deg: number | null;
   sharpness: number;
   sharpness_ok: boolean;
   grid_count: number;

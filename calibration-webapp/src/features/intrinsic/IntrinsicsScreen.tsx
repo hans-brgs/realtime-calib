@@ -103,6 +103,18 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
 
       <Group justify="space-between" mt="sm">
         <Text fz="0.72rem" c="dark.2">
+          Tilt vs frontal
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {coverage?.tilt_deg != null ? `${Math.round(coverage.tilt_deg)}°` : '—'}
+          <Text span fz="0.66rem" c="dark.3" inherit>
+            {' '}· vary 0→45°
+          </Text>
+        </Text>
+      </Group>
+
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
           Corners detected
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
