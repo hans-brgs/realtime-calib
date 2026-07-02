@@ -27,6 +27,7 @@ def coverage_metrics_payload(
         "phase": phase,
         "board_found": detection.found,
         "board_coverage": round(detection.board_coverage, 4),
+        "tilt_deg": round(detection.tilt_deg, 1) if detection.tilt_deg is not None else None,
         "sharpness": round(detection.sharpness, 1),
         "sharpness_ok": bool(detection.sharpness >= SHARPNESS_MIN),
         "grid_count": detection.count,

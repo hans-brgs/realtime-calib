@@ -31,6 +31,7 @@ class BoardDetection:
     outline: NDArray[np.float32] | None  # (4, 2) physical board contour (extrapolated)
     board_coverage: float  # outline area clipped to frame / frame area (calib.io >= 0.5)
     sharpness: float  # variance of the Laplacian over the board ROI
+    tilt_deg: float | None  # board tilt vs the frontal plane (PnP, guessed K); 0 = frontal
 
     @property
     def count(self) -> int:
@@ -39,7 +40,13 @@ class BoardDetection:
     @staticmethod
     def empty() -> BoardDetection:
         return BoardDetection(
-            found=False, corners=None, ids=None, outline=None, board_coverage=0.0, sharpness=0.0
+            found=False,
+            corners=None,
+            ids=None,
+            outline=None,
+            board_coverage=0.0,
+            sharpness=0.0,
+            tilt_deg=None,
         )
 
 
@@ -66,6 +73,29 @@ def _charuco_outline(
         return None
     outline_grid = np.array([[[-1, -1], [nx, -1], [nx, ny], [-1, ny]]], np.float32)
     return cast("NDArray[np.float32]", cv2.perspectiveTransform(outline_grid, homography)[0])
+
+
+def _guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
+    """A rough pinhole K (focal ≈ frame width, ~52° HFOV) for pre-calibration PnP.
+
+    The tilt estimate is approximate but monotonic — enough to guide the operator;
+    it is recomputed exactly at compute time with the real intrinsics.
+    """
+    f = float(width)
+    return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
+
+
+def _tilt_deg(
+    object_points: NDArray[np.float32], image_points: NDArray[np.float32], width: int, height: int
+) -> float | None:
+    """Board tilt vs the frontal plane (degrees) from a PnP pose with a guessed K."""
+    camera_matrix = _guessed_camera_matrix(width, height)
+    ok, rvec, _ = cv2.solvePnP(object_points, image_points, camera_matrix, None)
+    if not ok:
+        return None
+    rotation, _ = cv2.Rodrigues(rvec)
+    # Board normal's z-component in camera frame; |z|=1 when frontal.
+    return float(np.degrees(np.arccos(min(1.0, abs(float(rotation[2, 2]))))))
 
 
 def _coverage(outline: NDArray[np.float32], width: int, height: int) -> float:
@@ -100,9 +130,15 @@ class BoardDetector:
             )
             self._charuco: cv2.aruco.CharucoDetector | None = cv2.aruco.CharucoDetector(cv_board)
             self._aruco: cv2.aruco.ArucoDetector | None = None
+            # 3D corner coords (board units), indexed by ChArUco corner id — for PnP.
+            self._object_points = np.asarray(cv_board.getChessboardCorners(), np.float32)
         else:
             self._charuco = None
             self._aruco = cv2.aruco.ArucoDetector(dictionary)
+            # A single marker: its 4 corners as a unit square (TL, TR, BR, BL).
+            self._object_points = np.array(
+                [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], np.float32
+            )
 
     def detect(self, image: NDArray[np.uint8]) -> BoardDetection:
         gray = _to_gray(image)
@@ -130,6 +166,16 @@ class BoardDetector:
 
         coverage = _coverage(outline, width, height) if outline is not None else 0.0
 
+        if self._charuco is not None and ids is not None:
+            object_points = self._object_points[ids]
+        else:
+            object_points = self._object_points
+        tilt = (
+            _tilt_deg(object_points, corners, width, height)
+            if object_points.shape[0] == corners.shape[0]
+            else None
+        )
+
         return BoardDetection(
             found=True,
             corners=corners,
@@ -137,6 +183,7 @@ class BoardDetector:
             outline=outline,
             board_coverage=coverage,
             sharpness=_sharpness(gray, corners),
+            tilt_deg=tilt,
         )
 
     def _detect_single_marker(

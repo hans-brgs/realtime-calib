@@ -17,6 +17,7 @@ def _detection(sharpness: float) -> BoardDetection:
         outline=np.zeros((4, 2), np.float32),
         board_coverage=0.6234,
         sharpness=sharpness,
+        tilt_deg=18.0,
     )
 
 

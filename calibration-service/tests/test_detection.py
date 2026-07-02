@@ -36,6 +36,8 @@ def test_detects_all_charuco_corners() -> None:
     assert det.outline is not None and det.outline.shape == (4, 2)
     assert 0.0 < det.board_coverage <= 1.0
     assert det.sharpness > 0.0
+    # A rendered board is fronto-parallel → tilt near 0.
+    assert det.tilt_deg is not None and det.tilt_deg < 5.0
 
 
 def test_blank_frame_not_found() -> None:
