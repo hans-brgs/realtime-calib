@@ -55,6 +55,13 @@ _DEFAULT_FPS = 30
 _PARTICIPANT_IDENTITY = "service"
 # Telemetry cadence on the data channel (coverage metrics ~10 Hz, not per frame).
 _TELEMETRY_PERIOD_S = 0.1
+# Board detection + burn-in are expensive at native resolution (~17 ms/frame at
+# 1080p); throttle them to ~12 Hz for the live gauges. Raw frames are pushed in
+# between so the preview stays smooth.
+_DETECT_PERIOD_S = 1 / 12
+# Recording rate: ~30 Hz of native frames is ample to select keyframes from, and
+# caps the encode load. Writes run off the event loop.
+_RECORD_PERIOD_S = 1 / 30
 
 
 @dataclass(frozen=True)
@@ -80,33 +87,38 @@ class CameraPublishService:
         # burn-in + telemetry; the others publish raw preview (Phase 3.5).
         self._active_intrinsic: str | None = None
         # Recording the raw sweep of the active camera to disk (ADR-0019), if any.
+        # Writes run in the executor; the lock serialises write vs close (stop waits
+        # for an in-flight write before finalising the file).
         self._recorder: VideoRecorder | None = None
+        self._recorder_lock = asyncio.Lock()
 
     def set_active_intrinsic(self, name: str | None) -> None:
         """Select the camera whose feed gets board detection/overlay/telemetry."""
         logger.info("active intrinsic camera -> %s", name)
         self._active_intrinsic = name
 
-    def start_intrinsic_recording(self, camera_name: str) -> None:
+    async def start_intrinsic_recording(self, camera_name: str) -> None:
         """Make ``camera_name`` active and record its raw sweep to the session folder."""
-        self.stop_intrinsic_recording()
+        await self.stop_intrinsic_recording()
         self.set_active_intrinsic(camera_name)
         camera = next((c for c in self._sessions.current().cameras if c.name == camera_name), None)
         if camera is None:
             raise ValueError(f"unknown camera {camera_name!r}")
         path = self._sessions.intrinsic_video_path(camera_name)
-        self._recorder = VideoRecorder(path, camera.width, camera.height, camera.fps)
+        async with self._recorder_lock:
+            self._recorder = VideoRecorder(path, camera.width, camera.height, camera.fps)
         logger.info("recording intrinsic sweep of %s -> %s", camera_name, path)
 
-    def stop_intrinsic_recording(self) -> int:
+    async def stop_intrinsic_recording(self) -> int:
         """Finalise the current recording (if any) and return the frame count."""
-        recorder = self._recorder
-        self._recorder = None
-        if recorder is None:
-            return 0
-        recorder.close()
-        logger.info("stopped recording (%d frames)", recorder.frames)
-        return recorder.frames
+        async with self._recorder_lock:
+            recorder = self._recorder
+            self._recorder = None
+            if recorder is None:
+                return 0
+            recorder.close()
+            logger.info("stopped recording (%d frames)", recorder.frames)
+            return recorder.frames
 
     def _build_detector(self) -> BoardDetector | None:
         board = self._sessions.current().intrinsic_board
@@ -241,6 +253,8 @@ class CameraPublishService:
         """
         detector: BoardDetector | None = None
         last_telemetry = 0.0
+        last_detect = 0.0
+        last_record = 0.0
         while not publisher.is_disconnected():
             frame = await loop.run_in_executor(None, camera.read)
             if frame is None:
@@ -250,26 +264,30 @@ class CameraPublishService:
             if self._active_intrinsic == target.name:
                 if detector is None:
                     detector = self._build_detector()
-                if detector is not None:
+                now = loop.time()
+                # Detection + burn-in throttled (expensive); push raw frames between.
+                if detector is not None and now - last_detect >= _DETECT_PERIOD_S:
+                    last_detect = now
                     preview, detection = await loop.run_in_executor(
                         None, _process_frame, detector, frame.image
                     )
                     publisher.push(target.name, preview)
-                    # Record the RAW frame (detection fidelity), not the burn-in preview.
-                    # Sync write on the event loop → no race with start/stop (also on it).
-                    recorder = self._recorder
-                    if recorder is not None:
-                        recorder.write(frame.image)
-                    now = loop.time()
                     if now - last_telemetry >= _TELEMETRY_PERIOD_S:
                         last_telemetry = now
                         payload = json.dumps(coverage_metrics_payload(target.name, detection))
                         await publisher.send_data(payload, TELEMETRY_TOPIC)
-                    await asyncio.sleep(0)
-                    continue
-            else:
-                detector = None  # released when this camera is no longer the active one
+                else:
+                    publisher.push(target.name, frame.image)
+                # Record the RAW frame (detection fidelity), throttled, off the event loop.
+                if now - last_record >= _RECORD_PERIOD_S:
+                    last_record = now
+                    async with self._recorder_lock:
+                        if self._recorder is not None:
+                            await loop.run_in_executor(None, self._recorder.write, frame.image)
+                await asyncio.sleep(0)
+                continue
 
+            detector = None  # released when this camera is no longer the active one
             publisher.push(target.name, frame.image)
             await asyncio.sleep(0)  # yield to the event loop
         logger.info("capture loop %s exiting (disconnected)", target.name)

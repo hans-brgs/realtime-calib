@@ -288,7 +288,7 @@ async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
     if service is None:
         raise HTTPException(status_code=503, detail="capture service unavailable")
     try:
-        service.start_intrinsic_recording(camera)
+        await service.start_intrinsic_recording(camera)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return {"recording": camera}
@@ -298,7 +298,7 @@ async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
 async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
     """Finalise the recording; the video is ready to compute."""
     service = get_publish_service(request)
-    frames = service.stop_intrinsic_recording() if service is not None else 0
+    frames = await service.stop_intrinsic_recording() if service is not None else 0
     return {"camera": camera, "frames": frames}
 
 
@@ -316,7 +316,7 @@ async def compute_intrinsic(request: Request, camera: str) -> SessionOut:
 
     service = get_publish_service(request)
     if service is not None:
-        service.stop_intrinsic_recording()
+        await service.stop_intrinsic_recording()
         service.set_active_intrinsic(None)
 
     path = manager.intrinsic_video_path(camera)
