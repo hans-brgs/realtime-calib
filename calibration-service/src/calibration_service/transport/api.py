@@ -6,6 +6,7 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -391,7 +392,22 @@ async def compute_intrinsic(
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _session_out(manager.set_intrinsic_result(camera, result))
+    session = manager.set_intrinsic_result(camera, result)
+    # Persist the coverage grid next to the recording so the Results heatmap survives a
+    # reload/resume (ADR-0022); the grid is normalised, so native vs output res is moot.
+    coverage_path = manager.intrinsic_coverage_path(camera)
+    coverage_path.parent.mkdir(parents=True, exist_ok=True)
+    coverage_path.write_text(json.dumps([list(row) for row in result.coverage]))
+    return _session_out(session)
+
+
+@router.get("/intrinsic/{camera}/coverage")
+async def intrinsic_coverage(request: Request, camera: str) -> dict[str, list[list[float]]]:
+    """Serve the persisted coverage heatmap grid for the Results view (ADR-0022)."""
+    path = get_manager(request).intrinsic_coverage_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no coverage for {camera}")
+    return {"coverage": json.loads(path.read_text())}
 
 
 @router.post("/board", response_model=SessionOut)

@@ -183,3 +183,16 @@ def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
     response = client.post("/intrinsic/cam_0/compute", json={"frame_start": 10})
     assert response.status_code == 422
     assert "no readable frames" in response.json()["detail"]
+
+
+def test_intrinsic_coverage_endpoint_serves_persisted_grid(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    assert client.get("/intrinsic/cam_0/coverage").status_code == 404  # nothing computed
+
+    path = manager.intrinsic_coverage_path("cam_0")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text("[[0.0, 1.0], [0.5, 0.25]]")
+    response = client.get("/intrinsic/cam_0/coverage")
+    assert response.status_code == 200
+    assert response.json()["coverage"] == [[0.0, 1.0], [0.5, 0.25]]
