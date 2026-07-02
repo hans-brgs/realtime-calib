@@ -281,6 +281,23 @@ async def set_active_intrinsic(request: Request, body: ActiveIntrinsicRequest) -
     return {"active": body.camera}
 
 
+class CaptureViewRequest(BaseModel):
+    view: str | None  # wizard view id (e.g. "intrinsic", "cameras"), or null
+
+
+@router.post("/capture/view")
+async def set_capture_view(request: Request, body: CaptureViewRequest) -> dict[str, object]:
+    """Report the operator's current wizard view; drives the live camera set (ADR-0021).
+
+    On-demand capture: the service opens/publishes only the cameras this view needs
+    (``cameras``/``extrinsic`` → all, ``intrinsic`` → the active camera, else none).
+    """
+    service = get_publish_service(request)
+    if service is not None:
+        service.set_active_view(body.view)
+    return {"view": body.view}
+
+
 @router.post("/intrinsic/{camera}/start")
 async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
     """Begin recording the intrinsic sweep of ``camera`` (record → compute → review)."""

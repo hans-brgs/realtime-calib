@@ -131,3 +131,15 @@ def test_list_sessions_summaries(tmp_path: Path) -> None:
     assert summaries[0]["step"] == "intrinsic_capture"
     # modified_at is ISO 8601.
     assert "T" in summaries[0]["modified_at"]
+
+
+def test_capture_view_echoes_the_reported_view(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/capture/view", json={"view": "intrinsic"})
+    assert response.status_code == 200
+    assert response.json() == {"view": "intrinsic"}
+
+
+def test_capture_view_accepts_null(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/capture/view", json={"view": None})
+    assert response.status_code == 200
+    assert response.json() == {"view": None}
