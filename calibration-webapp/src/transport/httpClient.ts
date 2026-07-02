@@ -86,6 +86,10 @@ export const fetchIntrinsicFrameCount = (camera: string): Promise<{ total: numbe
 export const intrinsicFrameUrl = (camera: string, index: number): string =>
   `${API_URL}/intrinsic/${camera}/frame/${index}`;
 
+// Coverage heatmap grid (rows x cols in [0,1]) persisted at compute (ADR-0022, Results).
+export const fetchIntrinsicCoverage = (camera: string): Promise<{ coverage: number[][] }> =>
+  getJson<{ coverage: number[][] }>(`/intrinsic/${camera}/coverage`);
+
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
 

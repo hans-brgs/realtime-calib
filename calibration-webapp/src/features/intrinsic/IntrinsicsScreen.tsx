@@ -26,6 +26,7 @@ import { useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
 import { CameraTile } from '@/features/preview/CameraTile';
 import { computeIntrinsicThunk, selectSession } from '@/features/session/sessionSlice';
@@ -35,6 +36,7 @@ import {
   selectCoverage,
 } from '@/features/telemetry/telemetrySlice';
 import {
+  fetchIntrinsicCoverage,
   fetchIntrinsicFrameCount,
   fetchToken,
   setActiveIntrinsic,
@@ -336,6 +338,7 @@ function IntrinsicsInner() {
   const [keyframeCap, setKeyframeCap] = useState(25);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
+  const [coverageGrid, setCoverageGrid] = useState<number[][] | null>(null);
 
   // Cameras rehydrate from the API after mount; if this screen mounted first, the
   // initial `active` is null. Once the list arrives (or the config changes so the
@@ -361,6 +364,21 @@ function IntrinsicsInner() {
     if (!active) return;
     setActiveIntrinsic(step === 'capture' ? active : null).catch(() => {});
   }, [active, step]);
+
+  // On the Results step, load the persisted coverage heatmap for the active camera.
+  useEffect(() => {
+    if (step !== 'results' || !active) {
+      setCoverageGrid(null);
+      return;
+    }
+    let cancelled = false;
+    fetchIntrinsicCoverage(active)
+      .then((r) => !cancelled && setCoverageGrid(r.coverage))
+      .catch(() => !cancelled && setCoverageGrid(null));
+    return () => {
+      cancelled = true;
+    };
+  }, [step, active]);
 
   useEffect(() => () => void setActiveIntrinsic(null).catch(() => {}), []);
 
@@ -459,16 +477,17 @@ function IntrinsicsInner() {
       >
         <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
           {step === 'results' ? (
-            // ADR-0022 Results = coverage heatmap of the field of view (B7). Not built
-            // yet — the result summary is on the right.
-            <Center
-              h="100%"
-              style={{ border: '1px dashed var(--rc-border)', borderRadius: 'var(--mantine-radius-md)' }}
-            >
-              <Text c="dark.3" fz="0.84rem" ta="center" maw={280}>
-                Coverage heatmap coming next — for now, the result is on the right.
-              </Text>
-            </Center>
+            // ADR-0022 Results = coverage heatmap of the field of view (from the corners
+            // used in the solve), with the result summary on the right.
+            coverageGrid ? (
+              <CoverageHeatmap grid={coverageGrid} />
+            ) : (
+              <Center h="100%">
+                <Text c="dark.3" fz="0.84rem">
+                  Loading coverage…
+                </Text>
+              </Center>
+            )
           ) : scrubbing && active ? (
             <PrepareScrubber
               camera={active}
