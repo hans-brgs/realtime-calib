@@ -137,9 +137,29 @@ function ResultPanel({ camera }: { camera: CameraConfig }) {
           Focal (fx, fy)
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
-          {camera.matrix ? `${camera.matrix[0][0].toFixed(0)}, ${camera.matrix[1][1].toFixed(0)}` : '—'}
+          {camera.matrix ? `${camera.matrix[0][0].toFixed(1)}, ${camera.matrix[1][1].toFixed(1)}` : '—'}
         </Text>
       </Group>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Principal point (cx, cy)
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {camera.matrix ? `${camera.matrix[0][2].toFixed(1)}, ${camera.matrix[1][2].toFixed(1)}` : '—'}
+        </Text>
+      </Group>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Distortion (k1, k2)
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {camera.distortions ? `${camera.distortions[0].toFixed(3)}, ${camera.distortions[1].toFixed(3)}` : '—'}
+        </Text>
+      </Group>
+      <Text fz="0.66rem" c="dark.3" mt="md">
+        Calibrated at {camera.width * camera.resize_factor}×{camera.height * camera.resize_factor}
+        {camera.resize_factor !== 1 ? ` (native ${camera.width}×${camera.height}, ×${camera.resize_factor})` : ''}
+      </Text>
     </>
   );
 }
