@@ -254,12 +254,20 @@ function IntrinsicsInner() {
     setStep('record');
   };
 
-  const recompute = () => {
+  // Re-record replaces the sweep (and, once recomputed, the calibration). On an
+  // already-calibrated camera, confirm the overwrite first (ADR-0019).
+  const reRecord = () => {
     if (camera?.status === 'intrinsic_done') {
       setOverwriteOpen(true);
     } else {
-      void runCompute();
+      setStep('record');
     }
+  };
+
+  const confirmReRecord = () => {
+    setOverwriteOpen(false);
+    setRecording(false);
+    setStep('record');
   };
 
   const nextCamera = () => {
@@ -288,7 +296,20 @@ function IntrinsicsInner() {
         style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 22 }}
       >
         <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
-          {activeRef ? (
+          {step === 'review' ? (
+            // ADR-0019 reviewing = scrubbable annotated replay of the recorded
+            // video (detected + reprojected corners). Not built yet — the live
+            // feed here would be misleading, so show a placeholder.
+            <Center
+              h="100%"
+              style={{ border: '1px dashed var(--rc-border)', borderRadius: 'var(--mantine-radius-md)' }}
+            >
+              <Text c="dark.3" fz="0.84rem" ta="center" maw={280}>
+                Annotated replay (scrub + reprojected corners) coming next — for now,
+                the result is on the right.
+              </Text>
+            </Center>
+          ) : activeRef ? (
             <CameraTile trackRef={activeRef} label={active ?? undefined} />
           ) : (
             <Center h="100%">
@@ -338,8 +359,15 @@ function IntrinsicsInner() {
                 <Button fullWidth onClick={nextCamera} disabled={cameras.findIndex((c) => c.name === active) >= cameras.length - 1}>
                   Validate → next camera
                 </Button>
-                <Button fullWidth variant="light" color="gray" mt="sm" onClick={recompute}>
-                  Recompute
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="gray"
+                  mt="sm"
+                  leftSection={<IconPlayerRecordFilled size={15} />}
+                  onClick={reRecord}
+                >
+                  Re-record
                 </Button>
               </>
             ) : recording ? (
@@ -375,7 +403,7 @@ function IntrinsicsInner() {
         title="Computing intrinsics"
       >
         <Text fz="0.8rem" c="dark.2" mb="md">
-          {active} · calibrateCameraCharucoExtended
+          {active} · selecting keyframes + solving from the recorded sweep
         </Text>
         <Progress value={100} animated striped mb="md" />
         <Group justify="center">
@@ -383,28 +411,22 @@ function IntrinsicsInner() {
         </Group>
       </Modal>
 
-      {/* Override double-validation (ADR-0019): recompute overwrites the result. */}
+      {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}
       <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title={`Overwrite ${active} calibration?`}>
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
           <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
           <Text fz="0.84rem" c="dark.1">
-            Recomputing replaces the current intrinsics for {active} (error{' '}
-            {camera?.calibration_error?.toFixed(2) ?? '—'} px). The existing result is discarded. The
-            recorded video is kept.
+            Re-recording {active} will replace the current intrinsics (error{' '}
+            {camera?.calibration_error?.toFixed(2) ?? '—'} px) and overwrite the recorded video. The
+            existing result is discarded and cannot be recovered.
           </Text>
         </Group>
         <Group justify="flex-end">
           <Button variant="default" onClick={() => setOverwriteOpen(false)}>
             Cancel
           </Button>
-          <Button
-            color="red"
-            onClick={() => {
-              setOverwriteOpen(false);
-              void runCompute();
-            }}
-          >
-            Overwrite &amp; recompute
+          <Button color="red" onClick={confirmReRecord}>
+            Discard &amp; re-record
           </Button>
         </Group>
       </Modal>
