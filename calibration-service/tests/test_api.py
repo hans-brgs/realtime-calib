@@ -185,6 +185,62 @@ def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
     assert "no readable frames" in response.json()["detail"]
 
 
+def test_compute_persists_metrics_for_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The whole point of persisting metrics.json: after a reload the Results view is
+    # restored from it. Stub the (SIGILL-prone) solver and check the round-trip.
+    from calibration_service.calibration.intrinsic import IntrinsicResult
+    from calibration_service.transport import api as api_module
+
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/x",
+                    "device_node": "/dev/video0",
+                    "width": 64,
+                    "height": 48,
+                    "fps": 30,
+                }
+            ],
+        },
+    )
+    with VideoRecorder(manager.intrinsic_video_path("cam_0"), 64, 48, fps=30) as rec:
+        for _ in range(3):
+            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+
+    fixture = IntrinsicResult(
+        matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        distortions=[0.0] * 8,
+        error=0.12,
+        per_view_errors=[0.1] * 6,
+        grid_count=42,
+        view_count=6,
+        image_size=(64, 48),
+        coverage=((0.0, 1.0), (0.5, 0.0)),
+        image_coverage=0.5,
+        orientation_bins=6,
+        board_quads=(((0.0, 0.0, 10.0), (1.0, 0.0, 10.0), (1.0, 1.0, 10.0), (0.0, 1.0, 10.0)),),
+    )
+    monkeypatch.setattr(api_module, "compute_intrinsic_from_video", lambda *a, **k: fixture)
+
+    assert client.post("/intrinsic/cam_0/compute").status_code == 200
+    # Simulate the reload: fetch the persisted metrics fresh.
+    metrics = client.get("/intrinsic/cam_0/metrics").json()
+    assert metrics["image_coverage"] == 0.5
+    assert metrics["orientation_bins"] == 6
+    assert metrics["coverage"] == [[0.0, 1.0], [0.5, 0.0]]
+    assert len(metrics["board_quads"]) == 1 and len(metrics["board_quads"][0]) == 4
+
+
 def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     client = TestClient(create_app(manager))

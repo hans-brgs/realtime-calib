@@ -27,8 +27,8 @@ from calibration_service.calibration.intrinsic import (
     _COVERAGE_ROWS,
     _board_quads,
     _coverage_grid,
+    _covered_fraction,
     _cv_charuco_board,
-    _image_coverage,
     _is_well_spread,
     _orientation_bins,
 )
@@ -181,12 +181,17 @@ def test_coverage_grid_spreads_across_cells() -> None:
     assert grid[_COVERAGE_ROWS - 1][_COVERAGE_COLS - 1] == 1.0
 
 
-def test_image_coverage_is_hit_cells_over_5x5() -> None:
-    # One corner -> 1/25; four extreme corners -> 4 distinct cells -> 4/25 (Caliscope).
-    one = [np.array([[1.0, 1.0]], np.float32)]
-    assert _image_coverage(one, (500, 500)) == pytest.approx(1 / 25)
-    four = [np.array([[1.0, 1.0], [499.0, 1.0], [1.0, 499.0], [499.0, 499.0]], np.float32)]
-    assert _image_coverage(four, (500, 500)) == pytest.approx(4 / 25)
+def test_covered_fraction_counts_non_empty_heatmap_cells() -> None:
+    # Consistent with the heatmap: covered cells / total cells (gaps lower the value).
+    rows, cols = _COVERAGE_ROWS, _COVERAGE_COLS
+    empty = tuple(tuple(0.0 for _ in range(cols)) for _ in range(rows))
+    assert _covered_fraction(empty) == 0.0
+    one_hit = tuple(
+        tuple(1.0 if (r, c) == (0, 0) else 0.0 for c in range(cols)) for r in range(rows)
+    )
+    assert _covered_fraction(one_hit) == pytest.approx(1 / (rows * cols))
+    full = tuple(tuple(0.5 for _ in range(cols)) for _ in range(rows))
+    assert _covered_fraction(full) == 1.0
 
 
 def test_orientation_bins_drops_frontal_and_counts_azimuth() -> None:

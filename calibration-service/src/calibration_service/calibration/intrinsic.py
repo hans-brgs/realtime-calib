@@ -121,24 +121,21 @@ def _coverage_grid(
     return tuple(tuple(float(v) for v in grid_row) for grid_row in counts)
 
 
-_COVERAGE_CELLS = 5  # Caliscope image-coverage grid (frame_selector.py grid_size)
 _ORIENTATION_SECTORS = 8  # Caliscope 45deg tilt-azimuth bins
 _FRONTAL_TILT_DEG = 8.0  # below this the tilt direction is meaningless -> not binned
 
 
-def _image_coverage(
-    image_points: list[NDArray[np.float32]], image_size: tuple[int, int]
-) -> float:
-    """Caliscope image coverage: fraction of a 5x5 cell grid hit by any used corner."""
-    width, height = image_size
-    grid = _COVERAGE_CELLS
-    cells: set[tuple[int, int]] = set()
-    for pts in image_points:
-        xy = pts.reshape(-1, 2)
-        col = np.clip((xy[:, 0] / max(1, width) * grid).astype(int), 0, grid - 1)
-        row = np.clip((xy[:, 1] / max(1, height) * grid).astype(int), 0, grid - 1)
-        cells.update(zip(row.tolist(), col.tolist(), strict=True))
-    return len(cells) / float(grid * grid)
+def _covered_fraction(grid: tuple[tuple[float, ...], ...]) -> float:
+    """Image coverage = fraction of heatmap cells hit by any used corner.
+
+    Computed on the *same* grid as the Results heatmap (Caliscope uses a coarser 5x5,
+    which over-reports: one corner marks a whole cell). Here an empty cell visible as a
+    gap in the heatmap directly lowers the percentage, so metric and viz agree.
+    """
+    if not grid or not grid[0]:
+        return 0.0
+    covered = sum(1 for row in grid for value in row if value > 0.0)
+    return covered / float(len(grid) * len(grid[0]))
 
 
 def _orientation_bins(rvecs: list[NDArray[np.float64]]) -> int:
@@ -315,6 +312,7 @@ def calibrate_intrinsic(
     rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
+    coverage = _coverage_grid(image_points, (width, height))
     return IntrinsicResult(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
@@ -323,8 +321,8 @@ def calibrate_intrinsic(
         grid_count=grid_count,
         view_count=len(object_points),
         image_size=(width, height),
-        coverage=_coverage_grid(image_points, (width, height)),
-        image_coverage=_image_coverage(image_points, (width, height)),
+        coverage=coverage,
+        image_coverage=_covered_fraction(coverage),
         orientation_bins=_orientation_bins(rvec_list),
         board_quads=_board_quads(rvec_list, tvec_list, cv_board),
     )
