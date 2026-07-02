@@ -22,7 +22,7 @@ from calibration_service.calibration import (
     compute_intrinsic_from_video,
     select_keyframes,
 )
-from calibration_service.calibration.intrinsic import _cv_charuco_board
+from calibration_service.calibration.intrinsic import _cv_charuco_board, _is_well_spread
 from calibration_service.detection import BoardDetection
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import VideoRecorder
@@ -42,17 +42,26 @@ def _solver_works() -> bool:
 
 
 def _detection(cx: float, cy: float, tilt: float, sharpness: float = 500.0) -> BoardDetection:
-    # A small blob of corners around (cx, cy) with a couple of ids.
-    corners = np.array([[cx, cy], [cx + 5, cy], [cx, cy + 5], [cx + 5, cy + 5]], np.float32)
+    # A small 2x3 grid of corners around (cx, cy): >= _MIN_CORNERS_FOR_CALIBRATION and
+    # spread over both axes (not collinear), so it passes _is_well_spread too.
+    offsets = [(0, 0), (5, 0), (10, 0), (0, 5), (5, 5), (10, 5)]
+    corners = np.array([[cx + dx, cy + dy] for dx, dy in offsets], np.float32)
     return BoardDetection(
         found=True,
         corners=corners,
-        ids=np.arange(4, dtype=np.int32),
+        ids=np.arange(len(offsets), dtype=np.int32),
         outline=None,
         board_coverage=0.4,
         sharpness=sharpness,
         tilt_deg=tilt,
     )
+
+
+def test_is_well_spread_rejects_collinear() -> None:
+    collinear = np.array([[0, 0], [5, 0], [10, 0], [15, 0], [20, 0], [25, 0]], np.float32)
+    spread = np.array([[0, 0], [5, 0], [10, 0], [0, 5], [5, 5], [10, 5]], np.float32)
+    assert _is_well_spread(collinear) is False
+    assert _is_well_spread(spread) is True
 
 
 def test_select_keyframes_returns_all_below_cap() -> None:
@@ -84,6 +93,27 @@ def test_select_keyframes_caps_and_keeps_extremes() -> None:
     # Farthest-point sampling must retain the spread corner views.
     centroids = {(round(d.corners[0, 0]), round(d.corners[0, 1])) for d in picked}  # type: ignore[index]
     assert (20, 20) in centroids and (600, 440) in centroids
+
+
+def test_select_keyframes_excludes_sparse_views() -> None:
+    # Regression: a 4-corner detection is exactly the production crash — OpenCV's
+    # "DLT algorithm needs at least 6 points... 'count' is 4" — so it must never
+    # be selected, regardless of how "diverse" its tilt/position looks.
+    sparse = BoardDetection(
+        found=True,
+        corners=np.array([[100, 100], [105, 100], [100, 105], [105, 105]], np.float32),
+        ids=np.arange(4, dtype=np.int32),
+        outline=None,
+        board_coverage=0.1,
+        sharpness=500.0,
+        tilt_deg=30.0,
+    )
+    good = [_detection(300 + i, 200, 10) for i in range(6)]
+    picked = select_keyframes([sparse, *good], (640, 480), cap=25)
+    # BoardDetection's auto __eq__ compares numpy arrays element-wise (raises on
+    # shape mismatch via `in`), so check by identity instead.
+    assert not any(d is sparse for d in picked)
+    assert len(picked) == 6
 
 
 def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:

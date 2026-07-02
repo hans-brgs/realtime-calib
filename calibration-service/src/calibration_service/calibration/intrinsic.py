@@ -37,6 +37,13 @@ _CALIB_FLAGS = (
 )
 _DEFAULT_CAP = 25  # keyframes kept for the solve (MATLAB recommends 10-20)
 _MIN_VIEWS = 6  # calib.io: at least ~6 observations
+# cv2.calibrateCameraExtended's internal per-view pose init (cvFindExtrinsicCameraParams2)
+# requires >= 6 point correspondences and hard-crashes below that — observed in
+# Docker: "DLT algorithm needs at least 6 points... 'count' is 4". A near-edge-of-
+# frame detection with only a handful of corners is a poor observation anyway, so
+# this is filtered independently of BoardDetector's lower live-detection floor
+# (detection/detector.py's _MIN_CORNERS=4, which only gates UI "board found").
+_MIN_CORNERS_FOR_CALIBRATION = 6
 
 
 @dataclass(frozen=True)
@@ -57,6 +64,23 @@ def _centroid(corners: NDArray[np.float32]) -> tuple[float, float]:
     return float(c[0]), float(c[1])
 
 
+def _is_well_spread(corners: NDArray[np.float32]) -> bool:
+    """Reject near-collinear corner sets (2D rank-deficient).
+
+    Point count alone doesn't guarantee a usable view: OpenCV's own planarity
+    test inside calibrateCamera's per-view pose init can misclassify a thin,
+    near-collinear sliver of corners (e.g. a single board row/edge — exactly the
+    kind of "extreme" view farthest-point sampling favours) as non-planar,
+    routing it into a DLT solve that hard-crashes below 6 points regardless of
+    the guessed count. A cheap SVD rank check catches this before it reaches
+    the solver (Caliscope does not do this; grounded in OpenCV's own
+    calibration_base.cpp planarity-test mechanics).
+    """
+    centered = corners.astype(np.float64) - corners.mean(axis=0)
+    singular_values = np.linalg.svd(centered, compute_uv=False)
+    return bool(singular_values[1] > 0.02 * singular_values[0])
+
+
 def select_keyframes(
     detections: list[BoardDetection],
     image_size: tuple[int, int],
@@ -67,15 +91,23 @@ def select_keyframes(
 ) -> list[BoardDetection]:
     """Pick a diverse, capped, in-focus subset of detections for the solve.
 
-    Stride pre-filters high-fps runs; the sharpness gate drops blurry frames; then
-    farthest-point sampling over (tilt, image-x, image-y) spreads the selection over
-    orientations and sensor regions (coverage/diversity, [[coverage-metrics]]).
+    Stride pre-filters high-fps runs; the sharpness gate drops blurry frames; a
+    minimum corner count + spread check drops views too sparse/degenerate for the
+    solver (Caliscope filters the same way, before diversifying — see
+    _MIN_CORNERS_FOR_CALIBRATION); then farthest-point sampling over
+    (tilt, image-x, image-y) spreads the selection over orientations and sensor
+    regions (coverage/diversity, [[coverage-metrics]]).
     """
     width, height = image_size
     candidates = [
         d
         for d in detections[:: max(1, stride)]
-        if d.found and d.ids is not None and d.corners is not None and d.sharpness >= sharpness_min
+        if d.found
+        and d.ids is not None
+        and d.corners is not None
+        and d.sharpness >= sharpness_min
+        and d.count >= _MIN_CORNERS_FOR_CALIBRATION
+        and _is_well_spread(d.corners)
     ]
     if len(candidates) <= cap:
         return candidates
@@ -128,12 +160,14 @@ def calibrate_intrinsic(
     image_points: list[NDArray[np.float32]] = []
     grid_count = 0
     for det in detections:
-        if det.corners is None or det.ids is None or det.count < 4:
+        if det.corners is None or det.ids is None or det.count < _MIN_CORNERS_FOR_CALIBRATION:
+            continue
+        if not _is_well_spread(det.corners):
             continue
         corners = det.corners.reshape(-1, 1, 2).astype(np.float32)
         ids = det.ids.reshape(-1, 1).astype(np.int32)
         obj, img = cv_board.matchImagePoints(corners, ids)  # type: ignore[call-overload]
-        if obj is None or img is None or len(obj) < 4:
+        if obj is None or img is None or len(obj) < _MIN_CORNERS_FOR_CALIBRATION:
             continue
         object_points.append(obj)
         image_points.append(img)
