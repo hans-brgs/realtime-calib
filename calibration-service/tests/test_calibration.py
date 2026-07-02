@@ -10,15 +10,22 @@ from __future__ import annotations
 import functools
 import subprocess
 import sys
+from pathlib import Path
 
 import cv2
 import numpy as np
 import pytest
 
-from calibration_service.calibration import calibrate_intrinsic, select_keyframes
+from calibration_service.board import render_board_png
+from calibration_service.calibration import (
+    calibrate_intrinsic,
+    compute_intrinsic_from_video,
+    select_keyframes,
+)
 from calibration_service.calibration.intrinsic import _cv_charuco_board
 from calibration_service.detection import BoardDetection
 from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.recording import VideoRecorder
 
 
 @functools.cache
@@ -77,6 +84,22 @@ def test_select_keyframes_caps_and_keeps_extremes() -> None:
     # Farthest-point sampling must retain the spread corner views.
     centroids = {(round(d.corners[0, 0]), round(d.corners[0, 1])) for d in picked}  # type: ignore[index]
     assert (20, 20) in centroids and (600, 440) in centroids
+
+
+def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:
+    # Record 3 frames of a rendered board, then compute: detection + selection run,
+    # and the < 6 usable views guard fires *before* the (SIGILL-prone) solver.
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    gray = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    h, w = gray.shape[:2]
+    path = tmp_path / "capture.mkv"
+    with VideoRecorder(path, w, h, fps=30) as rec:
+        for _ in range(3):
+            rec.write(gray)
+    with pytest.raises(ValueError, match="usable views"):
+        compute_intrinsic_from_video(path, board)
 
 
 @pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")

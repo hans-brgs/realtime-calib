@@ -19,13 +19,15 @@ Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
-from calibration_service.detection import BoardDetection
+from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.telemetry import SHARPNESS_MIN
 
@@ -157,3 +159,36 @@ def calibrate_intrinsic(
         view_count=len(object_points),
         image_size=(width, height),
     )
+
+
+def compute_intrinsic_from_video(
+    video_path: Path,
+    board: CalibrationBoard,
+    *,
+    cap: int = _DEFAULT_CAP,
+    stride: int = 1,
+) -> IntrinsicResult:
+    """Recompute intrinsics from a recorded capture (ADR-0019 record → compute).
+
+    Reads every frame, detects the board, selects a diverse keyframe subset, then
+    calibrates. Raises ``ValueError`` on an empty/unusable video (before the solver).
+    """
+    detector = BoardDetector(board)
+    capture = cv2.VideoCapture(str(video_path))
+    detections: list[BoardDetection] = []
+    image_size: tuple[int, int] | None = None
+    try:
+        while True:
+            ok, frame = capture.read()
+            if not ok:
+                break
+            if image_size is None:
+                image_size = (frame.shape[1], frame.shape[0])
+            detections.append(detector.detect(cast("NDArray[np.uint8]", frame)))
+    finally:
+        capture.release()
+
+    if image_size is None:
+        raise ValueError(f"no readable frames in {video_path}")
+    keyframes = select_keyframes(detections, image_size, cap=cap, stride=stride)
+    return calibrate_intrinsic(keyframes, board, image_size)
