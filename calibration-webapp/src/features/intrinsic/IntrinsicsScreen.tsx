@@ -22,7 +22,7 @@ import {
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { Track } from 'livekit-client';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -36,14 +36,22 @@ import {
   selectCoverage,
 } from '@/features/telemetry/telemetrySlice';
 import {
-  fetchIntrinsicCoverage,
   fetchIntrinsicFrameCount,
+  fetchIntrinsicMetrics,
   fetchToken,
+  type IntrinsicMetrics,
   setActiveIntrinsic,
   startIntrinsic,
   stopIntrinsic,
 } from '@/transport/httpClient';
 import type { CameraConfig } from '@/transport/types';
+
+type ResultsView = 'coverage' | 'poses';
+
+// Lazy so three.js / R3F only load when the operator opens the 3D pose view.
+const PoseScene = lazy(() =>
+  import('@/features/intrinsic/PoseScene').then((m) => ({ default: m.PoseScene })),
+);
 
 type Step = 'capture' | 'prepare' | 'computing' | 'results';
 
@@ -132,7 +140,9 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
   );
 }
 
-function ResultPanel({ camera }: { camera: CameraConfig }) {
+function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: IntrinsicMetrics | null }) {
+  const coveragePct = metrics ? Math.round(metrics.image_coverage * 100) : null;
+  const bins = metrics?.orientation_bins ?? null;
   return (
     <>
       <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
@@ -148,6 +158,32 @@ function ResultPanel({ camera }: { camera: CameraConfig }) {
           px
         </Text>
       </Text>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Image coverage (≥ 80 % target)
+        </Text>
+        <Text
+          fz="0.78rem"
+          fw={600}
+          className="rc-tnum"
+          c={coveragePct == null ? undefined : coveragePct >= 80 ? 'var(--rc-success)' : 'var(--rc-warning)'}
+        >
+          {coveragePct == null ? '—' : `${coveragePct}%`}
+        </Text>
+      </Group>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Board orientations (≥ 4 / 8)
+        </Text>
+        <Text
+          fz="0.78rem"
+          fw={600}
+          className="rc-tnum"
+          c={bins == null ? undefined : bins >= 4 ? 'var(--rc-success)' : 'var(--rc-warning)'}
+        >
+          {bins == null ? '—' : `${bins}/8`}
+        </Text>
+      </Group>
       <Group justify="space-between" mt="sm">
         <Text fz="0.72rem" c="dark.2">
           Corners used
@@ -338,7 +374,8 @@ function IntrinsicsInner() {
   const [keyframeCap, setKeyframeCap] = useState(25);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
-  const [coverageGrid, setCoverageGrid] = useState<number[][] | null>(null);
+  const [metrics, setMetrics] = useState<IntrinsicMetrics | null>(null);
+  const [resultsView, setResultsView] = useState<ResultsView>('coverage');
 
   // Cameras rehydrate from the API after mount; if this screen mounted first, the
   // initial `active` is null. Once the list arrives (or the config changes so the
@@ -362,25 +399,25 @@ function IntrinsicsInner() {
   // The live camera is only needed while capturing; Prepare/Results scrub the file.
   useEffect(() => {
     if (!active) return;
-    setActiveIntrinsic(step === 'capture' ? active : null).catch(() => {});
+    setActiveIntrinsic(step === 'capture' ? active : null).catch(() => { });
   }, [active, step]);
 
-  // On the Results step, load the persisted coverage heatmap for the active camera.
+  // On the Results step, load the persisted review metrics for the active camera.
   useEffect(() => {
     if (step !== 'results' || !active) {
-      setCoverageGrid(null);
+      setMetrics(null);
       return;
     }
     let cancelled = false;
-    fetchIntrinsicCoverage(active)
-      .then((r) => !cancelled && setCoverageGrid(r.coverage))
-      .catch(() => !cancelled && setCoverageGrid(null));
+    fetchIntrinsicMetrics(active)
+      .then((m) => !cancelled && setMetrics(m))
+      .catch(() => !cancelled && setMetrics(null));
     return () => {
       cancelled = true;
     };
   }, [step, active]);
 
-  useEffect(() => () => void setActiveIntrinsic(null).catch(() => {}), []);
+  useEffect(() => () => void setActiveIntrinsic(null).catch(() => { }), []);
 
   const trackRefs = useTracks([Track.Source.Camera], { onlySubscribed: true }).filter(
     isTrackReference,
@@ -389,7 +426,7 @@ function IntrinsicsInner() {
 
   const startRecording = async () => {
     if (!active) return;
-    await startIntrinsic(active).catch(() => {});
+    await startIntrinsic(active).catch(() => { });
     setRecording(true);
     setStep('capture');
   };
@@ -397,7 +434,7 @@ function IntrinsicsInner() {
   // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
   const stopRecording = async () => {
     if (!active) return;
-    await stopIntrinsic(active).catch(() => {});
+    await stopIntrinsic(active).catch(() => { });
     setRecording(false);
     let total = 0;
     try {
@@ -477,14 +514,46 @@ function IntrinsicsInner() {
       >
         <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
           {step === 'results' ? (
-            // ADR-0022 Results = coverage heatmap of the field of view (from the corners
-            // used in the solve), with the result summary on the right.
-            coverageGrid ? (
-              <CoverageHeatmap grid={coverageGrid} />
+            // ADR-0022 Results: toggle between the coverage heatmap and the 3D pose scene
+            // (boards at their recovered poses); the result summary is on the right.
+            metrics ? (
+              <>
+                {resultsView === 'poses' ? (
+                  <Suspense
+                    fallback={
+                      <Center h="100%">
+                        <Loader size="sm" />
+                      </Center>
+                    }
+                  >
+                    <PoseScene quads={metrics.board_quads} />
+                  </Suspense>
+                ) : (
+                  <CoverageHeatmap grid={metrics.coverage} />
+                )}
+                <Box style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}>
+                  <SegmentedControl
+                    size="xs"
+                    value={resultsView}
+                    onChange={(v) => setResultsView(v as ResultsView)}
+                    data={[
+                      { label: 'Coverage', value: 'coverage' },
+                      { label: '3D poses', value: 'poses' },
+                    ]}
+                    styles={{
+                      root: {
+                        background: 'rgba(9,9,11,0.72)',
+                        backdropFilter: 'blur(6px)',
+                        border: '1px solid var(--rc-border)',
+                      },
+                    }}
+                  />
+                </Box>
+              </>
             ) : (
               <Center h="100%">
                 <Text c="dark.3" fz="0.84rem">
-                  Loading coverage…
+                  Loading review…
                 </Text>
               </Center>
             )
@@ -510,7 +579,14 @@ function IntrinsicsInner() {
               gap={6}
               px={10}
               py={5}
-              style={{ position: 'absolute', top: 12, left: 12, borderRadius: 20, background: 'rgba(9,9,11,0.7)' }}
+              style={{
+                position: 'absolute',
+                top: 12,
+                left: '50%',
+                transform: 'translateX(-50%)',
+                borderRadius: 20,
+                background: 'rgba(9,9,11,0.7)',
+              }}
             >
               <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
               <Text fz="0.72rem" fw={600}>
@@ -533,7 +609,7 @@ function IntrinsicsInner() {
           }}
         >
           {step === 'results' && camera ? (
-            <ResultPanel camera={camera} />
+            <ResultPanel camera={camera} metrics={metrics} />
           ) : scrubbing ? (
             <PreparePanel
               frame={frame}
@@ -602,7 +678,7 @@ function IntrinsicsInner() {
       {/* Blocking compute modal (ADR-0019: capture released, solver runs). */}
       <Modal
         opened={step === 'computing'}
-        onClose={() => {}}
+        onClose={() => { }}
         withCloseButton={false}
         closeOnClickOutside={false}
         closeOnEscape={false}

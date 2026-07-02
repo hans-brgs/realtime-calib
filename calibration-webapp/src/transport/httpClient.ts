@@ -86,9 +86,18 @@ export const fetchIntrinsicFrameCount = (camera: string): Promise<{ total: numbe
 export const intrinsicFrameUrl = (camera: string, index: number): string =>
   `${API_URL}/intrinsic/${camera}/frame/${index}`;
 
-// Coverage heatmap grid (rows x cols in [0,1]) persisted at compute (ADR-0022, Results).
-export const fetchIntrinsicCoverage = (camera: string): Promise<{ coverage: number[][] }> =>
-  getJson<{ coverage: number[][] }>(`/intrinsic/${camera}/coverage`);
+// Review metrics persisted at compute (ADR-0022, Results): coverage heatmap grid,
+// Caliscope 5x5 image-coverage fraction, occupied tilt-azimuth sectors (/8), and each
+// keyframe board's 4 outline corners in 3D camera coords (for the pose scene).
+export interface IntrinsicMetrics {
+  coverage: number[][];
+  image_coverage: number;
+  orientation_bins: number;
+  board_quads: number[][][];
+}
+
+export const fetchIntrinsicMetrics = (camera: string): Promise<IntrinsicMetrics> =>
+  getJson<IntrinsicMetrics>(`/intrinsic/${camera}/metrics`);
 
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
