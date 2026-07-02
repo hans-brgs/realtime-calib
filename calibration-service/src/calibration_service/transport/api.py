@@ -5,6 +5,7 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 
 from __future__ import annotations
 
+import asyncio
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -12,6 +13,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
+from calibration_service.calibration import compute_intrinsic_from_video
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
@@ -68,6 +70,10 @@ class CameraConfigOut(BaseModel):
     resize_factor: float
     fps: int
     status: str
+    matrix: list[list[float]] | None = None
+    distortions: list[float] | None = None
+    calibration_error: float | None = None
+    grid_count: int | None = None
 
 
 class BoardIn(BaseModel):
@@ -179,6 +185,10 @@ def _session_out(session: CalibrationSession) -> SessionOut:
                 resize_factor=c.resize_factor,
                 fps=c.fps,
                 status=c.status,
+                matrix=c.matrix,
+                distortions=c.distortions,
+                calibration_error=c.calibration_error,
+                grid_count=c.grid_count,
             )
             for c in session.cameras
         ],
@@ -269,6 +279,58 @@ async def set_active_intrinsic(request: Request, body: ActiveIntrinsicRequest) -
     if service is not None:
         service.set_active_intrinsic(body.camera)
     return {"active": body.camera}
+
+
+@router.post("/intrinsic/{camera}/start")
+async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
+    """Begin recording the intrinsic sweep of ``camera`` (record → compute → review)."""
+    service = get_publish_service(request)
+    if service is None:
+        raise HTTPException(status_code=503, detail="capture service unavailable")
+    try:
+        service.start_intrinsic_recording(camera)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"recording": camera}
+
+
+@router.post("/intrinsic/{camera}/stop")
+async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
+    """Finalise the recording; the video is ready to compute."""
+    service = get_publish_service(request)
+    frames = service.stop_intrinsic_recording() if service is not None else 0
+    return {"camera": camera, "frames": frames}
+
+
+@router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
+async def compute_intrinsic(request: Request, camera: str) -> SessionOut:
+    """Compute intrinsics from the recorded sweep and store them (Phase 3.7).
+
+    Reads the video off the capture loop (executor); the capture is released
+    (overlay/telemetry off) while the solver runs (ADR-0019).
+    """
+    manager = get_manager(request)
+    board = manager.current().intrinsic_board
+    if board is None:
+        raise HTTPException(status_code=422, detail="no intrinsic board defined")
+
+    service = get_publish_service(request)
+    if service is not None:
+        service.stop_intrinsic_recording()
+        service.set_active_intrinsic(None)
+
+    path = manager.intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None, lambda: compute_intrinsic_from_video(path, board)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return _session_out(manager.set_intrinsic_result(camera, result))
 
 
 @router.post("/board", response_model=SessionOut)

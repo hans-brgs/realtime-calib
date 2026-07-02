@@ -65,6 +65,11 @@ class CameraConfig:
     resize_factor: float  # output scale s (1.0 = native output), ADR-0015
     fps: int
     status: CameraStatus = CameraStatus.CONFIGURED
+    # Intrinsic calibration result (None until computed; camera-array-config fields).
+    matrix: list[list[float]] | None = None  # 3x3 K
+    distortions: list[float] | None = None  # rational-model coefficients
+    calibration_error: float | None = None  # RMS reprojection error (px)
+    grid_count: int | None = None  # corners used across keyframes
 
 
 @dataclass

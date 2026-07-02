@@ -25,6 +25,7 @@ from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
 from calibration_service.overlays import draw_overlay
+from calibration_service.recording import VideoRecorder
 from calibration_service.session.manager import SessionManager
 from calibration_service.telemetry import TELEMETRY_TOPIC, coverage_metrics_payload
 from calibration_service.transport.livekit_publisher import LiveKitPublisher, mint_publish_token
@@ -78,11 +79,34 @@ class CameraPublishService:
         # Track name currently in intrinsic capture: only that camera runs detection +
         # burn-in + telemetry; the others publish raw preview (Phase 3.5).
         self._active_intrinsic: str | None = None
+        # Recording the raw sweep of the active camera to disk (ADR-0019), if any.
+        self._recorder: VideoRecorder | None = None
 
     def set_active_intrinsic(self, name: str | None) -> None:
         """Select the camera whose feed gets board detection/overlay/telemetry."""
         logger.info("active intrinsic camera -> %s", name)
         self._active_intrinsic = name
+
+    def start_intrinsic_recording(self, camera_name: str) -> None:
+        """Make ``camera_name`` active and record its raw sweep to the session folder."""
+        self.stop_intrinsic_recording()
+        self.set_active_intrinsic(camera_name)
+        camera = next((c for c in self._sessions.current().cameras if c.name == camera_name), None)
+        if camera is None:
+            raise ValueError(f"unknown camera {camera_name!r}")
+        path = self._sessions.intrinsic_video_path(camera_name)
+        self._recorder = VideoRecorder(path, camera.width, camera.height, camera.fps)
+        logger.info("recording intrinsic sweep of %s -> %s", camera_name, path)
+
+    def stop_intrinsic_recording(self) -> int:
+        """Finalise the current recording (if any) and return the frame count."""
+        recorder = self._recorder
+        self._recorder = None
+        if recorder is None:
+            return 0
+        recorder.close()
+        logger.info("stopped recording (%d frames)", recorder.frames)
+        return recorder.frames
 
     def _build_detector(self) -> BoardDetector | None:
         board = self._sessions.current().intrinsic_board
@@ -231,6 +255,11 @@ class CameraPublishService:
                         None, _process_frame, detector, frame.image
                     )
                     publisher.push(target.name, preview)
+                    # Record the RAW frame (detection fidelity), not the burn-in preview.
+                    # Sync write on the event loop → no race with start/stop (also on it).
+                    recorder = self._recorder
+                    if recorder is not None:
+                        recorder.write(frame.image)
                     now = loop.time()
                     if now - last_telemetry >= _TELEMETRY_PERIOD_S:
                         last_telemetry = now
