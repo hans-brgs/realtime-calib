@@ -76,10 +76,12 @@ _DEFAULT_FPS = 30
 _PARTICIPANT_IDENTITY = "service"
 # Telemetry cadence on the data channel (coverage metrics ~10 Hz, not per frame).
 _TELEMETRY_PERIOD_S = 0.1
-# Board detection + burn-in are expensive at native resolution (~17 ms/frame at
-# 1080p); throttle them to ~12 Hz for the live gauges. Raw frames are pushed in
-# between so the preview stays smooth.
-_DETECT_PERIOD_S = 1 / 12
+# Board detection + burn-in run only on the single active intrinsic camera now
+# (ADR-0021), so there is CPU headroom to detect at the preview push rate (~30 Hz)
+# for a tightly-tracking overlay. This is the live-feedback rate ONLY; the intrinsic
+# *compute* re-detects on the recorded video (its own frame stride), so it is
+# unaffected by this value.
+_DETECT_PERIOD_S = 1 / 30
 # Recording rate: ~30 Hz of native frames is ample to select keyframes from, and
 # caps the encode load. Writes run off the event loop. The recorded file declares
 # min(capture fps, _RECORD_FPS) so its playback speed matches the write cadence.
