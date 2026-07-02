@@ -25,9 +25,12 @@ from calibration_service.calibration import (
 from calibration_service.calibration.intrinsic import (
     _COVERAGE_COLS,
     _COVERAGE_ROWS,
+    _board_quads,
     _coverage_grid,
     _cv_charuco_board,
+    _image_coverage,
     _is_well_spread,
+    _orientation_bins,
 )
 from calibration_service.detection import BoardDetection
 from calibration_service.models.board import BoardType, CalibrationBoard
@@ -176,6 +179,33 @@ def test_coverage_grid_spreads_across_cells() -> None:
     grid = _coverage_grid(points, (640, 480))
     assert grid[0][0] == 1.0
     assert grid[_COVERAGE_ROWS - 1][_COVERAGE_COLS - 1] == 1.0
+
+
+def test_image_coverage_is_hit_cells_over_5x5() -> None:
+    # One corner -> 1/25; four extreme corners -> 4 distinct cells -> 4/25 (Caliscope).
+    one = [np.array([[1.0, 1.0]], np.float32)]
+    assert _image_coverage(one, (500, 500)) == pytest.approx(1 / 25)
+    four = [np.array([[1.0, 1.0], [499.0, 1.0], [1.0, 499.0], [499.0, 499.0]], np.float32)]
+    assert _image_coverage(four, (500, 500)) == pytest.approx(4 / 25)
+
+
+def test_orientation_bins_drops_frontal_and_counts_azimuth() -> None:
+    frontal = np.zeros(3)  # identity -> normal [0,0,1], tilt 0 -> dropped
+    tilt_x = np.array([np.radians(20), 0.0, 0.0])  # tilts the normal along -y
+    tilt_y = np.array([0.0, np.radians(20), 0.0])  # tilts the normal along +x
+    assert _orientation_bins([frontal, tilt_x, tilt_y]) == 2
+
+
+def test_board_quads_place_the_outline_at_the_pose() -> None:
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    cv_board = _cv_charuco_board(board)
+    quads = _board_quads([np.zeros(3)], [np.array([0.0, 0.0, 10.0])], cv_board)
+    assert len(quads) == 1
+    assert len(quads[0]) == 4
+    # identity rotation + translate +10 in z -> every outline corner sits at z = 10.
+    assert all(abs(point[2] - 10.0) < 1e-6 for point in quads[0])
 
 
 def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None:

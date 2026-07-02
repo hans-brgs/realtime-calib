@@ -393,21 +393,32 @@ async def compute_intrinsic(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     session = manager.set_intrinsic_result(camera, result)
-    # Persist the coverage grid next to the recording so the Results heatmap survives a
-    # reload/resume (ADR-0022); the grid is normalised, so native vs output res is moot.
-    coverage_path = manager.intrinsic_coverage_path(camera)
-    coverage_path.parent.mkdir(parents=True, exist_ok=True)
-    coverage_path.write_text(json.dumps([list(row) for row in result.coverage]))
+    # Persist the review metrics next to the recording so the Results view survives a
+    # reload/resume (ADR-0022); all fields are resolution-independent.
+    metrics = {
+        "coverage": [list(row) for row in result.coverage],
+        "image_coverage": result.image_coverage,
+        "orientation_bins": result.orientation_bins,
+        "board_quads": [[list(point) for point in quad] for quad in result.board_quads],
+    }
+    metrics_path = manager.intrinsic_metrics_path(camera)
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_path.write_text(json.dumps(metrics))
     return _session_out(session)
 
 
-@router.get("/intrinsic/{camera}/coverage")
-async def intrinsic_coverage(request: Request, camera: str) -> dict[str, list[list[float]]]:
-    """Serve the persisted coverage heatmap grid for the Results view (ADR-0022)."""
-    path = get_manager(request).intrinsic_coverage_path(camera)
+@router.get("/intrinsic/{camera}/metrics")
+async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
+    """Serve the persisted review metrics for the Results view (ADR-0022).
+
+    ``{coverage: heatmap grid, image_coverage: 5x5 fraction, orientation_bins: /8,
+    board_quads: per-keyframe 4x3 board outline in camera coords}``.
+    """
+    path = get_manager(request).intrinsic_metrics_path(camera)
     if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"no coverage for {camera}")
-    return {"coverage": json.loads(path.read_text())}
+        raise HTTPException(status_code=404, detail=f"no metrics for {camera}")
+    payload: dict[str, object] = json.loads(path.read_text())
+    return payload
 
 
 @router.post("/board", response_model=SessionOut)

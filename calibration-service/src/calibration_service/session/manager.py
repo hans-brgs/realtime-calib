@@ -118,9 +118,9 @@ class SessionManager:
         """Path of the recorded capture for a camera's intrinsic sweep."""
         return intrinsic_capture_path(self._sessions_dir, self._session_id, camera_name)
 
-    def intrinsic_coverage_path(self, camera_name: str) -> Path:
-        """Path of the persisted coverage heatmap grid (Results, ADR-0022)."""
-        return self.intrinsic_video_path(camera_name).with_name("coverage.json")
+    def intrinsic_metrics_path(self, camera_name: str) -> Path:
+        """Path of the persisted review metrics (coverage/orientation/poses, ADR-0022)."""
+        return self.intrinsic_video_path(camera_name).with_name("metrics.json")
 
     def set_intrinsic_result(
         self, camera_name: str, result: IntrinsicResult

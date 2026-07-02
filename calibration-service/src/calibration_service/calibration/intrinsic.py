@@ -58,9 +58,15 @@ class IntrinsicResult:
     grid_count: int  # total corners used across keyframes
     view_count: int  # keyframes used
     image_size: tuple[int, int]  # (width, height)
-    # Normalised sensor occupancy by the used corners, rows x cols in [0, 1] (Results
-    # heatmap, ADR-0022). Scale-invariant, so ``scaled()`` leaves it unchanged.
+    # Review metrics (ADR-0022). All resolution-independent, so ``scaled()`` leaves them
+    # unchanged. `coverage` = normalised sensor occupancy heatmap (rows x cols in [0,1]);
+    # `image_coverage` = Caliscope 5x5 cells-hit fraction; `orientation_bins` = occupied
+    # 45deg tilt-azimuth sectors (Caliscope, /8); `board_quads` = each keyframe board's
+    # 4 outline corners in 3D camera coords (square units) for the pose scene.
     coverage: tuple[tuple[float, ...], ...] = ()
+    image_coverage: float = 0.0
+    orientation_bins: int = 0
+    board_quads: tuple[tuple[tuple[float, float, float], ...], ...] = ()
 
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
@@ -113,6 +119,73 @@ def _coverage_grid(
     if peak > 0:
         counts /= peak
     return tuple(tuple(float(v) for v in grid_row) for grid_row in counts)
+
+
+_COVERAGE_CELLS = 5  # Caliscope image-coverage grid (frame_selector.py grid_size)
+_ORIENTATION_SECTORS = 8  # Caliscope 45deg tilt-azimuth bins
+_FRONTAL_TILT_DEG = 8.0  # below this the tilt direction is meaningless -> not binned
+
+
+def _image_coverage(
+    image_points: list[NDArray[np.float32]], image_size: tuple[int, int]
+) -> float:
+    """Caliscope image coverage: fraction of a 5x5 cell grid hit by any used corner."""
+    width, height = image_size
+    grid = _COVERAGE_CELLS
+    cells: set[tuple[int, int]] = set()
+    for pts in image_points:
+        xy = pts.reshape(-1, 2)
+        col = np.clip((xy[:, 0] / max(1, width) * grid).astype(int), 0, grid - 1)
+        row = np.clip((xy[:, 1] / max(1, height) * grid).astype(int), 0, grid - 1)
+        cells.update(zip(row.tolist(), col.tolist(), strict=True))
+    return len(cells) / float(grid * grid)
+
+
+def _orientation_bins(rvecs: list[NDArray[np.float64]]) -> int:
+    """Occupied 45deg tilt-azimuth sectors (Caliscope orientation_count, out of 8).
+
+    The board normal in camera coords is R's third column; frames too close to frontal
+    (no meaningful tilt direction) are dropped, the rest binned by azimuth.
+    """
+    occupied: set[int] = set()
+    for rvec in rvecs:
+        rmat, _ = cv2.Rodrigues(rvec)
+        normal = rmat[:, 2]
+        tilt = np.degrees(np.arccos(min(1.0, abs(float(normal[2])))))
+        if tilt < _FRONTAL_TILT_DEG:
+            continue
+        azimuth = np.arctan2(float(normal[1]), float(normal[0]))  # -pi..pi
+        sector = int((azimuth + np.pi) / (2 * np.pi) * _ORIENTATION_SECTORS)
+        occupied.add(sector % _ORIENTATION_SECTORS)
+    return len(occupied)
+
+
+def _board_quads(
+    rvecs: list[NDArray[np.float64]],
+    tvecs: list[NDArray[np.float64]],
+    cv_board: cv2.aruco.CharucoBoard,
+) -> tuple[tuple[tuple[float, float, float], ...], ...]:
+    """Each keyframe board's 4 outline corners in 3D camera coords (pose scene, ADR-0022).
+
+    Uses the board's chessboard-corner bounding rectangle (square units) transformed by
+    the calibrated per-view pose; the camera sits at the origin in the scene.
+    """
+    chess = np.asarray(cv_board.getChessboardCorners(), np.float64).reshape(-1, 3)
+    low, high = chess.min(axis=0), chess.max(axis=0)
+    outline = np.array(
+        [
+            [low[0], low[1], 0.0],
+            [high[0], low[1], 0.0],
+            [high[0], high[1], 0.0],
+            [low[0], high[1], 0.0],
+        ]
+    )
+    quads: list[tuple[tuple[float, float, float], ...]] = []
+    for rvec, tvec in zip(rvecs, tvecs, strict=True):
+        rmat, _ = cv2.Rodrigues(rvec)
+        corners = outline @ rmat.T + tvec.reshape(3)
+        quads.append(tuple((float(p[0]), float(p[1]), float(p[2])) for p in corners))
+    return tuple(quads)
 
 
 def _centroid(corners: NDArray[np.float32]) -> tuple[float, float]:
@@ -239,7 +312,9 @@ def calibrate_intrinsic(
     result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
         object_points, image_points, (width, height), guess, None, flags=_CALIB_FLAGS
     )
-    rms, matrix, dist, _rvecs, _tvecs, _sdi, _sde, per_view = result
+    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
+    rvec_list = [np.asarray(r, np.float64) for r in rvecs]
+    tvec_list = [np.asarray(t, np.float64) for t in tvecs]
     return IntrinsicResult(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
@@ -249,6 +324,9 @@ def calibrate_intrinsic(
         view_count=len(object_points),
         image_size=(width, height),
         coverage=_coverage_grid(image_points, (width, height)),
+        image_coverage=_image_coverage(image_points, (width, height)),
+        orientation_bins=_orientation_bins(rvec_list),
+        board_quads=_board_quads(rvec_list, tvec_list, cv_board),
     )
 
 
