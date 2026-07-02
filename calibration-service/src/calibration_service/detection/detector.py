@@ -20,6 +20,24 @@ from calibration_service.models.board import BoardType, CalibrationBoard
 
 _MIN_CORNERS = 4  # below this a frame is not useful for calibration
 
+# Sub-pixel refinement of the *chessboard* corners (as Caliscope does) — NOT ArUco
+# corner refinement, which OpenCV warns degrades ChArUco interpolation.
+_SUBPIX_WIN = (11, 11)
+_SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.0001)
+
+
+def _detector_params() -> cv2.aruco.DetectorParameters:
+    """ArUco detection tuned for small/peripheral markers on a wide-angle lens.
+
+    Grounded in Caliscope + OpenCV docs: lower ``minMarkerPerimeterRate`` recovers
+    small markers, higher ``polygonalApproxAccuracyRate`` tolerates barrel
+    distortion. Corner refinement is left off (harmful for ChArUco).
+    """
+    params = cv2.aruco.DetectorParameters()
+    params.minMarkerPerimeterRate = 0.01  # default 0.03 — small / far markers
+    params.polygonalApproxAccuracyRate = 0.05  # default 0.03 — distorted images
+    return params
+
 
 @dataclass(frozen=True)
 class BoardDetection:
@@ -152,13 +170,17 @@ class BoardDetector:
             cv_board = cv2.aruco.CharucoBoard(
                 (board.columns, board.rows), 1.0, board.marker_ratio, dictionary
             )
-            self._charuco: cv2.aruco.CharucoDetector | None = cv2.aruco.CharucoDetector(cv_board)
+            charuco_params = cv2.aruco.CharucoParameters()
+            charuco_params.tryRefineMarkers = True  # recover markers from interpolation
+            self._charuco: cv2.aruco.CharucoDetector | None = cv2.aruco.CharucoDetector(
+                cv_board, charucoParams=charuco_params, detectorParams=_detector_params()
+            )
             self._aruco: cv2.aruco.ArucoDetector | None = None
             # 3D corner coords (board units), indexed by ChArUco corner id — for PnP.
             self._object_points = np.asarray(cv_board.getChessboardCorners(), np.float32)
         else:
             self._charuco = None
-            self._aruco = cv2.aruco.ArucoDetector(dictionary)
+            self._aruco = cv2.aruco.ArucoDetector(dictionary, _detector_params())
             # Single marker: canonical centered square (TL, TR, BR, BL) for IPPE_SQUARE,
             # matching the corner order cv2.aruco returns.
             self._object_points = np.array(
@@ -173,8 +195,14 @@ class BoardDetector:
         ids: NDArray[np.int32] | None = None
         if self._charuco is not None:
             corners_raw, ids_raw, _, _ = self._charuco.detectBoard(gray)
-            if corners_raw is not None:
-                corners = corners_raw.reshape(-1, 2).astype(np.float32)
+            if corners_raw is not None and corners_raw.shape[0] >= 1:
+                # Sub-pixel refine the interpolated chessboard corners (calibration-grade).
+                refined = np.ascontiguousarray(corners_raw, dtype=np.float32)
+                try:
+                    cv2.cornerSubPix(gray, refined, _SUBPIX_WIN, (-1, -1), _SUBPIX_CRITERIA)
+                except cv2.error:
+                    refined = cast("NDArray[np.float32]", corners_raw)
+                corners = refined.reshape(-1, 2).astype(np.float32)
             if ids_raw is not None:
                 ids = ids_raw.reshape(-1).astype(np.int32)
         else:
