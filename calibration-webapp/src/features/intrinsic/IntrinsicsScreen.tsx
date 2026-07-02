@@ -235,6 +235,17 @@ function IntrinsicsInner() {
   const [overwriteOpen, setOverwriteOpen] = useState(false);
   const [computeError, setComputeError] = useState<string | null>(null);
 
+  // Cameras rehydrate from the API after mount; if this screen mounted first, the
+  // initial `active` is null. Once the list arrives (or the config changes so the
+  // current selection goes stale), select a valid camera so its track tile resolves.
+  const cameraNames = cameras.map((c) => c.name).join(',');
+  useEffect(() => {
+    if (cameras.length > 0 && !cameras.some((c) => c.name === active)) {
+      setActive(cameras[0].name);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cameraNames]);
+
   // On camera switch: live overlay on that camera + derive the sub-step from its status.
   useEffect(() => {
     if (!active) return;
