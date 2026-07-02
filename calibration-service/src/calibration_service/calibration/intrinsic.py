@@ -36,6 +36,7 @@ _CALIB_FLAGS = (
     cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_RATIONAL_MODEL | cv2.CALIB_FIX_ASPECT_RATIO
 )
 _DEFAULT_CAP = 25  # keyframes kept for the solve (MATLAB recommends 10-20)
+_MAX_DETECT_FRAMES = 400  # cap detection cost on long sweeps (spread across the video)
 _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # cv2.calibrateCameraExtended's internal per-view pose init (cvFindExtrinsicCameraParams2)
 # requires >= 6 point correspondences and hard-crashes below that — observed in
@@ -200,29 +201,35 @@ def compute_intrinsic_from_video(
     board: CalibrationBoard,
     *,
     cap: int = _DEFAULT_CAP,
-    stride: int = 1,
 ) -> IntrinsicResult:
     """Recompute intrinsics from a recorded capture (ADR-0019 record → compute).
 
-    Reads every frame, detects the board, selects a diverse keyframe subset, then
-    calibrates. Raises ``ValueError`` on an empty/unusable video (before the solver).
+    Detection (not the solve) dominates the cost on a long sweep, so an adaptive
+    read-stride caps how many frames are detected (spread across the whole video)
+    before the diverse keyframe subset is chosen. Raises ``ValueError`` on an
+    empty/unusable video (before the solver).
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
+    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    read_stride = max(1, total // _MAX_DETECT_FRAMES) if total > 0 else 1
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None
+    index = 0
     try:
         while True:
             ok, frame = capture.read()
             if not ok:
                 break
-            if image_size is None:
-                image_size = (frame.shape[1], frame.shape[0])
-            detections.append(detector.detect(cast("NDArray[np.uint8]", frame)))
+            if index % read_stride == 0:
+                if image_size is None:
+                    image_size = (frame.shape[1], frame.shape[0])
+                detections.append(detector.detect(cast("NDArray[np.uint8]", frame)))
+            index += 1
     finally:
         capture.release()
 
     if image_size is None:
         raise ValueError(f"no readable frames in {video_path}")
-    keyframes = select_keyframes(detections, image_size, cap=cap, stride=stride)
+    keyframes = select_keyframes(detections, image_size, cap=cap)
     return calibrate_intrinsic(keyframes, board, image_size)
