@@ -19,11 +19,11 @@ import {
 } from '@/features/telemetry/telemetrySlice';
 import { fetchToken, setActiveIntrinsic } from '@/transport/httpClient';
 
-// Board span (distance proxy) → colour band (mirrors the backend burn-in bands).
-function fillColor(fill: number): string {
-  if (fill < 0.25) return 'var(--rc-error)';
-  if (fill < 0.4) return '#fb923c';
-  if (fill < 0.55) return 'var(--rc-warning)';
+// Board coverage (extrapolated area / frame) → colour band; green >= 0.50 = calib.io.
+function fillColor(coverage: number): string {
+  if (coverage < 0.15) return 'var(--rc-error)';
+  if (coverage < 0.3) return '#fb923c';
+  if (coverage < 0.5) return 'var(--rc-warning)';
   return 'var(--rc-success)';
 }
 
@@ -47,7 +47,7 @@ function Gauge({ label, value, pct, color }: { label: string; value: string; pct
 
 function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
   const found = coverage?.board_found ?? false;
-  const fill = coverage?.fill_fraction ?? 0;
+  const fill = coverage?.board_coverage ?? 0;
   return (
     <Box
       style={{
@@ -76,7 +76,7 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
       </Group>
 
       <Gauge
-        label="Board span (distance)"
+        label="Board coverage (≥ 50 % target)"
         value={`${Math.round(fill * 100)}%`}
         pct={fill}
         color={fillColor(fill)}

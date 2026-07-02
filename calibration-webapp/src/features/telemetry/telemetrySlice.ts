@@ -9,7 +9,7 @@ export interface CoverageMetrics {
   camera: string;
   phase: string;
   board_found: boolean;
-  fill_fraction: number;
+  board_coverage: number;
   sharpness: number;
   sharpness_ok: boolean;
   grid_count: number;
