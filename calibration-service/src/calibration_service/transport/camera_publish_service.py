@@ -15,7 +15,9 @@ import contextlib
 import json
 import logging
 from dataclasses import dataclass
+from typing import cast
 
+import cv2
 import numpy as np
 from numpy.typing import NDArray
 
@@ -34,12 +36,16 @@ logger = logging.getLogger(__name__)
 
 
 def _process_frame(
-    detector: BoardDetector, image: NDArray[np.uint8]
+    detector: BoardDetector, image: NDArray[np.uint8], preview_size: tuple[int, int]
 ) -> tuple[NDArray[np.uint8], BoardDetection]:
-    """Detect the board and burn the overlay in — CPU-bound, meant for an executor."""
+    """Detect the board (native res) + burn the overlay in, downscaled to the preview.
+
+    CPU-bound; meant for an executor. Detection uses the full-resolution frame; the
+    returned preview is the downscaled burn-in for LiveKit.
+    """
     detection = detector.detect(image)
     preview = draw_overlay(image, detection, resize_factor=1.0)
-    return preview, detection
+    return _downscale(preview, preview_size), detection
 
 _EMPTY_READ_BACKOFF_S = 0.005
 _FIRST_FRAME_ATTEMPTS = 60
@@ -62,6 +68,24 @@ _DETECT_PERIOD_S = 1 / 12
 # Recording rate: ~30 Hz of native frames is ample to select keyframes from, and
 # caps the encode load. Writes run off the event loop.
 _RECORD_PERIOD_S = 1 / 30
+# Preview published to LiveKit is downscaled + rate-capped (ADR-0015): capture stays
+# native (for recording/detection), but publishing 4x1080p@60 overloads the CPU VP8
+# encoder. Downscaling the preview cuts encode ~4x and the fps cap ~2x.
+_PREVIEW_MAX_WIDTH = 960
+_PREVIEW_FPS = 30
+_PUSH_PERIOD_S = 1 / _PREVIEW_FPS
+
+
+def _preview_size(width: int, height: int) -> tuple[int, int]:
+    """Downscaled, even-dimensioned preview size (<= _PREVIEW_MAX_WIDTH wide)."""
+    scale = min(1.0, _PREVIEW_MAX_WIDTH / width)
+    return (round(width * scale) & ~1, round(height * scale) & ~1)
+
+
+def _downscale(image: NDArray[np.uint8], size: tuple[int, int]) -> NDArray[np.uint8]:
+    if (image.shape[1], image.shape[0]) == size:
+        return image
+    return cast("NDArray[np.uint8]", cv2.resize(image, size, interpolation=cv2.INTER_AREA))
 
 
 @dataclass(frozen=True)
@@ -214,8 +238,11 @@ class CameraPublishService:
                         logger.warning("camera %s produced no frame", target.name)
                         continue
                     height, width = first.image.shape[:2]
-                    await publisher.publish_camera_track(target.name, width, height, target.fps)
-                    publisher.push(target.name, first.image)
+                    preview_size = _preview_size(width, height)
+                    await publisher.publish_camera_track(
+                        target.name, preview_size[0], preview_size[1], _PREVIEW_FPS
+                    )
+                    publisher.push(target.name, _downscale(first.image, preview_size))
                     publisher.unmute(target.name)
                     capture_tasks.append(
                         asyncio.create_task(
@@ -247,49 +274,60 @@ class CameraPublishService:
     ) -> None:
         """Read one camera and push every frame to its track until the room disconnects.
 
-        The camera in intrinsic capture (``_active_intrinsic``) gets board detection,
-        burn-in overlay and ~10 Hz coverage telemetry; the others push raw frames. A
-        read failure (USB blip) is skipped, not fatal.
+        The preview published to LiveKit is downscaled + rate-capped (ADR-0015) to
+        keep the encoder from saturating. The camera in intrinsic capture
+        (``_active_intrinsic``) also gets board detection, burn-in overlay, ~10 Hz
+        coverage telemetry and disk recording (at native res); the others push raw.
+        A read failure (USB blip) is skipped, not fatal.
         """
+        preview_size = _preview_size(target.width, target.height) if target.width else None
         detector: BoardDetector | None = None
         last_telemetry = 0.0
         last_detect = 0.0
         last_record = 0.0
+        last_push = 0.0
         while not publisher.is_disconnected():
             frame = await loop.run_in_executor(None, camera.read)
             if frame is None:
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
                 continue
+            if preview_size is None:
+                preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
 
-            if self._active_intrinsic == target.name:
-                if detector is None:
-                    detector = self._build_detector()
-                now = loop.time()
-                # Detection + burn-in throttled (expensive); push raw frames between.
-                if detector is not None and now - last_detect >= _DETECT_PERIOD_S:
-                    last_detect = now
-                    preview, detection = await loop.run_in_executor(
-                        None, _process_frame, detector, frame.image
-                    )
-                    publisher.push(target.name, preview)
-                    if now - last_telemetry >= _TELEMETRY_PERIOD_S:
-                        last_telemetry = now
-                        payload = json.dumps(coverage_metrics_payload(target.name, detection))
-                        await publisher.send_data(payload, TELEMETRY_TOPIC)
+            now = loop.time()
+            active = self._active_intrinsic == target.name
+            if not active:
+                detector = None
+
+            # Publish the (downscaled) preview at a capped rate to spare the encoder.
+            if now - last_push >= _PUSH_PERIOD_S:
+                last_push = now
+                if active and now - last_detect >= _DETECT_PERIOD_S:
+                    if detector is None:
+                        detector = self._build_detector()
+                    if detector is not None:
+                        last_detect = now
+                        preview, detection = await loop.run_in_executor(
+                            None, _process_frame, detector, frame.image, preview_size
+                        )
+                        publisher.push(target.name, preview)
+                        if now - last_telemetry >= _TELEMETRY_PERIOD_S:
+                            last_telemetry = now
+                            payload = json.dumps(coverage_metrics_payload(target.name, detection))
+                            await publisher.send_data(payload, TELEMETRY_TOPIC)
+                    else:
+                        publisher.push(target.name, _downscale(frame.image, preview_size))
                 else:
-                    publisher.push(target.name, frame.image)
-                # Record the RAW frame (detection fidelity), throttled, off the event loop.
-                if now - last_record >= _RECORD_PERIOD_S:
-                    last_record = now
-                    async with self._recorder_lock:
-                        if self._recorder is not None:
-                            await loop.run_in_executor(None, self._recorder.write, frame.image)
-                await asyncio.sleep(0)
-                continue
+                    small = await loop.run_in_executor(None, _downscale, frame.image, preview_size)
+                    publisher.push(target.name, small)
 
-            detector = None  # released when this camera is no longer the active one
-            publisher.push(target.name, frame.image)
-            await asyncio.sleep(0)  # yield to the event loop
+            # Record the RAW native frame (detection fidelity), throttled, off event loop.
+            if active and now - last_record >= _RECORD_PERIOD_S:
+                last_record = now
+                async with self._recorder_lock:
+                    if self._recorder is not None:
+                        await loop.run_in_executor(None, self._recorder.write, frame.image)
+            await asyncio.sleep(0)
         logger.info("capture loop %s exiting (disconnected)", target.name)
 
     @staticmethod
