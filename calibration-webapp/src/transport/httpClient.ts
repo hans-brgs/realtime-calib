@@ -56,6 +56,11 @@ export const fetchBoardDictionaries = (): Promise<string[]> =>
 export const setActiveIntrinsic = (camera: string | null): Promise<{ active: string | null }> =>
   postJson<{ active: string | null }>('/intrinsic/active', { camera });
 
+// Report the operator's current wizard view so the service captures only the cameras
+// that view needs (ADR-0021: cameras/extrinsic -> all, intrinsic -> active, else none).
+export const setCaptureView = (view: string | null): Promise<{ view: string | null }> =>
+  postJson<{ view: string | null }>('/capture/view', { view });
+
 export const startIntrinsic = (camera: string): Promise<{ recording: string }> =>
   postJson<{ recording: string }>(`/intrinsic/${camera}/start`);
 

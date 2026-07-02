@@ -13,6 +13,7 @@ import {
 } from '@/features/session/selectors';
 import { StepContent } from '@/features/session/StepContent';
 import { WizardRail, type RailItem } from '@/features/session/WizardRail';
+import { setCaptureView } from '@/transport/httpClient';
 
 // Top-level shell: persistent Topbar + FSM rail + scrollable main. The rail replaces
 // the horizontal Stepper. `view` is volatile UI state (free navigation between
@@ -32,6 +33,12 @@ export function WizardShell() {
   useEffect(() => {
     setView(persistedView);
   }, [persistedView]);
+
+  // Report the current view so the service captures only the cameras it needs
+  // (ADR-0021): cameras/extrinsic → all, intrinsic → the active camera, else none.
+  useEffect(() => {
+    setCaptureView(view).catch(() => {});
+  }, [view]);
 
   const items: RailItem[] = [
     { id: 'session', label: 'Session', status: 'home' },
