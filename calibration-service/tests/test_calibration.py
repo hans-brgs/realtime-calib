@@ -57,6 +57,28 @@ def _detection(cx: float, cy: float, tilt: float, sharpness: float = 500.0) -> B
     )
 
 
+def test_intrinsic_result_scaled() -> None:
+    from calibration_service.calibration import IntrinsicResult
+
+    r = IntrinsicResult(
+        matrix=[[1337.0, 0.0, 993.0], [0.0, 1337.0, 544.0], [0.0, 0.0, 1.0]],
+        distortions=[0.1, -0.05, 0.0, 0.0, 0.0],
+        error=0.62,
+        per_view_errors=[0.6, 0.7],
+        grid_count=1000,
+        view_count=20,
+        image_size=(1920, 1080),
+    )
+    s = r.scaled(0.5)
+    assert s.matrix[0][0] == 668.5 and s.matrix[1][1] == 668.5  # fx, fy halved
+    assert s.matrix[0][2] == 496.5 and s.matrix[1][2] == 272.0  # cx, cy halved
+    assert s.matrix[2] == [0.0, 0.0, 1.0]  # homogeneous row untouched
+    assert s.distortions == r.distortions  # normalised — unchanged
+    assert s.image_size == (960, 540)
+    assert s.error == 0.31
+    assert r.scaled(1.0) is r  # no-op at native
+
+
 def test_is_well_spread_rejects_collinear() -> None:
     collinear = np.array([[0, 0], [5, 0], [10, 0], [15, 0], [20, 0], [25, 0]], np.float32)
     spread = np.array([[0, 0], [5, 0], [10, 0], [0, 5], [5, 5], [10, 5]], np.float32)

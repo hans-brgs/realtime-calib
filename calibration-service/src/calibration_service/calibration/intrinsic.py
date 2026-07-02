@@ -18,7 +18,7 @@ Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
 
@@ -58,6 +58,29 @@ class IntrinsicResult:
     grid_count: int  # total corners used across keyframes
     view_count: int  # keyframes used
     image_size: tuple[int, int]  # (width, height)
+
+    def scaled(self, factor: float) -> IntrinsicResult:
+        """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
+
+        We calibrate at native resolution for accuracy then rescale K + image size
+        to the operator's output resolution. Scaling the pinhole model is exact:
+        fx, fy, cx, cy (and pixel errors) scale by ``factor``; the normalised
+        distortion coefficients are unchanged.
+        """
+        if factor == 1.0:
+            return self
+        width, height = self.image_size
+        return replace(
+            self,
+            matrix=[
+                [v * factor for v in self.matrix[0]],
+                [v * factor for v in self.matrix[1]],
+                list(self.matrix[2]),
+            ],
+            error=self.error * factor,
+            per_view_errors=[e * factor for e in self.per_view_errors],
+            image_size=(round(width * factor), round(height * factor)),
+        )
 
 
 def _centroid(corners: NDArray[np.float32]) -> tuple[float, float]:

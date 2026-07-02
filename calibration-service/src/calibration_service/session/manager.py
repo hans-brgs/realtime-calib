@@ -126,6 +126,9 @@ class SessionManager:
         camera = next((c for c in session.cameras if c.name == camera_name), None)
         if camera is None:
             raise ValueError(f"unknown camera {camera_name!r}")
+        # Calibrated at native resolution; report at the operator's output resolution
+        # (native x resize_factor, ADR-0015).
+        result = result.scaled(camera.resize_factor)
         camera.matrix = result.matrix
         camera.distortions = result.distortions
         camera.calibration_error = result.error
