@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 from pathlib import Path
 
 from calibration_service.config import LiveKitConfig
@@ -14,6 +15,37 @@ from calibration_service.transport.camera_publish_service import (
 
 def _service(tmp_path: Path) -> CameraPublishService:
     return CameraPublishService(LiveKitConfig(), SessionManager(tmp_path))
+
+
+class _FakePublisher:
+    def __init__(self) -> None:
+        self.muted: list[str] = []
+
+    def mute(self, name: str) -> None:
+        self.muted.append(name)
+
+
+class _FakeCamera:
+    def __init__(self) -> None:
+        self.released = False
+
+    def release(self) -> None:
+        self.released = True
+
+
+class _FakeRecorder:
+    def __init__(self) -> None:
+        self.closed = False
+        self.frames = 3
+
+    def close(self) -> None:
+        self.closed = True
+
+
+async def _done_task() -> asyncio.Task[None]:
+    task: asyncio.Task[None] = asyncio.create_task(asyncio.sleep(0))
+    await task
+    return task
 
 
 def _targets(*names: str) -> dict[str, _PublishTarget]:
@@ -68,3 +100,36 @@ def test_passive_views_publish_nothing(tmp_path: Path) -> None:
     for view in ("boards", "review", "export", "session", "load"):
         service.set_active_view(view)
         assert service._desired_cameras(by_name) == set(), view
+
+
+def test_leaving_a_recording_camera_finalises_the_recorder(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        recorder = _FakeRecorder()
+        service._recorder = recorder  # type: ignore[assignment]
+        service._recording_camera = "cam_0"
+        publisher, camera = _FakePublisher(), _FakeCamera()
+        task = await _done_task()
+        await service._stop_capture(publisher, "cam_0", camera, task)  # type: ignore[arg-type]
+        assert recorder.closed is True
+        assert service._recorder is None
+        assert service._recording_camera is None
+        assert camera.released is True
+        assert "cam_0" in publisher.muted
+
+    asyncio.run(scenario())
+
+
+def test_leaving_a_non_recording_camera_keeps_the_recorder(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        recorder = _FakeRecorder()
+        service._recorder = recorder  # type: ignore[assignment]
+        service._recording_camera = "cam_0"
+        task = await _done_task()
+        await service._stop_capture(_FakePublisher(), "cam_1", _FakeCamera(), task)  # type: ignore[arg-type]
+        assert recorder.closed is False
+        assert service._recorder is recorder
+        assert service._recording_camera == "cam_0"
+
+    asyncio.run(scenario())

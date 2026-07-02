@@ -133,8 +133,11 @@ class CameraPublishService:
         self._active_intrinsic: str | None = None
         # Recording the raw sweep of the active camera to disk (ADR-0019), if any.
         # Writes run in the executor; the lock serialises write vs close (stop waits
-        # for an in-flight write before finalising the file).
+        # for an in-flight write before finalising the file). `_recording_camera` is
+        # the track being recorded, so the reconciler can finalise the sweep if that
+        # camera leaves the live set (navigation / switch) mid-recording (ADR-0021).
         self._recorder: VideoRecorder | None = None
+        self._recording_camera: str | None = None
         self._recorder_lock = asyncio.Lock()
 
     def set_active_view(self, view: str | None) -> None:
@@ -166,6 +169,7 @@ class CameraPublishService:
         record_fps = min(camera.fps, _RECORD_FPS) if camera.fps else _RECORD_FPS
         async with self._recorder_lock:
             self._recorder = VideoRecorder(path, camera.width, camera.height, record_fps)
+            self._recording_camera = camera_name
         logger.info("recording intrinsic sweep of %s -> %s", camera_name, path)
 
     async def stop_intrinsic_recording(self) -> int:
@@ -173,6 +177,7 @@ class CameraPublishService:
         async with self._recorder_lock:
             recorder = self._recorder
             self._recorder = None
+            self._recording_camera = None
             if recorder is None:
                 return 0
             recorder.close()
@@ -352,6 +357,10 @@ class CameraPublishService:
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
+        # If this camera was being recorded (operator left the intrinsic view or
+        # switched camera mid-sweep), finalise the file now rather than leaving it open.
+        if name == self._recording_camera:
+            await self.stop_intrinsic_recording()
         publisher.mute(name)  # keep the track (unpublish leaks, #449); just stop media
         camera.release()
         logger.info("camera %s released (muted + closed)", name)
