@@ -531,7 +531,7 @@ function IntrinsicsInner() {
                 ) : (
                   <CoverageHeatmap grid={metrics.coverage} />
                 )}
-                <Box style={{ position: 'absolute', top: 12, right: 12, zIndex: 2 }}>
+                <Box style={{ position: 'absolute', top: 38, right: 12, zIndex: 2 }}>
                   <SegmentedControl
                     size="xs"
                     value={resultsView}

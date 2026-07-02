@@ -1,3 +1,4 @@
+import { Box, Text } from '@mantine/core';
 import { Bounds, Line, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 
@@ -42,18 +43,23 @@ export function PoseScene({ quads }: { quads: number[][][] }) {
   const frustum = Math.max(1, Math.abs(meanDepth) * 0.15);
 
   return (
-    <Canvas
-      camera={{ position: [meanDepth * 1.4, -meanDepth * 0.9, -meanDepth * 0.6], fov: 50 }}
-      style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
-    >
-      <ambientLight intensity={0.8} />
-      <Bounds fit clip observe margin={1.3}>
-        <CameraFrustum size={frustum} />
-        {boards.map((corners, i) => (
-          <BoardOutline key={i} corners={corners} />
-        ))}
-      </Bounds>
-      <OrbitControls makeDefault enablePan={false} />
-    </Canvas>
+    <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
+      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
+        3D pose of calibrated boards
+      </Text>
+      <Canvas
+        camera={{ position: [meanDepth * 1.4, -meanDepth * 0.9, -meanDepth * 0.6], fov: 50 }}
+        style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
+      >
+        <ambientLight intensity={0.8} />
+        <Bounds fit clip observe margin={1.3}>
+          <CameraFrustum size={frustum} />
+          {boards.map((corners, i) => (
+            <BoardOutline key={i} corners={corners} />
+          ))}
+        </Bounds>
+        <OrbitControls makeDefault enablePan={false} />
+      </Canvas>
+    </Box>
   );
 }
