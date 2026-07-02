@@ -66,6 +66,22 @@ export function commonFps(cameras: DetectedCamera[], width: number, height: numb
   return [...first].filter((f) => rest.every((set) => set.has(f))).sort((a, b) => b - a);
 }
 
+// Standard capture rates offered to the operator, fastest first. A rate below what
+// the sensor advertises natively is still offered: the service honours it by pacing
+// the pipeline (dropping surplus frames). So the whole ladder is offerable up to the
+// camera's native max for the chosen resolution; the max caps it (can't exceed it).
+export const FPS_LADDER = [60, 30, 15] as const;
+
+export function offeredFps(cameras: DetectedCamera[], width: number, height: number): number[] {
+  const native = commonFps(cameras, width, height);
+  if (native.length === 0) {
+    return [];
+  }
+  const max = native[0]; // commonFps is sorted high-to-low
+  const ladder = FPS_LADDER.filter((f) => f <= max);
+  return ladder.length > 0 ? ladder : [max];
+}
+
 export const RESIZE_FACTORS = [1, 0.75, 0.5, 1 / 3, 0.25] as const;
 
 export interface CaptureDefaults {
@@ -79,7 +95,7 @@ export function defaultCapture(cameras: DetectedCamera[]): CaptureDefaults | nul
     return null;
   }
   const top = resolutions[0];
-  const fps = commonFps(cameras, top.width, top.height);
+  const fps = offeredFps(cameras, top.width, top.height);
   return { resolution: top, fps: fps[0] ?? 30 };
 }
 

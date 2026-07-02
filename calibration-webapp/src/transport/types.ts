@@ -26,6 +26,11 @@ export interface CameraConfig {
   resize_factor: number;
   fps: number;
   status: CameraStatus;
+  // Intrinsic calibration result (null until computed).
+  matrix?: number[][] | null;
+  distortions?: number[] | null;
+  calibration_error?: number | null;
+  grid_count?: number | null;
 }
 
 export type BoardType = 'charuco' | 'aruco';

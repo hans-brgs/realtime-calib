@@ -4,11 +4,13 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
+from calibration_service.recording import VideoRecorder
 from calibration_service.session.manager import SessionManager
 from calibration_service.session.store import load_session
 
@@ -131,3 +133,125 @@ def test_list_sessions_summaries(tmp_path: Path) -> None:
     assert summaries[0]["step"] == "intrinsic_capture"
     # modified_at is ISO 8601.
     assert "T" in summaries[0]["modified_at"]
+
+
+def test_capture_view_echoes_the_reported_view(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/capture/view", json={"view": "intrinsic"})
+    assert response.status_code == 200
+    assert response.json() == {"view": "intrinsic"}
+
+
+def test_capture_view_accepts_null(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/capture/view", json={"view": None})
+    assert response.status_code == 200
+    assert response.json() == {"view": None}
+
+
+def test_intrinsic_frame_server_serves_recorded_frames(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    path = manager.intrinsic_video_path("cam_0")
+    with VideoRecorder(path, 64, 48, fps=30) as rec:
+        for _ in range(3):
+            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+
+    count = client.get("/intrinsic/cam_0/frames")
+    assert count.status_code == 200
+    assert count.json()["total"] == 3
+
+    frame = client.get("/intrinsic/cam_0/frame/0")
+    assert frame.status_code == 200
+    assert frame.headers["content-type"] == "image/jpeg"
+    assert len(frame.content) > 0
+
+
+def test_intrinsic_frame_server_404_without_recording(tmp_path: Path) -> None:
+    assert _client(tmp_path).get("/intrinsic/nope/frames").status_code == 404
+    assert _client(tmp_path).get("/intrinsic/nope/frame/0").status_code == 404
+
+
+def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    path = manager.intrinsic_video_path("cam_0")
+    with VideoRecorder(path, 64, 48, fps=30) as rec:
+        for _ in range(3):
+            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+    # Trim past the 3 recorded frames -> forwarded to the solver stage -> empty range.
+    response = client.post("/intrinsic/cam_0/compute", json={"frame_start": 10})
+    assert response.status_code == 422
+    assert "no readable frames" in response.json()["detail"]
+
+
+def test_compute_persists_metrics_for_reload(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The whole point of persisting metrics.json: after a reload the Results view is
+    # restored from it. Stub the (SIGILL-prone) solver and check the round-trip.
+    from calibration_service.calibration.intrinsic import IntrinsicResult
+    from calibration_service.transport import api as api_module
+
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/x",
+                    "device_node": "/dev/video0",
+                    "width": 64,
+                    "height": 48,
+                    "fps": 30,
+                }
+            ],
+        },
+    )
+    with VideoRecorder(manager.intrinsic_video_path("cam_0"), 64, 48, fps=30) as rec:
+        for _ in range(3):
+            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+
+    fixture = IntrinsicResult(
+        matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
+        distortions=[0.0] * 8,
+        error=0.12,
+        per_view_errors=[0.1] * 6,
+        grid_count=42,
+        view_count=6,
+        image_size=(64, 48),
+        coverage=((0.0, 1.0), (0.5, 0.0)),
+        image_coverage=0.5,
+        orientation_bins=6,
+        board_quads=(((0.0, 0.0, 10.0), (1.0, 0.0, 10.0), (1.0, 1.0, 10.0), (0.0, 1.0, 10.0)),),
+    )
+    monkeypatch.setattr(api_module, "compute_intrinsic_from_video", lambda *a, **k: fixture)
+
+    assert client.post("/intrinsic/cam_0/compute").status_code == 200
+    # Simulate the reload: fetch the persisted metrics fresh.
+    metrics = client.get("/intrinsic/cam_0/metrics").json()
+    assert metrics["image_coverage"] == 0.5
+    assert metrics["orientation_bins"] == 6
+    assert metrics["coverage"] == [[0.0, 1.0], [0.5, 0.0]]
+    assert len(metrics["board_quads"]) == 1 and len(metrics["board_quads"][0]) == 4
+
+
+def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    assert client.get("/intrinsic/cam_0/metrics").status_code == 404  # nothing computed
+
+    path = manager.intrinsic_metrics_path("cam_0")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"coverage": [[0.0, 1.0]], "image_coverage": 0.8, "orientation_bins": 5}')
+    response = client.get("/intrinsic/cam_0/metrics")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["coverage"] == [[0.0, 1.0]]
+    assert body["image_coverage"] == 0.8
+    assert body["orientation_bins"] == 5

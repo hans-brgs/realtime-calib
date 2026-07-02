@@ -77,6 +77,24 @@ def test_list_sessions(tmp_path: Path) -> None:
     assert list_sessions(tmp_path) == ["alpha", "beta"]
 
 
+def test_round_trip_preserves_intrinsic_result(tmp_path: Path) -> None:
+    camera = _sample_camera()
+    camera.matrix = [[600.0, 0.0, 320.0], [0.0, 600.0, 240.0], [0.0, 0.0, 1.0]]
+    camera.distortions = [0.05, -0.02, 0.001, 0.0, 0.0, 0.0, 0.0, 0.0]
+    camera.calibration_error = 0.21
+    camera.grid_count = 480
+    camera.status = CameraStatus.INTRINSIC_DONE
+    session = CalibrationSession(session_id="demo", cameras=[camera])
+
+    save_session(tmp_path, session)
+    loaded = load_session(tmp_path, "demo")
+
+    assert loaded.cameras[0].matrix == camera.matrix
+    assert loaded.cameras[0].calibration_error == 0.21
+    assert loaded.cameras[0].grid_count == 480
+    assert loaded.cameras[0].status is CameraStatus.INTRINSIC_DONE
+
+
 def test_reload_maps_legacy_modes(tmp_path: Path) -> None:
     """Pre-ADR-0019 session.toml files still load (mode name mapping)."""
     base = session_dir(tmp_path, "legacy")

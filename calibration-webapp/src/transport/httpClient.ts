@@ -53,6 +53,52 @@ export const configureCameras = (request: ConfigRequest): Promise<Session> =>
 export const fetchBoardDictionaries = (): Promise<string[]> =>
   getJson<string[]>('/board/dictionaries');
 
+export const setActiveIntrinsic = (camera: string | null): Promise<{ active: string | null }> =>
+  postJson<{ active: string | null }>('/intrinsic/active', { camera });
+
+// Report the operator's current wizard view so the service captures only the cameras
+// that view needs (ADR-0021: cameras/extrinsic -> all, intrinsic -> active, else none).
+export const setCaptureView = (view: string | null): Promise<{ view: string | null }> =>
+  postJson<{ view: string | null }>('/capture/view', { view });
+
+export const startIntrinsic = (camera: string): Promise<{ recording: string }> =>
+  postJson<{ recording: string }>(`/intrinsic/${camera}/start`);
+
+export const stopIntrinsic = (camera: string): Promise<{ camera: string; frames: number }> =>
+  postJson<{ camera: string; frames: number }>(`/intrinsic/${camera}/stop`);
+
+// Prepare-step knobs forwarded to the compute (ADR-0022); omitted fields use auto/defaults.
+export interface ComputeParams {
+  stride?: number;
+  cap?: number;
+  frame_start?: number;
+  frame_end?: number;
+}
+
+export const computeIntrinsic = (camera: string, params?: ComputeParams): Promise<Session> =>
+  postJson<Session>(`/intrinsic/${camera}/compute`, params);
+
+// Frame-server (ADR-0022): total frames of the recorded sweep, and the URL to one
+// frame as JPEG (used directly as an <img> src for the Prepare scrubber).
+export const fetchIntrinsicFrameCount = (camera: string): Promise<{ total: number }> =>
+  getJson<{ total: number }>(`/intrinsic/${camera}/frames`);
+
+export const intrinsicFrameUrl = (camera: string, index: number): string =>
+  `${API_URL}/intrinsic/${camera}/frame/${index}`;
+
+// Review metrics persisted at compute (ADR-0022, Results): coverage heatmap grid,
+// Caliscope 5x5 image-coverage fraction, occupied tilt-azimuth sectors (/8), and each
+// keyframe board's 4 outline corners in 3D camera coords (for the pose scene).
+export interface IntrinsicMetrics {
+  coverage: number[][];
+  image_coverage: number;
+  orientation_bins: number;
+  board_quads: number[][][];
+}
+
+export const fetchIntrinsicMetrics = (camera: string): Promise<IntrinsicMetrics> =>
+  getJson<IntrinsicMetrics>(`/intrinsic/${camera}/metrics`);
+
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
 

@@ -22,9 +22,9 @@ import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import {
   buildConfigRequest,
-  commonFps,
   commonResolutions,
   defaultCapture,
+  offeredFps,
   outputDimensions,
   parseResolution,
   RESIZE_FACTORS,
@@ -219,14 +219,14 @@ export function CameraSetupScreen() {
 
   const resolutionOptions = commonResolutions(detected);
   const selected = resolution ? parseResolution(resolution) : null;
-  const fpsOptions = selected ? commonFps(detected, selected.width, selected.height) : [];
+  const fpsOptions = selected ? offeredFps(detected, selected.width, selected.height) : [];
   const output = selected ? outputDimensions(selected.width, selected.height, resizeFactor) : null;
 
   const onResolutionChange = (value: string | null) => {
     setResolution(value);
     if (value) {
       const { width, height } = parseResolution(value);
-      const next = commonFps(detected, width, height);
+      const next = offeredFps(detected, width, height);
       setFps(next[0] ?? null);
     }
   };
@@ -446,7 +446,8 @@ export function CameraSetupScreen() {
                   />
                   {fpsOptions.length > 0 && (
                     <Text fz="0.625rem" c="dark.3" mt={6} style={{ lineHeight: 1.5 }}>
-                      Top value is the fastest rate every camera supports at this resolution.
+                      Rates at or below the camera's native max for this resolution.
+                      Lower rates are paced by the service (fewer frames, less USB load).
                     </Text>
                   )}
                 </Box>

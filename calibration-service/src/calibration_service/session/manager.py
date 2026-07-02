@@ -9,16 +9,19 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
+from calibration_service.calibration import IntrinsicResult
 from calibration_service.capture.enumeration import enumerate_camera_devices
 from calibration_service.models.board import CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
     CalibrationSession,
     CameraConfig,
+    CameraStatus,
     SessionSummary,
     WizardStep,
     session_status,
 )
+from calibration_service.recording import intrinsic_capture_path
 from calibration_service.session.config_store import load_board_config, save_board_config
 from calibration_service.session.store import (
     SESSION_FILE,
@@ -105,6 +108,38 @@ class SessionManager:
         )
         save_session(self._sessions_dir, session)
         logger.info("defined %s board; step -> %s", target, session.step)
+        return session
+
+    @property
+    def sessions_dir(self) -> Path:
+        return self._sessions_dir
+
+    def intrinsic_video_path(self, camera_name: str) -> Path:
+        """Path of the recorded capture for a camera's intrinsic sweep."""
+        return intrinsic_capture_path(self._sessions_dir, self._session_id, camera_name)
+
+    def intrinsic_metrics_path(self, camera_name: str) -> Path:
+        """Path of the persisted review metrics (coverage/orientation/poses, ADR-0022)."""
+        return self.intrinsic_video_path(camera_name).with_name("metrics.json")
+
+    def set_intrinsic_result(
+        self, camera_name: str, result: IntrinsicResult
+    ) -> CalibrationSession:
+        """Store a computed intrinsic result on the camera and mark it done."""
+        session = self.current()
+        camera = next((c for c in session.cameras if c.name == camera_name), None)
+        if camera is None:
+            raise ValueError(f"unknown camera {camera_name!r}")
+        # Calibrated at native resolution; report at the operator's output resolution
+        # (native x resize_factor, ADR-0015).
+        result = result.scaled(camera.resize_factor)
+        camera.matrix = result.matrix
+        camera.distortions = result.distortions
+        camera.calibration_error = result.error
+        camera.grid_count = result.grid_count
+        camera.status = CameraStatus.INTRINSIC_DONE
+        save_session(self._sessions_dir, session)
+        logger.info("intrinsic result stored for %s (rms=%.3f)", camera_name, result.error)
         return session
 
     def configure_cameras(self, cameras: list[CameraConfig]) -> CalibrationSession:

@@ -14,6 +14,7 @@ class FakeSource:
 
     def __init__(self, frames: list[NDArray[np.uint8]]) -> None:
         self._frames = list(frames)
+        self._grabbed: NDArray[np.uint8] | None = None
         self.released = False
 
     def isOpened(self) -> bool:
@@ -24,6 +25,15 @@ class FakeSource:
             return True, self._frames.pop(0)
         return False, None
 
+    def grab(self) -> bool:
+        self._grabbed = self._frames.pop(0) if self._frames else None
+        return self._grabbed is not None
+
+    def retrieve(self) -> tuple[bool, NDArray[np.uint8] | None]:
+        if self._grabbed is None:
+            return False, None
+        return True, self._grabbed
+
     def get(self, prop_id: int) -> float:
         return 30.0
 
@@ -32,12 +42,18 @@ class FakeSource:
 
 
 class RaisingSource:
-    """A ``VideoSource`` whose ``read`` raises, simulating a vanished USB camera."""
+    """A ``VideoSource`` whose reads raise, simulating a vanished USB camera."""
 
     def isOpened(self) -> bool:
         return True
 
     def read(self) -> tuple[bool, NDArray[np.uint8] | None]:
+        raise RuntimeError("usb device disconnected")
+
+    def grab(self) -> bool:
+        raise RuntimeError("usb device disconnected")
+
+    def retrieve(self) -> tuple[bool, NDArray[np.uint8] | None]:
         raise RuntimeError("usb device disconnected")
 
     def get(self, prop_id: int) -> float:
@@ -74,6 +90,31 @@ def test_read_returns_none_when_source_exhausted() -> None:
 def test_read_returns_none_when_source_raises() -> None:
     camera = CameraCapture(RaisingSource(), camera_index=0)
     assert camera.read() is None
+
+
+def test_grab_then_retrieve_decodes_the_grabbed_frame() -> None:
+    source = FakeSource([_image(), _image()])
+    camera = CameraCapture(source, camera_index=3)
+
+    assert camera.grab() is True
+    frame = camera.retrieve()
+
+    assert frame is not None
+    assert frame.camera_index == 3
+    assert frame.frame_id == 1
+    assert frame.image.shape == (4, 4, 3)
+
+
+def test_grab_returns_false_when_source_exhausted() -> None:
+    camera = CameraCapture(FakeSource([]), camera_index=0)
+    assert camera.grab() is False
+    assert camera.retrieve() is None
+
+
+def test_grab_returns_false_when_source_raises() -> None:
+    camera = CameraCapture(RaisingSource(), camera_index=0)
+    assert camera.grab() is False
+    assert camera.retrieve() is None
 
 
 def test_context_manager_releases_source() -> None:

@@ -1,8 +1,9 @@
-import { IconCube, IconDownload, IconFocusCentered, IconTopologyStar3 } from '@tabler/icons-react';
+import { IconCube, IconDownload, IconTopologyStar3 } from '@tabler/icons-react';
 
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { TargetConfigScreen } from '@/features/board/TargetConfigScreen';
 import { CameraSetupScreen } from '@/features/cameras/CameraSetupScreen';
+import { IntrinsicsScreen } from '@/features/intrinsic/IntrinsicsScreen';
 import { DashboardScreen } from '@/features/session/DashboardScreen';
 import { LoadFromFilesScreen } from '@/features/session/LoadFromFilesScreen';
 import type { NavTarget } from '@/features/session/selectors';
@@ -26,13 +27,7 @@ export function StepContent({ view, onNavigate }: ScreenRouterProps) {
     case 'cameras':
       return <CameraSetupScreen />;
     case 'intrinsic':
-      return (
-        <PlaceholderScreen
-          icon={IconFocusCentered}
-          title="Intrinsics"
-          description="Per-camera capture with live burn-in and coverage gauges. High-fidelity screen coming in a later pass."
-        />
-      );
+      return <IntrinsicsScreen />;
     case 'extrinsic':
       return (
         <PlaceholderScreen

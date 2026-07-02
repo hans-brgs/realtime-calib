@@ -104,12 +104,37 @@ class LiveKitPublisher:
         if track is not None:
             track.unmute()
 
+    def mute(self, name: str) -> None:
+        """Stop sending media for a track without unpublishing it.
+
+        Used for on-demand capture (ADR-0021): when a camera leaves the live set we
+        mute its track and close the camera, rather than ``unpublish``-ing — the
+        LiveKit Python SDK leaks on frequent unpublish/republish cycles (~200 MB
+        each, issue #449). Tracks are published once and stay for the session.
+        """
+        track = self._tracks.get(name)
+        if track is not None:
+            track.mute()
+
     def push(self, name: str, image: NDArray[np.uint8]) -> None:
         """Push a BGR frame to the named track's source."""
         source = self._sources.get(name)
         if source is None:
             raise RuntimeError(f"push() for unpublished track {name!r}")
         source.capture_frame(bgr_to_video_frame(image))
+
+    async def send_data(self, payload: str, topic: str) -> None:
+        """Publish a data-channel message (best-effort, lossy) to subscribers.
+
+        Used for telemetry ([[coverage-metrics]]): dropping a packet is fine, so it
+        goes out unreliable and swallows errors rather than disturbing capture.
+        """
+        if self._room.connection_state != rtc.ConnectionState.CONN_CONNECTED:
+            return
+        try:
+            await self._room.local_participant.publish_data(payload, reliable=False, topic=topic)
+        except Exception:
+            logger.debug("data publish failed (topic=%s)", topic, exc_info=True)
 
     def is_disconnected(self) -> bool:
         """True once the room is fully disconnected (LiveKit gone / gave up reconnecting).

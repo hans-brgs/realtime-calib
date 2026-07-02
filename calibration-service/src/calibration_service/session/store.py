@@ -97,6 +97,54 @@ def session_mtime(sessions_dir: Path, session_id: str) -> float:
     return (session_dir(sessions_dir, session_id) / SESSION_FILE).stat().st_mtime
 
 
+def _camera_to_dict(c: CameraConfig) -> dict[str, object]:
+    data: dict[str, object] = {
+        "index": c.index,
+        "name": c.name,
+        "prefix": c.prefix,
+        "device_path": c.device_path,
+        "device_node": c.device_node,
+        "width": c.width,
+        "height": c.height,
+        "resize_factor": c.resize_factor,
+        "fps": c.fps,
+        "status": c.status.value,
+    }
+    # Intrinsic results are optional; omit when absent (rtoml has no null).
+    if c.matrix is not None:
+        data["matrix"] = c.matrix
+    if c.distortions is not None:
+        data["distortions"] = c.distortions
+    if c.calibration_error is not None:
+        data["calibration_error"] = c.calibration_error
+    if c.grid_count is not None:
+        data["grid_count"] = c.grid_count
+    return data
+
+
+def _camera_from_dict(c: Mapping[str, Any]) -> CameraConfig:
+    matrix = c.get("matrix")
+    distortions = c.get("distortions")
+    error = c.get("calibration_error")
+    grid_count = c.get("grid_count")
+    return CameraConfig(
+        index=int(c["index"]),
+        name=str(c["name"]),
+        prefix=str(c["prefix"]),
+        device_path=str(c["device_path"]),
+        device_node=str(c["device_node"]),
+        width=int(c["width"]),
+        height=int(c["height"]),
+        resize_factor=float(c["resize_factor"]),
+        fps=int(c["fps"]),
+        status=CameraStatus(c["status"]),
+        matrix=[[float(v) for v in row] for row in matrix] if matrix is not None else None,
+        distortions=[float(v) for v in distortions] if distortions is not None else None,
+        calibration_error=float(error) if error is not None else None,
+        grid_count=int(grid_count) if grid_count is not None else None,
+    )
+
+
 def _to_dict(session: CalibrationSession) -> dict[str, object]:
     return {
         "session_id": session.session_id,
@@ -104,40 +152,12 @@ def _to_dict(session: CalibrationSession) -> dict[str, object]:
         "mode": session.mode.value,
         "intrinsic_fps": session.intrinsic_fps,
         "optimization_strategy": session.optimization_strategy,
-        "cameras": [
-            {
-                "index": c.index,
-                "name": c.name,
-                "prefix": c.prefix,
-                "device_path": c.device_path,
-                "device_node": c.device_node,
-                "width": c.width,
-                "height": c.height,
-                "resize_factor": c.resize_factor,
-                "fps": c.fps,
-                "status": c.status.value,
-            }
-            for c in session.cameras
-        ],
+        "cameras": [_camera_to_dict(c) for c in session.cameras],
     }
 
 
 def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
-    cameras = [
-        CameraConfig(
-            index=int(c["index"]),
-            name=str(c["name"]),
-            prefix=str(c["prefix"]),
-            device_path=str(c["device_path"]),
-            device_node=str(c["device_node"]),
-            width=int(c["width"]),
-            height=int(c["height"]),
-            resize_factor=float(c["resize_factor"]),
-            fps=int(c["fps"]),
-            status=CameraStatus(c["status"]),
-        )
-        for c in data.get("cameras", [])
-    ]
+    cameras = [_camera_from_dict(c) for c in data.get("cameras", [])]
     return CalibrationSession(
         session_id=str(data["session_id"]),
         step=WizardStep(data["step"]),

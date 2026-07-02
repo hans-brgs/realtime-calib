@@ -5,6 +5,8 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 
 from __future__ import annotations
 
+import asyncio
+import json
 from datetime import UTC, datetime
 from typing import Literal
 
@@ -12,6 +14,7 @@ from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
+from calibration_service.calibration import compute_intrinsic_from_video
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
@@ -19,6 +22,7 @@ from calibration_service.models.session import (
     CameraConfig,
     CameraStatus,
 )
+from calibration_service.recording import frame_count, read_frame_jpeg
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -68,6 +72,10 @@ class CameraConfigOut(BaseModel):
     resize_factor: float
     fps: int
     status: str
+    matrix: list[list[float]] | None = None
+    distortions: list[float] | None = None
+    calibration_error: float | None = None
+    grid_count: int | None = None
 
 
 class BoardIn(BaseModel):
@@ -179,6 +187,10 @@ def _session_out(session: CalibrationSession) -> SessionOut:
                 resize_factor=c.resize_factor,
                 fps=c.fps,
                 status=c.status,
+                matrix=c.matrix,
+                distortions=c.distortions,
+                calibration_error=c.calibration_error,
+                grid_count=c.grid_count,
             )
             for c in session.cameras
         ],
@@ -256,6 +268,157 @@ async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut
 @router.get("/board/dictionaries", response_model=list[str])
 async def board_dictionaries() -> list[str]:
     return list(SUPPORTED_DICTIONARIES)
+
+
+class ActiveIntrinsicRequest(BaseModel):
+    camera: str | None  # track name (e.g. "cam_0"), or null to stop
+
+
+@router.post("/intrinsic/active")
+async def set_active_intrinsic(request: Request, body: ActiveIntrinsicRequest) -> dict[str, object]:
+    """Select which camera runs board detection/overlay/telemetry (Phase 3.5)."""
+    service = get_publish_service(request)
+    if service is not None:
+        service.set_active_intrinsic(body.camera)
+    return {"active": body.camera}
+
+
+class CaptureViewRequest(BaseModel):
+    view: str | None  # wizard view id (e.g. "intrinsic", "cameras"), or null
+
+
+@router.post("/capture/view")
+async def set_capture_view(request: Request, body: CaptureViewRequest) -> dict[str, object]:
+    """Report the operator's current wizard view; drives the live camera set (ADR-0021).
+
+    On-demand capture: the service opens/publishes only the cameras this view needs
+    (``cameras``/``extrinsic`` → all, ``intrinsic`` → the active camera, else none).
+    """
+    service = get_publish_service(request)
+    if service is not None:
+        service.set_active_view(body.view)
+    return {"view": body.view}
+
+
+@router.post("/intrinsic/{camera}/start")
+async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
+    """Begin recording the intrinsic sweep of ``camera`` (record → compute → review)."""
+    service = get_publish_service(request)
+    if service is None:
+        raise HTTPException(status_code=503, detail="capture service unavailable")
+    try:
+        await service.start_intrinsic_recording(camera)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    return {"recording": camera}
+
+
+@router.post("/intrinsic/{camera}/stop")
+async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
+    """Finalise the recording; the video is ready to compute."""
+    service = get_publish_service(request)
+    frames = await service.stop_intrinsic_recording() if service is not None else 0
+    return {"camera": camera, "frames": frames}
+
+
+@router.get("/intrinsic/{camera}/frames")
+async def intrinsic_frame_count(request: Request, camera: str) -> dict[str, int]:
+    """Total frame count of the recorded sweep, for the Prepare scrubber (ADR-0022)."""
+    path = get_manager(request).intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+    total = await asyncio.get_running_loop().run_in_executor(None, frame_count, path)
+    return {"total": total}
+
+
+@router.get("/intrinsic/{camera}/frame/{index}")
+async def intrinsic_frame(request: Request, camera: str, index: int) -> Response:
+    """Serve frame ``index`` of the recorded sweep as JPEG (ADR-0022, frame-server)."""
+    path = get_manager(request).intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+    jpeg = await asyncio.get_running_loop().run_in_executor(None, read_frame_jpeg, path, index)
+    if jpeg is None:
+        raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
+    return Response(content=jpeg, media_type="image/jpeg")
+
+
+class ComputeRequest(BaseModel):
+    """Prepare-step knobs (ADR-0022); all optional — omitted fields use auto/defaults."""
+
+    stride: int | None = None  # "process every N frames" (read decimation); None = auto
+    cap: int | None = None  # keyframe cap (plafond); None = default
+    frame_start: int = 0  # trim start (frame index)
+    frame_end: int | None = None  # trim end (exclusive); None = end of recording
+
+
+@router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
+async def compute_intrinsic(
+    request: Request, camera: str, body: ComputeRequest | None = None
+) -> SessionOut:
+    """Compute intrinsics from the recorded sweep and store them (Phase 3.7).
+
+    The optional body carries the Prepare-step knobs (stride/cap/trim, ADR-0022).
+    Reads the video off the capture loop (executor); the capture is released
+    (overlay/telemetry off) while the solver runs (ADR-0019).
+    """
+    params = body or ComputeRequest()
+    manager = get_manager(request)
+    board = manager.current().intrinsic_board
+    if board is None:
+        raise HTTPException(status_code=422, detail="no intrinsic board defined")
+
+    service = get_publish_service(request)
+    if service is not None:
+        await service.stop_intrinsic_recording()
+        service.set_active_intrinsic(None)
+
+    path = manager.intrinsic_video_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: compute_intrinsic_from_video(
+                path,
+                board,
+                cap=params.cap,
+                stride=params.stride,
+                frame_start=params.frame_start,
+                frame_end=params.frame_end,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    session = manager.set_intrinsic_result(camera, result)
+    # Persist the review metrics next to the recording so the Results view survives a
+    # reload/resume (ADR-0022); all fields are resolution-independent.
+    metrics = {
+        "coverage": [list(row) for row in result.coverage],
+        "image_coverage": result.image_coverage,
+        "orientation_bins": result.orientation_bins,
+        "board_quads": [[list(point) for point in quad] for quad in result.board_quads],
+    }
+    metrics_path = manager.intrinsic_metrics_path(camera)
+    metrics_path.parent.mkdir(parents=True, exist_ok=True)
+    metrics_path.write_text(json.dumps(metrics))
+    return _session_out(session)
+
+
+@router.get("/intrinsic/{camera}/metrics")
+async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
+    """Serve the persisted review metrics for the Results view (ADR-0022).
+
+    ``{coverage: heatmap grid, image_coverage: 5x5 fraction, orientation_bins: /8,
+    board_quads: per-keyframe 4x3 board outline in camera coords}``.
+    """
+    path = get_manager(request).intrinsic_metrics_path(camera)
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no metrics for {camera}")
+    payload: dict[str, object] = json.loads(path.read_text())
+    return payload
 
 
 @router.post("/board", response_model=SessionOut)
