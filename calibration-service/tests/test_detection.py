@@ -56,6 +56,14 @@ def test_tilt_frontal_square_near_zero() -> None:
     assert tilt is not None and tilt < 10.0
 
 
+def test_tilt_ippe_square_path() -> None:
+    # Single-marker path: canonical centered square + IPPE_SQUARE, frontal → ~0 deg.
+    obj = np.array([[-0.5, 0.5, 0], [0.5, 0.5, 0], [0.5, -0.5, 0], [-0.5, -0.5, 0]], np.float32)
+    img = np.array([[300, 220], [340, 220], [340, 260], [300, 260]], np.float32)
+    tilt = _tilt_deg(obj, img, 640, 480, square=True)
+    assert tilt is not None and tilt < 10.0
+
+
 def test_blank_frame_not_found() -> None:
     board = _charuco()
     blank = np.full((480, 640), 255, np.uint8)

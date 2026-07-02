@@ -86,23 +86,33 @@ def _guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
 
 
 def _tilt_deg(
-    object_points: NDArray[np.float32], image_points: NDArray[np.float32], width: int, height: int
+    object_points: NDArray[np.float32],
+    image_points: NDArray[np.float32],
+    width: int,
+    height: int,
+    *,
+    square: bool = False,
 ) -> float | None:
     """Board tilt vs the frontal plane (degrees) from a planar PnP pose (guessed K).
 
-    Uses IPPE (planar, works from 4 coplanar points). Returns None when the points
-    are too few or collinear (degenerate pose) — the board points are always
-    coplanar, so a spread in both board axes is required.
+    ``square`` (single ArUco marker, exactly 4 corners) uses IPPE_SQUARE, the
+    square-specific planar solver; otherwise IPPE (planar, >= 4 coplanar points).
+    Returns None on degenerate input (too few / collinear) so it never crashes capture.
     """
-    if object_points.shape[0] < 4:
-        return None
-    if len(np.unique(object_points[:, 0])) < 2 or len(np.unique(object_points[:, 1])) < 2:
-        return None  # collinear → pose ill-defined
+    n = object_points.shape[0]
+    if square:
+        if n != 4:
+            return None
+        flag = cv2.SOLVEPNP_IPPE_SQUARE
+    else:
+        if n < 4:
+            return None
+        if len(np.unique(object_points[:, 0])) < 2 or len(np.unique(object_points[:, 1])) < 2:
+            return None  # collinear → pose ill-defined
+        flag = cv2.SOLVEPNP_IPPE
     camera_matrix = _guessed_camera_matrix(width, height)
     try:
-        ok, rvec, _ = cv2.solvePnP(
-            object_points, image_points, camera_matrix, None, flags=cv2.SOLVEPNP_IPPE
-        )
+        ok, rvec, _ = cv2.solvePnP(object_points, image_points, camera_matrix, None, flags=flag)
     except cv2.error:
         return None
     if not ok:
@@ -149,9 +159,10 @@ class BoardDetector:
         else:
             self._charuco = None
             self._aruco = cv2.aruco.ArucoDetector(dictionary)
-            # A single marker: its 4 corners as a unit square (TL, TR, BR, BL).
+            # Single marker: canonical centered square (TL, TR, BR, BL) for IPPE_SQUARE,
+            # matching the corner order cv2.aruco returns.
             self._object_points = np.array(
-                [[0, 0, 0], [1, 0, 0], [1, 1, 0], [0, 1, 0]], np.float32
+                [[-0.5, 0.5, 0], [0.5, 0.5, 0], [0.5, -0.5, 0], [-0.5, -0.5, 0]], np.float32
             )
 
     def detect(self, image: NDArray[np.uint8]) -> BoardDetection:
@@ -180,12 +191,13 @@ class BoardDetector:
 
         coverage = _coverage(outline, width, height) if outline is not None else 0.0
 
-        if self._charuco is not None and ids is not None:
+        is_square = self._charuco is None  # single ArUco marker
+        if not is_square and ids is not None:
             object_points = self._object_points[ids]
         else:
             object_points = self._object_points
         tilt = (
-            _tilt_deg(object_points, corners, width, height)
+            _tilt_deg(object_points, corners, width, height, square=is_square)
             if object_points.shape[0] == corners.shape[0]
             else None
         )
