@@ -4,13 +4,29 @@ import {
   useDataChannel,
   useTracks,
 } from '@livekit/components-react';
-import { Box, Button, Center, Group, Loader, Modal, Progress, SegmentedControl, Text } from '@mantine/core';
-import { IconAlertTriangle, IconPlayerRecordFilled, IconPlayerStopFilled } from '@tabler/icons-react';
+import {
+  Box,
+  Button,
+  Center,
+  Group,
+  Loader,
+  Modal,
+  NumberInput,
+  Progress,
+  SegmentedControl,
+  Text,
+} from '@mantine/core';
+import {
+  IconAlertTriangle,
+  IconPlayerRecordFilled,
+  IconPlayerStopFilled,
+} from '@tabler/icons-react';
 import { Track } from 'livekit-client';
 import { useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
 import { CameraTile } from '@/features/preview/CameraTile';
 import { computeIntrinsicThunk, selectSession } from '@/features/session/sessionSlice';
 import {
@@ -18,10 +34,16 @@ import {
   coverageReceived,
   selectCoverage,
 } from '@/features/telemetry/telemetrySlice';
-import { fetchToken, setActiveIntrinsic, startIntrinsic, stopIntrinsic } from '@/transport/httpClient';
+import {
+  fetchIntrinsicFrameCount,
+  fetchToken,
+  setActiveIntrinsic,
+  startIntrinsic,
+  stopIntrinsic,
+} from '@/transport/httpClient';
 import type { CameraConfig } from '@/transport/types';
 
-type Step = 'record' | 'computing' | 'review';
+type Step = 'capture' | 'prepare' | 'computing' | 'results';
 
 // Board coverage (extrapolated area / frame) → colour band; green >= 0.50 = calib.io.
 function fillColor(coverage: number): string {
@@ -164,10 +186,82 @@ function ResultPanel({ camera }: { camera: CameraConfig }) {
   );
 }
 
+interface PreparePanelProps {
+  frame: number;
+  trimStart: number;
+  trimEnd: number;
+  stride: number;
+  keyframeCap: number;
+  onTrimStart: (n: number) => void;
+  onTrimEnd: (n: number) => void;
+  onStride: (n: number) => void;
+  onCap: (n: number) => void;
+}
+
+// Right-side dashboard in the Prepare step (ADR-0022): trim + sampling stride +
+// keyframe cap, forwarded to the compute. Components mirror design/realtime-calib.dc.html.
+function PreparePanel({
+  frame,
+  trimStart,
+  trimEnd,
+  stride,
+  keyframeCap,
+  onTrimStart,
+  onTrimEnd,
+  onStride,
+  onCap,
+}: PreparePanelProps) {
+  return (
+    <>
+      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
+        Prepare · from recording
+      </Text>
+
+      <Group justify="space-between" mb={6}>
+        <Text fz="0.72rem" c="dark.2">
+          Trim (frames)
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {trimStart}–{trimEnd}
+        </Text>
+      </Group>
+      <Group gap="xs" mb="lg" grow>
+        <Button size="xs" variant="light" color="gray" onClick={() => onTrimStart(frame)}>
+          Set in @ {frame}
+        </Button>
+        <Button size="xs" variant="light" color="gray" onClick={() => onTrimEnd(frame)}>
+          Set out @ {frame}
+        </Button>
+      </Group>
+
+      <NumberInput
+        label="Sampling stride (1 frame / N)"
+        value={stride}
+        onChange={(v) => onStride(Math.max(1, Number(v) || 1))}
+        min={1}
+        max={30}
+        mb="md"
+      />
+      <NumberInput
+        label="Keyframe cap (max kept)"
+        value={keyframeCap}
+        onChange={(v) => onCap(Math.max(6, Number(v) || 6))}
+        min={6}
+        max={60}
+        mb="md"
+      />
+      <Text fz="0.66rem" c="dark.3">
+        Fewer keyframes → faster compute, potentially lower coverage.
+      </Text>
+    </>
+  );
+}
+
 const STEPS: { key: Step; label: string }[] = [
-  { key: 'record', label: 'Record' },
-  { key: 'computing', label: 'Compute' },
-  { key: 'review', label: 'Review' },
+  { key: 'capture', label: 'Capture' },
+  { key: 'prepare', label: 'Prepare' },
+  { key: 'computing', label: 'Computing' },
+  { key: 'results', label: 'Results' },
 ];
 
 function StepIndicator({ step }: { step: Step }) {
@@ -230,10 +324,18 @@ function IntrinsicsInner() {
   const coverage = useAppSelector(selectCoverage(active));
   const camera = cameras.find((c) => c.name === active) ?? null;
 
-  const [step, setStep] = useState<Step>('record');
+  const [step, setStep] = useState<Step>('capture');
   const [recording, setRecording] = useState(false);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
   const [computeError, setComputeError] = useState<string | null>(null);
+
+  // Prepare-step state (ADR-0022): the recorded sweep + the operator knobs.
+  const [frameTotal, setFrameTotal] = useState(0);
+  const [frame, setFrame] = useState(0);
+  const [stride, setStride] = useState(5);
+  const [keyframeCap, setKeyframeCap] = useState(25);
+  const [trimStart, setTrimStart] = useState(0);
+  const [trimEnd, setTrimEnd] = useState(0);
 
   // Cameras rehydrate from the API after mount; if this screen mounted first, the
   // initial `active` is null. Once the list arrives (or the config changes so the
@@ -246,14 +348,19 @@ function IntrinsicsInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraNames]);
 
-  // On camera switch: live overlay on that camera + derive the sub-step from its status.
+  // On camera switch: reset to the right sub-step for that camera's status.
   useEffect(() => {
     if (!active) return;
-    setActiveIntrinsic(active).catch(() => {});
     setRecording(false);
-    setStep(camera?.status === 'intrinsic_done' ? 'review' : 'record');
+    setStep(camera?.status === 'intrinsic_done' ? 'results' : 'capture');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
+
+  // The live camera is only needed while capturing; Prepare/Results scrub the file.
+  useEffect(() => {
+    if (!active) return;
+    setActiveIntrinsic(step === 'capture' ? active : null).catch(() => {});
+  }, [active, step]);
 
   useEffect(() => () => void setActiveIntrinsic(null).catch(() => {}), []);
 
@@ -262,27 +369,49 @@ function IntrinsicsInner() {
   );
   const activeRef = trackRefs.find((r) => r.publication.trackName === active);
 
+  const startRecording = async () => {
+    if (!active) return;
+    await startIntrinsic(active).catch(() => {});
+    setRecording(true);
+    setStep('capture');
+  };
+
+  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
+  const stopRecording = async () => {
+    if (!active) return;
+    await stopIntrinsic(active).catch(() => {});
+    setRecording(false);
+    let total = 0;
+    try {
+      total = (await fetchIntrinsicFrameCount(active)).total;
+    } catch {
+      /* leave total at 0; the scrubber shows an empty-recording state */
+    }
+    setFrameTotal(total);
+    setFrame(0);
+    setTrimStart(0);
+    setTrimEnd(Math.max(0, total - 1));
+    setStride(5);
+    setKeyframeCap(25);
+    setStep('prepare');
+  };
+
   const runCompute = async () => {
     if (!active) return;
     setStep('computing');
     setComputeError(null);
     try {
-      await stopIntrinsic(active);
-      await dispatch(computeIntrinsicThunk(active)).unwrap();
-      setStep('review');
+      await dispatch(
+        computeIntrinsicThunk({
+          camera: active,
+          params: { stride, cap: keyframeCap, frame_start: trimStart, frame_end: trimEnd + 1 },
+        }),
+      ).unwrap();
+      setStep('results');
     } catch (err) {
       setComputeError(err instanceof Error ? err.message : 'compute failed');
-      setStep('record');
-    } finally {
-      setRecording(false);
+      setStep('prepare');
     }
-  };
-
-  const startRecording = async () => {
-    if (!active) return;
-    await startIntrinsic(active).catch(() => {});
-    setRecording(true);
-    setStep('record');
   };
 
   // Re-record replaces the sweep (and, once recomputed, the calibration). On an
@@ -291,14 +420,14 @@ function IntrinsicsInner() {
     if (camera?.status === 'intrinsic_done') {
       setOverwriteOpen(true);
     } else {
-      setStep('record');
+      setStep('capture');
     }
   };
 
   const confirmReRecord = () => {
     setOverwriteOpen(false);
     setRecording(false);
-    setStep('record');
+    setStep('capture');
   };
 
   const nextCamera = () => {
@@ -306,6 +435,8 @@ function IntrinsicsInner() {
     const next = cameras[idx + 1];
     if (next) setActive(next.name);
   };
+
+  const scrubbing = step === 'prepare' || step === 'computing';
 
   return (
     <>
@@ -327,19 +458,25 @@ function IntrinsicsInner() {
         style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 22 }}
       >
         <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
-          {step === 'review' ? (
-            // ADR-0019 reviewing = scrubbable annotated replay of the recorded
-            // video (detected + reprojected corners). Not built yet — the live
-            // feed here would be misleading, so show a placeholder.
+          {step === 'results' ? (
+            // ADR-0022 Results = coverage heatmap of the field of view (B7). Not built
+            // yet — the result summary is on the right.
             <Center
               h="100%"
               style={{ border: '1px dashed var(--rc-border)', borderRadius: 'var(--mantine-radius-md)' }}
             >
               <Text c="dark.3" fz="0.84rem" ta="center" maw={280}>
-                Annotated replay (scrub + reprojected corners) coming next — for now,
-                the result is on the right.
+                Coverage heatmap coming next — for now, the result is on the right.
               </Text>
             </Center>
+          ) : scrubbing && active ? (
+            <PrepareScrubber
+              camera={active}
+              total={frameTotal}
+              frame={frame}
+              onFrame={setFrame}
+              trim={[trimStart, trimEnd]}
+            />
           ) : activeRef ? (
             <CameraTile trackRef={activeRef} label={active ?? undefined} />
           ) : (
@@ -349,7 +486,7 @@ function IntrinsicsInner() {
               </Text>
             </Center>
           )}
-          {recording && (
+          {recording && step === 'capture' && (
             <Group
               gap={6}
               px={10}
@@ -376,7 +513,23 @@ function IntrinsicsInner() {
             flexDirection: 'column',
           }}
         >
-          {step === 'review' && camera ? <ResultPanel camera={camera} /> : <GaugesPanel coverage={coverage} />}
+          {step === 'results' && camera ? (
+            <ResultPanel camera={camera} />
+          ) : scrubbing ? (
+            <PreparePanel
+              frame={frame}
+              trimStart={trimStart}
+              trimEnd={trimEnd}
+              stride={stride}
+              keyframeCap={keyframeCap}
+              onTrimStart={(n) => setTrimStart(Math.min(n, trimEnd))}
+              onTrimEnd={(n) => setTrimEnd(Math.max(n, trimStart))}
+              onStride={setStride}
+              onCap={setKeyframeCap}
+            />
+          ) : (
+            <GaugesPanel coverage={coverage} />
+          )}
 
           {computeError && (
             <Text fz="0.72rem" c="var(--rc-error)" mt="sm">
@@ -385,7 +538,7 @@ function IntrinsicsInner() {
           )}
 
           <Box mt="auto" pt="md">
-            {step === 'review' ? (
+            {step === 'results' ? (
               <>
                 <Button fullWidth onClick={nextCamera} disabled={cameras.findIndex((c) => c.name === active) >= cameras.length - 1}>
                   Validate → next camera
@@ -401,14 +554,18 @@ function IntrinsicsInner() {
                   Re-record
                 </Button>
               </>
+            ) : scrubbing ? (
+              <Button fullWidth loading={step === 'computing'} onClick={() => void runCompute()}>
+                Compute
+              </Button>
             ) : recording ? (
               <Button
                 fullWidth
                 color="red"
                 leftSection={<IconPlayerStopFilled size={16} />}
-                onClick={() => void runCompute()}
+                onClick={() => void stopRecording()}
               >
-                Stop &amp; compute
+                Stop
               </Button>
             ) : (
               <Button
@@ -465,8 +622,9 @@ function IntrinsicsInner() {
   );
 }
 
-// Intrinsic calibration per camera (ADR-0019 sub-FSM record → compute → review):
-// sweep the board (live burn-in + gauges), compute from the recording, review the RMSE.
+// Intrinsic calibration per camera (ADR-0022 sub-FSM capture → prepare → computing →
+// results): sweep the board (live burn-in + gauges), replay + tune the sampling in
+// Prepare, compute from the recording, then review the result + coverage.
 export function IntrinsicsScreen() {
   const [connection, setConnection] = useState<{ serverUrl: string; token: string } | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -491,7 +649,7 @@ export function IntrinsicsScreen() {
     <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       <ScreenHeader
         title="Intrinsics"
-        subtitle="Per camera: record a board sweep, compute, then review the reprojection error before validating."
+        subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
       />
       {error ? (
         <Center style={{ flex: 1 }}>

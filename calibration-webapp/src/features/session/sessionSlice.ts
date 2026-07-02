@@ -2,6 +2,7 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 
 import type { RootState } from '@/app/store';
 import {
+  type ComputeParams,
   computeIntrinsic,
   configureCameras,
   defineBoard,
@@ -45,8 +46,9 @@ export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request:
   defineBoard(request),
 );
 
-export const computeIntrinsicThunk = createAsyncThunk('session/computeIntrinsic', (camera: string) =>
-  computeIntrinsic(camera),
+export const computeIntrinsicThunk = createAsyncThunk(
+  'session/computeIntrinsic',
+  ({ camera, params }: { camera: string; params?: ComputeParams }) => computeIntrinsic(camera, params),
 );
 
 const sessionSlice = createSlice({

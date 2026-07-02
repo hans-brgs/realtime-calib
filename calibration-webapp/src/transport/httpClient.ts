@@ -67,8 +67,24 @@ export const startIntrinsic = (camera: string): Promise<{ recording: string }> =
 export const stopIntrinsic = (camera: string): Promise<{ camera: string; frames: number }> =>
   postJson<{ camera: string; frames: number }>(`/intrinsic/${camera}/stop`);
 
-export const computeIntrinsic = (camera: string): Promise<Session> =>
-  postJson<Session>(`/intrinsic/${camera}/compute`);
+// Prepare-step knobs forwarded to the compute (ADR-0022); omitted fields use auto/defaults.
+export interface ComputeParams {
+  stride?: number;
+  cap?: number;
+  frame_start?: number;
+  frame_end?: number;
+}
+
+export const computeIntrinsic = (camera: string, params?: ComputeParams): Promise<Session> =>
+  postJson<Session>(`/intrinsic/${camera}/compute`, params);
+
+// Frame-server (ADR-0022): total frames of the recorded sweep, and the URL to one
+// frame as JPEG (used directly as an <img> src for the Prepare scrubber).
+export const fetchIntrinsicFrameCount = (camera: string): Promise<{ total: number }> =>
+  getJson<{ total: number }>(`/intrinsic/${camera}/frames`);
+
+export const intrinsicFrameUrl = (camera: string, index: number): string =>
+  `${API_URL}/intrinsic/${camera}/frame/${index}`;
 
 export const defineBoard = (request: BoardConfigRequest): Promise<Session> =>
   postJson<Session>('/board', request);
