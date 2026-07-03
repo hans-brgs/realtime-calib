@@ -400,6 +400,12 @@ def bundle_adjust(
         x0[6 * slot + 3 : 6 * slot + 6] = pose[:3, 3]
     x0[n_cam_params:] = points3d.ravel()
 
+    # The anchor is held at its CURRENT pose (identity right after chaining, but a
+    # reorientation may have moved the world frame — Minimize must not undo it).
+    anchor_rvec_m, _ = cv2.Rodrigues(poses[anchor][:3, :3])
+    anchor_rvec = np.asarray(anchor_rvec_m, np.float64).reshape(3)
+    anchor_tvec = np.asarray(poses[anchor][:3, 3], np.float64)
+
     masks = [obs_camera == c for c in range(len(camera_order))]
     identity_k = np.eye(3)
 
@@ -411,8 +417,8 @@ def bundle_adjust(
             if not bool(mask.any()):
                 continue
             if name == anchor:
-                rvec = np.zeros(3)
-                tvec = np.zeros(3)
+                rvec = anchor_rvec
+                tvec = anchor_tvec
             else:
                 slot = free_slot[name]
                 rvec = params[6 * slot : 6 * slot + 3]
@@ -450,7 +456,7 @@ def bundle_adjust(
     solution = np.asarray(result.x, np.float64)
     logger.info("bundle adjustment: cost %.6f -> %.6f", float(result.cost), float(result.cost))
 
-    solved: dict[str, NDArray[np.float64]] = {anchor: np.eye(4)}
+    solved: dict[str, NDArray[np.float64]] = {anchor: poses[anchor].copy()}
     for name, slot in free_slot.items():
         rmat, _ = cv2.Rodrigues(solution[6 * slot : 6 * slot + 3])
         solved[name] = _transform(
@@ -507,7 +513,8 @@ def _kabsch(source: NDArray[np.float64], target: NDArray[np.float64]) -> NDArray
 
 
 def _group_board_quads(
-    triangulation: Triangulation,
+    point_group: NDArray[np.intp],
+    point_corner: NDArray[np.int32],
     points3d: NDArray[np.float64],
     chess: NDArray[np.float64],
     group_count: int,
@@ -529,15 +536,176 @@ def _group_board_quads(
     )
     quads: list[list[list[float]] | None] = []
     for group in range(group_count):
-        mask = triangulation.point_group == group
+        mask = point_group == group
         if int(mask.sum()) < _MIN_COMMON_CORNERS:
             quads.append(None)
             continue
-        board_points = chess[triangulation.point_corner[mask]]
+        board_points = chess[point_corner[mask]]
         pose = _kabsch(board_points, points3d[mask])
         placed = outline @ pose[:3, :3].T + pose[:3, 3]
         quads.append([[float(v) for v in corner] for corner in placed])
     return quads
+
+
+def axis_rotation_transform(axis: str, degrees: float) -> NDArray[np.float64]:
+    """World-frame change G (old->new coords): rotation about the current origin.
+
+    ``x_new = G_R @ x_old`` — the spec's ±xyz reorientation buttons compose these.
+    """
+    radians = np.radians(degrees)
+    c, s = float(np.cos(radians)), float(np.sin(radians))
+    if axis == "x":
+        rotation = np.array([[1.0, 0, 0], [0, c, -s], [0, s, c]])
+    elif axis == "y":
+        rotation = np.array([[c, 0, s], [0, 1.0, 0], [-s, 0, c]])
+    elif axis == "z":
+        rotation = np.array([[c, -s, 0], [s, c, 0], [0, 0, 1.0]])
+    else:
+        raise ValueError(f"unknown axis {axis!r}")
+    return _transform(rotation, np.zeros(3))
+
+
+def quad_origin_transform(quad: list[list[float]]) -> NDArray[np.float64]:
+    """World-frame change G placing the origin + axes on a board quad ('Set origin').
+
+    The quad's corner order (c0 bl, c1 br, c3 tl) defines the board basis B
+    (board->world); the new world IS that board frame: ``x_new = B^-1 x_old``.
+    The basis is re-orthonormalised (the Kabsch quad is rigid, but guard anyway).
+    """
+    corners = np.asarray(quad, np.float64)
+    x = corners[1] - corners[0]
+    x = x / np.linalg.norm(x)
+    y_raw = corners[3] - corners[0]
+    y = y_raw - x * float(x @ y_raw)
+    y = y / np.linalg.norm(y)
+    z = np.cross(x, y)
+    basis = np.column_stack([x, y, z])  # board->world rotation
+    g_rotation = basis.T
+    g_translation = -basis.T @ corners[0]
+    return _transform(g_rotation, g_translation)
+
+
+def reorient_result(result: ExtrinsicResult, transform: NDArray[np.float64]) -> ExtrinsicResult:
+    """Re-express the solved array in a new world frame (rigid G: old->new coords).
+
+    Cameras: ``x_cam = R x_old + t`` with ``x_old = G^-1 x_new`` gives
+    ``R' = R G_R^T``, ``t' = t - R' G_t``. Points/quads map as ``G_R p + G_t``.
+    Reprojection errors are invariant under a rigid world change, so all quality
+    fields carry over unchanged.
+    """
+    g_rotation = transform[:3, :3]
+    g_translation = transform[:3, 3]
+
+    rotations: dict[str, list[float]] = {}
+    translations: dict[str, list[float]] = {}
+    for name in result.cameras:
+        r_matrix = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
+        t_vector = np.asarray(result.translations[name], np.float64)
+        new_r = r_matrix @ g_rotation.T
+        new_t = t_vector - new_r @ g_translation
+        rvec, _ = cv2.Rodrigues(new_r)
+        rotations[name] = [float(v) for v in np.asarray(rvec).reshape(3)]
+        translations[name] = [float(v) for v in new_t]
+
+    points = np.asarray(result.points, np.float64)
+    moved_points = points @ g_rotation.T + g_translation if len(points) else points
+    quads: list[list[list[float]] | None] = []
+    for quad in result.board_quads:
+        if quad is None:
+            quads.append(None)
+        else:
+            moved = np.asarray(quad, np.float64) @ g_rotation.T + g_translation
+            quads.append([[float(v) for v in corner] for corner in moved])
+
+    return ExtrinsicResult(
+        cameras=result.cameras,
+        rotations=rotations,
+        translations=translations,
+        per_camera_error=result.per_camera_error,
+        error=result.error,
+        pair_errors=result.pair_errors,
+        group_count=result.group_count,
+        point_count=result.point_count,
+        points=[[float(v) for v in point] for point in moved_points],
+        point_groups=result.point_groups,
+        board_quads=quads,
+    )
+
+
+@dataclass(frozen=True)
+class BAInputs:
+    """Persisted bundle-adjustment observations (Minimize re-runs without redetecting)."""
+
+    obs_camera: list[int]
+    obs_point: list[int]
+    obs_norm: list[list[float]]
+    obs_px: list[list[float]]
+    point_corner: list[int]
+
+
+def refine_result(
+    result: ExtrinsicResult,
+    ba_inputs: BAInputs,
+    models: list[CameraModel],
+    board: CalibrationBoard,
+    anchor: str,
+) -> ExtrinsicResult:
+    """Re-run the bundle adjustment from the CURRENT result (spec 'Minimize').
+
+    Uses the persisted observations — no re-detection — and holds the anchor at its
+    current pose, so an operator reorientation (origin/±xyz) is preserved.
+    """
+    poses: dict[str, NDArray[np.float64]] = {}
+    for name in result.cameras:
+        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
+        poses[name] = _transform(rotation, np.asarray(result.translations[name], np.float64))
+
+    obs_camera = np.asarray(ba_inputs.obs_camera, np.intp)
+    obs_point = np.asarray(ba_inputs.obs_point, np.intp)
+    obs_norm = np.asarray(ba_inputs.obs_norm, np.float64)
+    obs_px = np.asarray(ba_inputs.obs_px, np.float64)
+    points3d = np.asarray(result.points, np.float64)
+
+    solved, refined = bundle_adjust(
+        result.cameras, poses, points3d, obs_camera, obs_point, obs_norm, anchor
+    )
+    per_camera, overall = pixel_errors(
+        result.cameras,
+        solved,
+        refined,
+        obs_camera,
+        obs_point,
+        obs_px,
+        {model.name: model for model in models},
+    )
+
+    rotations: dict[str, list[float]] = {}
+    translations: dict[str, list[float]] = {}
+    for name, pose in solved.items():
+        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        rotations[name] = [float(v) for v in np.asarray(rvec).reshape(3)]
+        translations[name] = [float(v) for v in pose[:3, 3]]
+
+    chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
+    return ExtrinsicResult(
+        cameras=result.cameras,
+        rotations=rotations,
+        translations=translations,
+        per_camera_error=per_camera,
+        error=overall,
+        pair_errors=result.pair_errors,
+        group_count=result.group_count,
+        point_count=len(refined),
+        points=[[float(v) for v in point] for point in refined],
+        point_groups=result.point_groups,
+        board_quads=_group_board_quads(
+            np.asarray(result.point_groups, np.intp),
+            np.asarray(ba_inputs.point_corner, np.int32),
+            refined,
+            chess,
+            result.group_count,
+        ),
+    )
 
 
 def _detect_group_frames(
@@ -621,13 +789,14 @@ def compute_extrinsic_from_sweep(
     stride: int | None = None,
     max_spread_s: float | None = None,
     min_shared: int = _DEFAULT_MIN_SHARED,
-) -> ExtrinsicResult:
+) -> tuple[ExtrinsicResult, BAInputs]:
     """Solve the camera array from a recorded synchronized sweep (ADR-0023).
 
     Synchronizes on the timestamp **sidecars only** (cheap), applies the Prepare
     knobs (``stride`` = every Nth group, ``max_spread_s`` = drop loosely-synced
     groups), evens the detection budget over the sweep, then detects only the
-    selected frames and runs pairwise -> chaining -> triangulation -> BA.
+    selected frames and runs pairwise -> chaining -> triangulation -> BA. Also
+    returns the BA observations so 'Minimize' can refine later without redetecting.
     """
     if board.board_type is not BoardType.CHARUCO:
         raise ValueError("extrinsic calibration requires a ChArUco board")
@@ -690,7 +859,7 @@ def compute_extrinsic_from_sweep(
         translations[name] = [float(v) for v in pose[:3, 3]]
 
     chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
-    return ExtrinsicResult(
+    result = ExtrinsicResult(
         cameras=order,
         rotations=rotations,
         translations=translations,
@@ -701,5 +870,19 @@ def compute_extrinsic_from_sweep(
         point_count=len(points_opt),
         points=[[float(v) for v in point] for point in points_opt],
         point_groups=[int(g) for g in triangulation.point_group],
-        board_quads=_group_board_quads(triangulation, points_opt, chess, len(detections)),
+        board_quads=_group_board_quads(
+            triangulation.point_group,
+            triangulation.point_corner,
+            points_opt,
+            chess,
+            len(detections),
+        ),
     )
+    ba_inputs = BAInputs(
+        obs_camera=[int(v) for v in triangulation.obs_camera],
+        obs_point=[int(v) for v in triangulation.obs_point],
+        obs_norm=[[float(a), float(b)] for a, b in triangulation.obs_norm],
+        obs_px=[[float(a), float(b)] for a, b in triangulation.obs_px],
+        point_corner=[int(v) for v in triangulation.point_corner],
+    )
+    return result, ba_inputs

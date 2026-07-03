@@ -19,6 +19,7 @@ from numpy.typing import NDArray
 
 from calibration_service.calibration.extrinsic import (
     CameraModel,
+    ExtrinsicResult,
     GroupDetection,
     PairEstimate,
     _transform,
@@ -198,7 +199,7 @@ def test_sweep_orchestration_solves_from_sidecars(
         "calibration_service.calibration.extrinsic._detect_group_frames", fake_detect
     )
     models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in cameras]
-    result = compute_extrinsic_from_sweep(
+    result, ba_inputs = compute_extrinsic_from_sweep(
         tmp_path,
         BOARD,
         models,
@@ -206,6 +207,8 @@ def test_sweep_orchestration_solves_from_sidecars(
         window_s=0.95 / fps,
         min_shared=3,
     )
+    assert len(ba_inputs.obs_camera) == len(ba_inputs.obs_norm) == len(ba_inputs.obs_px)
+    assert len(ba_inputs.point_corner) == result.point_count
     assert result.cameras == ["cam_0", "cam_1", "cam_2"]
     assert np.allclose(result.rotations["cam_0"], np.zeros(3), atol=1e-9)
     assert np.allclose(result.translations["cam_0"], np.zeros(3), atol=1e-9)
@@ -234,3 +237,135 @@ def test_sweep_orchestration_solves_from_sidecars(
     tilt = _rot("x", 8.0 * np.sin(0.0)) @ _rot("y", 10.0 * np.cos(0.0))
     expected = outline @ tilt.T + np.array([-3.0, -2.6, 9.0])
     assert np.allclose(np.asarray(quad), expected, atol=5e-3)
+
+
+def _relative(result_rotations, result_translations, a: str, b: str) -> np.ndarray:
+    """4x4 transform a->b from a result's per-camera world->cam poses."""
+    ra = cv2.Rodrigues(np.asarray(result_rotations[a]))[0]
+    rb = cv2.Rodrigues(np.asarray(result_rotations[b]))[0]
+    ta = np.asarray(result_translations[a])
+    tb = np.asarray(result_translations[b])
+    pa, pb = np.eye(4), np.eye(4)
+    pa[:3, :3], pa[:3, 3] = ra, ta
+    pb[:3, :3], pb[:3, 3] = rb, tb
+    return pb @ np.linalg.inv(pa)
+
+
+def _fixture_result() -> ExtrinsicResult:
+    rotations, translations = {}, {}
+    for name, pose in POSES.items():
+        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        rotations[name] = [float(v) for v in rvec.reshape(3)]
+        translations[name] = [float(v) for v in pose[:3, 3]]
+    low, high = CHESS.min(axis=0), CHESS.max(axis=0)
+    outline = np.array(
+        [
+            [low[0], low[1], 0.0],
+            [high[0], low[1], 0.0],
+            [high[0], high[1], 0.0],
+            [low[0], high[1], 0.0],
+        ]
+    )
+    tilt = _rot("x", 0.0) @ _rot("y", 10.0)
+    placed = outline @ tilt.T + np.array([-3.0, -2.6, 9.0])
+    return ExtrinsicResult(
+        cameras=list(POSES),
+        rotations=rotations,
+        translations=translations,
+        per_camera_error={name: 0.1 for name in POSES},
+        error=0.1,
+        pair_errors={},
+        group_count=1,
+        point_count=3,
+        points=[[0.0, 0.0, 10.0], [1.0, 0.0, 10.0], [0.0, 1.0, 10.0]],
+        point_groups=[0, 0, 0],
+        board_quads=[[[float(v) for v in c] for c in placed]],
+    )
+
+
+def test_reorient_preserves_relative_geometry() -> None:
+    from calibration_service.calibration.extrinsic import (
+        axis_rotation_transform,
+        reorient_result,
+    )
+
+    result = _fixture_result()
+    turned = reorient_result(result, axis_rotation_transform("z", 90.0))
+    before = _relative(result.rotations, result.translations, "cam_0", "cam_1")
+    after = _relative(turned.rotations, turned.translations, "cam_0", "cam_1")
+    assert np.allclose(before, after, atol=1e-9)  # rigid world change: cam-cam invariant
+    # Points rotate with the frame: (x, y, z) -> (-y, x, z) for +90 about z.
+    assert np.allclose(turned.points[1], [0.0, 1.0, 10.0], atol=1e-9)
+    assert turned.error == result.error  # reprojection quality carries over
+
+
+def test_set_origin_puts_the_board_at_the_origin() -> None:
+    from calibration_service.calibration.extrinsic import (
+        quad_origin_transform,
+        reorient_result,
+    )
+
+    result = _fixture_result()
+    quad = result.board_quads[0]
+    assert quad is not None
+    moved = reorient_result(result, quad_origin_transform(quad))
+    new_quad = moved.board_quads[0]
+    assert new_quad is not None
+    width = float(np.linalg.norm(np.asarray(quad[1]) - np.asarray(quad[0])))
+    assert np.allclose(new_quad[0], [0.0, 0.0, 0.0], atol=1e-9)  # c0 = origin
+    assert np.allclose(new_quad[1], [width, 0.0, 0.0], atol=1e-9)  # c1 on +x
+    assert abs(new_quad[3][2]) < 1e-9  # board plane = z=0
+
+
+def test_refine_preserves_a_reoriented_anchor() -> None:
+    # Compute on synthetic data, reorient the world, then Minimize: the BA must
+    # hold the anchor at its REORIENTED pose (not snap back to identity).
+    from calibration_service.calibration.extrinsic import (
+        BAInputs,
+        axis_rotation_transform,
+        refine_result,
+        reorient_result,
+    )
+
+    groups = _groups(4)
+    tri = triangulate_groups(groups, POSES)
+    solved, refined = bundle_adjust(
+        tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
+    )
+    rotations, translations = {}, {}
+    for name, pose in solved.items():
+        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        rotations[name] = [float(v) for v in rvec.reshape(3)]
+        translations[name] = [float(v) for v in pose[:3, 3]]
+    from calibration_service.calibration.extrinsic import ExtrinsicResult
+
+    chess_ids = tri.point_corner
+    result = ExtrinsicResult(
+        cameras=tri.camera_order,
+        rotations=rotations,
+        translations=translations,
+        per_camera_error={},
+        error=0.0,
+        pair_errors={},
+        group_count=4,
+        point_count=len(refined),
+        points=[[float(v) for v in p] for p in refined],
+        point_groups=[int(g) for g in tri.point_group],
+        board_quads=[None] * 4,
+    )
+    ba = BAInputs(
+        obs_camera=[int(v) for v in tri.obs_camera],
+        obs_point=[int(v) for v in tri.obs_point],
+        obs_norm=[[float(a), float(b)] for a, b in tri.obs_norm],
+        obs_px=[[float(a), float(b)] for a, b in tri.obs_px],
+        point_corner=[int(v) for v in chess_ids],
+    )
+    turned = reorient_result(result, axis_rotation_transform("y", 90.0))
+    models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in tri.camera_order]
+    minimized = refine_result(turned, ba, models, BOARD, "cam_0")
+    # Anchor pose preserved exactly (held fixed at its reoriented pose).
+    assert np.allclose(minimized.rotations["cam_0"], turned.rotations["cam_0"], atol=1e-12)
+    assert np.allclose(minimized.translations["cam_0"], turned.translations["cam_0"], atol=1e-12)
+    # Already-optimal geometry: the other cameras stay put within tolerance.
+    assert np.allclose(minimized.rotations["cam_1"], turned.rotations["cam_1"], atol=1e-4)
+    assert np.allclose(minimized.translations["cam_1"], turned.translations["cam_1"], atol=1e-3)

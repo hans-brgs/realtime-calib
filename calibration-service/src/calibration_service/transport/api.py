@@ -17,9 +17,15 @@ from pydantic import BaseModel
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
 from calibration_service.calibration import (
+    BAInputs,
     CameraModel,
+    ExtrinsicResult,
+    axis_rotation_transform,
     compute_extrinsic_from_sweep,
     compute_intrinsic_from_video,
+    quad_origin_transform,
+    refine_result,
+    reorient_result,
     sweep_groups,
 )
 from calibration_service.models.board import BoardType, CalibrationBoard
@@ -537,7 +543,7 @@ async def compute_extrinsic(
 
     loop = asyncio.get_running_loop()
     try:
-        result = await loop.run_in_executor(
+        result, ba_inputs = await loop.run_in_executor(
             None,
             lambda: compute_extrinsic_from_sweep(
                 directory,
@@ -555,6 +561,8 @@ async def compute_extrinsic(
 
     session = manager.set_extrinsic_result(result)
     (directory / "result.json").write_text(json.dumps(asdict(result)))
+    # BA observations: lets Minimize refine later without redetecting the videos.
+    (directory / "ba_inputs.json").write_text(json.dumps(asdict(ba_inputs)))
     return _session_out(session)
 
 
@@ -565,6 +573,86 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
     payload: dict[str, object] = json.loads(path.read_text())
+    return payload
+
+
+class OrientRequest(BaseModel):
+    """Reorient the solved world frame (spec 3d-extrinsic-review, mutating)."""
+
+    op: Literal["set_origin", "rotate"]
+    group: int | None = None  # set_origin: synchronized-group whose board becomes origin
+    axis: Literal["x", "y", "z"] | None = None  # rotate
+    degrees: float | None = None  # rotate (the UI sends +/-90)
+
+
+def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
+    path = manager.extrinsic_dir() / "result.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no extrinsic result")
+    return ExtrinsicResult(**json.loads(path.read_text()))
+
+
+def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) -> None:
+    manager.set_extrinsic_result(result)
+    (manager.extrinsic_dir() / "result.json").write_text(json.dumps(asdict(result)))
+
+
+@router.post("/extrinsic/orient")
+async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, object]:
+    """Apply a rigid world-frame change to the solved array and persist it.
+
+    ``set_origin`` puts the world origin/axes on the board of one group;
+    ``rotate`` turns the frame ±90° about an axis. Reprojection quality is
+    invariant, so errors carry over; the updated result payload is returned.
+    """
+    manager = get_manager(request)
+    result = _load_extrinsic_result(manager)
+    if body.op == "set_origin":
+        if body.group is None or not (0 <= body.group < len(result.board_quads)):
+            raise HTTPException(status_code=422, detail="invalid group")
+        quad = result.board_quads[body.group]
+        if quad is None:
+            raise HTTPException(status_code=422, detail="group has no board pose")
+        transform = quad_origin_transform(quad)
+    else:
+        if body.axis is None or body.degrees is None:
+            raise HTTPException(status_code=422, detail="rotate needs axis + degrees")
+        transform = axis_rotation_transform(body.axis, body.degrees)
+    reoriented = reorient_result(result, transform)
+    _store_extrinsic_result(manager, reoriented)
+    payload: dict[str, object] = asdict(reoriented)
+    return payload
+
+
+@router.post("/extrinsic/minimize")
+async def minimize_extrinsic(request: Request) -> dict[str, object]:
+    """Re-run the bundle adjustment from the current result (spec 'Minimize').
+
+    Uses the persisted BA observations (no redetection) and holds the anchor at
+    its current pose, preserving any operator reorientation.
+    """
+    manager = get_manager(request)
+    session = manager.current()
+    board = session.effective_extrinsic_board()
+    if board is None:
+        raise HTTPException(status_code=422, detail="no extrinsic board defined")
+    result = _load_extrinsic_result(manager)
+    ba_path = manager.extrinsic_dir() / "ba_inputs.json"
+    if not ba_path.is_file():
+        raise HTTPException(status_code=404, detail="no BA observations (recompute first)")
+    ba_inputs = BAInputs(**json.loads(ba_path.read_text()))
+    models = [_native_camera_model(c) for c in session.cameras if c.matrix is not None]
+    anchor = min(session.cameras, key=lambda c: c.index)
+
+    loop = asyncio.get_running_loop()
+    try:
+        refined = await loop.run_in_executor(
+            None, lambda: refine_result(result, ba_inputs, models, board, anchor.name)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    _store_extrinsic_result(manager, refined)
+    payload: dict[str, object] = asdict(refined)
     return payload
 
 

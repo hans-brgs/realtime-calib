@@ -349,7 +349,15 @@ def test_extrinsic_compute_stores_result_and_persists_json(
         group_count=42,
         point_count=1234,
     )
-    monkeypatch.setattr(api_module, "compute_extrinsic_from_sweep", lambda *a, **k: fixture)
+    from calibration_service.calibration.extrinsic import BAInputs
+
+    ba_fixture = BAInputs(
+        obs_camera=[0, 1], obs_point=[0, 0], obs_norm=[[0.1, 0.2], [0.3, 0.4]],
+        obs_px=[[10.0, 20.0], [30.0, 40.0]], point_corner=[0],
+    )
+    monkeypatch.setattr(
+        api_module, "compute_extrinsic_from_sweep", lambda *a, **k: (fixture, ba_fixture)
+    )
 
     response = client.post("/extrinsic/compute", json={"stride": 2, "max_spread_ms": 12.0})
     assert response.status_code == 200

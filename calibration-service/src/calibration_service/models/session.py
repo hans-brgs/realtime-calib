@@ -25,8 +25,9 @@ class WizardStep(StrEnum):
     EXTRINSIC_BOARD_CHOICE = "extrinsic_board_choice"
     CAMERA_SETUP = "camera_setup"
     INTRINSIC_CAPTURE = "intrinsic_capture"
+    # No REVIEW_3D step: the 3D review is the Result sub-step of the extrinsic
+    # capture (spec 3d-extrinsic-review), not a wizard stage of its own.
     EXTRINSIC_CAPTURE = "extrinsic_capture"
-    REVIEW_3D = "review_3d"
     EXPORT = "export"
 
 
