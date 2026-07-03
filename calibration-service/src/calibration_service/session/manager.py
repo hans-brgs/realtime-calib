@@ -126,6 +126,17 @@ class SessionManager:
         """Folder of the synchronized extrinsic sweep (videos + timestamp sidecars)."""
         return extrinsic_dir(self._sessions_dir, self._session_id)
 
+    def export_dir(self) -> Path:
+        """Folder of the exported calibration artifacts (spec calibration-export)."""
+        return session_dir(self._sessions_dir, self._session_id) / "export"
+
+    def mark_exported(self) -> CalibrationSession:
+        """Advance the wizard to the export step and persist it."""
+        session = self.current()
+        session.step = WizardStep.EXPORT
+        save_session(self._sessions_dir, session)
+        return session
+
     def begin_extrinsic_capture(self) -> CalibrationSession:
         """Advance the wizard to the extrinsic capture step and persist it."""
         session = self.current()

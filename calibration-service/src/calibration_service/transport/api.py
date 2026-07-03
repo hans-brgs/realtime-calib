@@ -6,12 +6,16 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 from __future__ import annotations
 
 import asyncio
+import io
 import json
+import logging
+import zipfile
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Literal
 
 import numpy as np
+import rtoml
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
@@ -27,6 +31,12 @@ from calibration_service.calibration import (
     refine_result,
     reorient_result,
     sweep_groups,
+)
+from calibration_service.export import (
+    PLATFORM_FORMATS,
+    aniposelib_document,
+    caliscope_document,
+    platform_variant,
 )
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
@@ -713,6 +723,82 @@ async def extrinsic_frame(request: Request, camera: str, index: int) -> Response
     if jpeg is None:
         raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
     return Response(content=jpeg, media_type="image/jpeg")
+
+
+class ExportRequest(BaseModel):
+    """Artifacts to export. The canonical Caliscope TOML is ALWAYS written; the
+    optional list adds 'aniposelib' and/or platform variants (threejs, blender,
+    unity, unreal) — see spec calibration-export."""
+
+    formats: list[str] = []
+
+
+@router.post("/export")
+async def export_calibration(request: Request, body: ExportRequest) -> dict[str, object]:
+    """Write the calibration export folder and list the produced files."""
+    manager = get_manager(request)
+    session = manager.current()
+    board = session.effective_extrinsic_board()
+    if board is None:
+        raise HTTPException(status_code=422, detail="no board defined")
+    if not session.cameras or any(c.rotation is None for c in session.cameras):
+        raise HTTPException(status_code=422, detail="extrinsic calibration incomplete")
+    unknown = [f for f in body.formats if f not in PLATFORM_FORMATS and f != "aniposelib"]
+    if unknown:
+        raise HTTPException(status_code=422, detail=f"unknown formats: {', '.join(unknown)}")
+
+    result_path = manager.extrinsic_dir() / "result.json"
+    overall_error: float | None = None
+    if result_path.is_file():
+        overall_error = json.loads(result_path.read_text()).get("error")
+
+    directory = manager.export_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    square = board.square_size_mm
+    files: list[dict[str, object]] = []
+
+    rtoml.dump(caliscope_document(session, square), directory / "camera_array.toml")
+    files.append({"name": "camera_array.toml", "convention": "opencv (canonical)"})
+    if "aniposelib" in body.formats:
+        rtoml.dump(
+            aniposelib_document(session, square, overall_error),
+            directory / "camera_array_aniposelib.toml",
+        )
+        files.append({"name": "camera_array_aniposelib.toml", "convention": "opencv (canonical)"})
+    for format_id in body.formats:
+        if format_id not in PLATFORM_FORMATS:
+            continue
+        variant = platform_variant(session, format_id, square)
+        name = f"camera_array_{format_id}.json"
+        (directory / name).write_text(json.dumps(variant, indent=2))
+        convention = variant["convention"]
+        assert isinstance(convention, dict)
+        label = f"{convention['label']} · {convention['platforms']}"
+        files.append({"name": name, "convention": label})
+
+    manager.mark_exported()
+    logger_files = ", ".join(str(f["name"]) for f in files)
+    logging.getLogger(__name__).info("exported: %s", logger_files)
+    return {"files": files}
+
+
+@router.get("/export/archive")
+async def export_archive(request: Request) -> Response:
+    """Download the export folder as a single zip."""
+    directory = get_manager(request).export_dir()
+    entries = sorted(directory.glob("*")) if directory.is_dir() else []
+    if not entries:
+        raise HTTPException(status_code=404, detail="nothing exported yet")
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+        for entry in entries:
+            if entry.is_file():
+                archive.write(entry, arcname=entry.name)
+    return Response(
+        content=buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="calibration_export.zip"'},
+    )
 
 
 @router.post("/board", response_model=SessionOut)
