@@ -1,8 +1,6 @@
-import { IconDownload } from '@tabler/icons-react';
-
-import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { TargetConfigScreen } from '@/features/board/TargetConfigScreen';
 import { CameraSetupScreen } from '@/features/cameras/CameraSetupScreen';
+import { ExportScreen } from '@/features/export/ExportScreen';
 import { ExtrinsicScreen } from '@/features/extrinsic/ExtrinsicScreen';
 import { IntrinsicsScreen } from '@/features/intrinsic/IntrinsicsScreen';
 import { DashboardScreen } from '@/features/session/DashboardScreen';
@@ -14,9 +12,8 @@ interface ScreenRouterProps {
   onNavigate: (id: NavTarget) => void;
 }
 
-// Maps the active view to its screen. Dashboard and Camera Setup are live; the Load
-// entry is a gated screen (Phase 3.5); the remaining stages render styled
-// placeholders until their high-fidelity pass.
+// Maps the active view to its screen. Every wizard stage is live; the Load entry
+// stays a gated screen until the replay/load-from-files pass (Phase 3.5).
 export function StepContent({ view, onNavigate }: ScreenRouterProps) {
   switch (view) {
     case 'session':
@@ -32,13 +29,7 @@ export function StepContent({ view, onNavigate }: ScreenRouterProps) {
     case 'extrinsic':
       return <ExtrinsicScreen />;
     case 'export':
-      return (
-        <PlaceholderScreen
-          icon={IconDownload}
-          title="Export"
-          description="Caliscope-compatible camera_array.toml + aniposelib. High-fidelity screen coming in a later pass."
-        />
-      );
+      return <ExportScreen />;
     default:
       return null;
   }

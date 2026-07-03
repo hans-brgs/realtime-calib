@@ -9,6 +9,13 @@ import {
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
+import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  CONVENTIONS,
+  conventionByValue,
+  conventionSelected,
+  selectConvention,
+} from '@/features/review3d/conventions';
 import {
   type ExtrinsicResultPayload,
   minimizeExtrinsic,
@@ -19,23 +26,9 @@ import {
 // their solved poses + the triangulated corner cloud of the scrubbed group + the
 // board outline with its local xyz triad. The convention selector RE-EXPRESSES the
 // scene in the target platform's axes (display-only basis change — the solved data
-// stays canonical OpenCV per ADR-0002; the same choice will drive export variants).
+// stays canonical OpenCV per ADR-0002). The selection is SHARED with the Export
+// screen (one source of truth) where it preselects the platform variant.
 type Vec3 = [number, number, number];
-
-interface Convention {
-  value: string;
-  label: string;
-  m: number[][]; // basis change: canonical OpenCV world coords -> displayed coords
-  up: Vec3; // three.js camera up for this convention
-}
-
-const CONVENTIONS: Convention[] = [
-  { value: 'opencv', label: 'OpenCV · Y↓ RH (canonical)', m: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], up: [0, -1, 0] },
-  { value: 'yup-rh', label: 'Y-up RH · three.js/OpenGL', m: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], up: [0, 1, 0] },
-  { value: 'zup-rh', label: 'Z-up RH · Blender/ROS', m: [[1, 0, 0], [0, 0, 1], [0, -1, 0]], up: [0, 0, 1] },
-  { value: 'yup-lh', label: 'Y-up LH · Unity', m: [[1, 0, 0], [0, -1, 0], [0, 0, 1]], up: [0, 1, 0] },
-  { value: 'zup-lh', label: 'Z-up LH · Unreal', m: [[0, 0, 1], [1, 0, 0], [0, -1, 0]], up: [0, 0, 1] },
-];
 
 const CAMERA_COLORS = ['#a78bfa', '#4ade80', '#38bdf8', '#fbbf24', '#f472b6', '#f87171'];
 const PLAY_FPS = 6;
@@ -200,12 +193,13 @@ export function ArrayReview({
   result: ExtrinsicResultPayload;
   onResult: (updated: ExtrinsicResultPayload) => void;
 }) {
-  const [conventionId, setConventionId] = useState('yup-rh');
+  const dispatch = useAppDispatch();
+  const conventionId = useAppSelector(selectConvention);
   const [group, setGroup] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mutateError, setMutateError] = useState<string | null>(null);
-  const convention = CONVENTIONS.find((c) => c.value === conventionId) ?? CONVENTIONS[1];
+  const convention = conventionByValue(conventionId);
   const maxGroup = Math.max(0, result.group_count - 1);
 
   // Mutating review actions (spec 3d-extrinsic-review): reorient the stored world
@@ -355,7 +349,7 @@ export function ArrayReview({
             size="xs"
             label="Display convention"
             value={conventionId}
-            onChange={(value) => value && setConventionId(value)}
+            onChange={(value) => value && dispatch(conventionSelected(value))}
             data={CONVENTIONS.map(({ value, label }) => ({ value, label }))}
             comboboxProps={{ withinPortal: true }}
             styles={{

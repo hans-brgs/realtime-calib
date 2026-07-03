@@ -200,3 +200,15 @@ export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPay
 // no redetection; the anchor keeps its — possibly reoriented — pose).
 export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/minimize');
+
+// Calibration export (spec calibration-export): the canonical Caliscope TOML is
+// always written; formats adds 'aniposelib' and/or platform variants.
+export interface ExportedFile {
+  name: string;
+  convention: string;
+}
+
+export const exportCalibration = (formats: string[]): Promise<{ files: ExportedFile[] }> =>
+  postJson<{ files: ExportedFile[] }>('/export', { formats });
+
+export const exportArchiveUrl = (): string => `${API_URL}/export/archive`;
