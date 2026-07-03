@@ -593,10 +593,15 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
 
 
 class OrientRequest(BaseModel):
-    """Reorient the solved world frame (spec 3d-extrinsic-review, mutating)."""
+    """Reorient the solved world frame (spec 3d-extrinsic-review, mutating).
 
-    op: Literal["set_origin", "rotate"]
-    group: int | None = None  # set_origin: synchronized-group whose board becomes origin
+    ``set_origin`` = neutral, Caliscope behavior (world := board frame, wherever
+    the board is). ``set_ground`` = the operator declares the board on the FLOOR:
+    same origin, but the board normal becomes the world's up.
+    """
+
+    op: Literal["set_origin", "set_ground", "rotate"]
+    group: int | None = None  # set_origin/set_ground: group whose board is the reference
     axis: Literal["x", "y", "z"] | None = None  # rotate
     degrees: float | None = None  # rotate (the UI sends +/-90)
 
@@ -623,7 +628,7 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
     """
     manager = get_manager(request)
     result = _load_extrinsic_result(manager)
-    if body.op == "set_origin":
+    if body.op in ("set_origin", "set_ground"):
         if body.group is None or not (0 <= body.group < len(result.board_quads)):
             raise HTTPException(status_code=422, detail="invalid group")
         quad = result.board_quads[body.group]
@@ -633,7 +638,9 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
         # convention); a ChArUco board frame originates at its first corner.
         board = manager.current().effective_extrinsic_board()
         marker = board is not None and board.board_type is not BoardType.CHARUCO
-        transform = quad_origin_transform(quad, at_center=marker)
+        transform = quad_origin_transform(
+            quad, at_center=marker, ground=body.op == "set_ground"
+        )
     else:
         if body.axis is None or body.degrees is None:
             raise HTTPException(status_code=422, detail="rotate needs axis + degrees")
@@ -735,9 +742,11 @@ async def extrinsic_frame(request: Request, camera: str, index: int) -> Response
 class ExportRequest(BaseModel):
     """Artifacts to export. The canonical Caliscope TOML is ALWAYS written; the
     optional list adds 'aniposelib' and/or platform variants (threejs, blender,
-    unity, unreal) — see spec calibration-export."""
+    unity, unreal) — see spec calibration-export. ``units`` applies to the
+    platform JSONs only (the TOMLs keep their fixed mm semantics, ADR-0002)."""
 
     formats: list[str] = []
+    units: Literal["mm", "m"] = "mm"
 
 
 @router.post("/export")
@@ -775,7 +784,7 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
     for format_id in body.formats:
         if format_id not in PLATFORM_FORMATS:
             continue
-        variant = platform_variant(session, format_id, square)
+        variant = platform_variant(session, format_id, square, units=body.units)
         name = f"camera_array_{format_id}.json"
         (directory / name).write_text(json.dumps(variant, indent=2))
         convention = variant["convention"]

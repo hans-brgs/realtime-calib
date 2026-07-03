@@ -172,9 +172,19 @@ def _quaternion_xyzw(rotation: NDArray[np.float64]) -> list[float]:
 
 
 def platform_variant(
-    session: CalibrationSession, format_id: str, square_size_mm: float
+    session: CalibrationSession, format_id: str, square_size_mm: float, units: str = "mm"
 ) -> dict[str, Any]:
-    """A self-describing per-platform JSON document (spec calibration-export)."""
+    """A self-describing per-platform JSON document (spec calibration-export).
+
+    Each camera carries the SCENE form (position/quaternion/matrix, camera->world
+    — what a scene graph applies to place the object) and, for right-handed
+    conventions only, the VIEW form (R|t, world->camera — what an OpenCV-style
+    consumer feeds to projection). Left-handed conventions get no view block:
+    the raw view rotation R @ M^T has det=-1 there (a mirror, not a rotation) —
+    project via the platform's own camera API instead. ``units`` scales world
+    lengths ("mm" or "m"); intrinsics stay in pixels.
+    """
+    scale = 0.001 if units == "m" else 1.0
     convention = CONVENTIONS[format_id]
     basis = np.asarray(convention.basis, np.float64)
     forward = basis @ np.array([0.0, 0.0, 1.0])  # OpenCV optical axis, remapped
@@ -185,7 +195,7 @@ def platform_variant(
         rotation_w2c = np.asarray(
             cv2.Rodrigues(np.asarray(camera.rotation or [0.0, 0.0, 0.0]))[0], np.float64
         )
-        translation = np.asarray(_translation_mm(camera, square_size_mm), np.float64)
+        translation = scale * np.asarray(_translation_mm(camera, square_size_mm), np.float64)
         position = basis @ (-rotation_w2c.T @ translation)
         # Similarity keeps det=+1 under a mirror: the ONE place the LH flip happens.
         rotation_c2w = basis @ rotation_w2c.T @ basis.T
@@ -196,21 +206,25 @@ def platform_variant(
         size = _output_size(camera)
         fy = float(camera.matrix[1][1]) if camera.matrix else 0.0
         fov_deg = 2.0 * math.degrees(math.atan(size[1] / (2.0 * fy))) if fy else 0.0
-        cameras.append(
-            {
-                "name": camera.name,
-                "position": [float(v) for v in position],
-                "quaternion": _quaternion_xyzw(rotation_c2w),
-                "matrix": [[float(v) for v in row] for row in matrix],
-                "intrinsics": {
-                    "resolution": size,
-                    "matrix": camera.matrix,
-                    "distortions": camera.distortions,
-                    "fov_deg": round(fov_deg, 3),
-                },
-                "error": camera.extrinsic_error or camera.calibration_error,
+        entry: dict[str, Any] = {
+            "name": camera.name,
+            "position": [float(v) for v in position],
+            "quaternion": _quaternion_xyzw(rotation_c2w),
+            "matrix": [[float(v) for v in row] for row in matrix],
+            "intrinsics": {
+                "resolution": size,
+                "matrix": camera.matrix,
+                "distortions": camera.distortions,
+                "fov_deg": round(fov_deg, 3),
+            },
+            "error": camera.extrinsic_error or camera.calibration_error,
+        }
+        if convention.handedness == "right":
+            entry["view"] = {
+                "R": [[float(v) for v in row] for row in rotation_w2c @ basis.T],
+                "t": [float(v) for v in translation],
             }
-        )
+        cameras.append(entry)
 
     return {
         "convention": {
@@ -223,7 +237,7 @@ def platform_variant(
             "camera_forward": [float(v) for v in forward],
             "camera_up": [float(v) for v in local_up],
         },
-        "world_units": "mm",
+        "world_units": units,
         "anchor": next((c.name for c in session.cameras if c.index == 0), None),
         "cameras": cameras,
     }

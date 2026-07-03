@@ -115,6 +115,37 @@ def test_every_convention_yields_proper_rotations() -> None:
             assert np.linalg.det(matrix[:3, :3]) == pytest.approx(1.0), format_id
 
 
+def test_view_block_only_for_right_handed_conventions() -> None:
+    # RH variants carry the view form (R|t, world->camera) next to the scene form;
+    # LH variants must not: R @ M^T has det=-1 there (a mirror, not a rotation).
+    for format_id in ("threejs", "blender"):
+        variant = platform_variant(_session(), format_id, SQUARE_MM)
+        for camera in variant["cameras"]:
+            r = np.asarray(camera["view"]["R"])
+            t = np.asarray(camera["view"]["t"])
+            assert np.linalg.det(r) == pytest.approx(1.0), format_id
+            # Both forms describe the SAME pose: position = -R^T t.
+            assert -r.T @ t == pytest.approx(np.asarray(camera["position"])), format_id
+    for format_id in ("unity", "unreal"):
+        variant = platform_variant(_session(), format_id, SQUARE_MM)
+        assert all("view" not in camera for camera in variant["cameras"])
+
+
+def test_units_scale_platform_world_lengths() -> None:
+    mm = platform_variant(_session(), "threejs", SQUARE_MM)
+    m = platform_variant(_session(), "threejs", SQUARE_MM, units="m")
+    assert m["world_units"] == "m"
+    cam_mm, cam_m = mm["cameras"][1], m["cameras"][1]
+    assert np.asarray(cam_m["position"]) == pytest.approx(
+        np.asarray(cam_mm["position"]) / 1000.0
+    )
+    assert np.asarray(cam_m["view"]["t"]) == pytest.approx(
+        np.asarray(cam_mm["view"]["t"]) / 1000.0
+    )
+    # Intrinsics stay in pixels regardless of world units.
+    assert cam_m["intrinsics"]["matrix"] == cam_mm["intrinsics"]["matrix"]
+
+
 def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path)
     client = TestClient(create_app(manager))
@@ -142,6 +173,11 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     assert archive.status_code == 200
     with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
         assert sorted(bundle.namelist()) == sorted(names)
+
+    # Units apply to the platform JSONs (the TOMLs keep their mm semantics).
+    client.post("/export", json={"formats": ["unity"], "units": "m"})
+    unity_m = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
+    assert unity_m["world_units"] == "m"
 
     assert client.post("/export", json={"formats": ["nope"]}).status_code == 422
     assert manager.current().step.value == "export"  # wizard advanced

@@ -692,7 +692,7 @@ def axis_rotation_transform(axis: str, degrees: float) -> NDArray[np.float64]:
 
 
 def quad_origin_transform(
-    quad: list[list[float]], *, at_center: bool = False
+    quad: list[list[float]], *, at_center: bool = False, ground: bool = False
 ) -> NDArray[np.float64]:
     """World-frame change G placing the origin + axes on a board quad ('Set origin').
 
@@ -701,6 +701,12 @@ def quad_origin_transform(
     ``at_center`` anchors the origin on the quad centroid instead of c0 — the
     single-ArUco convention (cv2 places the marker frame at its CENTER), whereas
     a ChArUco board frame originates at its first chessboard corner.
+    ``ground`` ('Set ground'): the operator declares the board LYING ON THE
+    FLOOR, so its normal becomes the world's up. The new world is the
+    OpenCV-oriented ground frame — x along the board's x edge, y = -normal
+    (down), z along the board's y edge (proper rotation) — which every export
+    basis (they all map canonical -y to the platform's up) turns into a flat
+    floor with no manual reorientation.
     The basis is re-orthonormalised (the Kabsch quad is rigid, but guard anyway).
     """
     corners = np.asarray(quad, np.float64)
@@ -710,7 +716,7 @@ def quad_origin_transform(
     y = y_raw - x * float(x @ y_raw)
     y = y / np.linalg.norm(y)
     z = np.cross(x, y)
-    basis = np.column_stack([x, y, z])  # board->world rotation
+    basis = np.column_stack([x, -z, y] if ground else [x, y, z])  # board->world
     anchor = corners.mean(axis=0) if at_center else corners[0]
     g_rotation = basis.T
     g_translation = -basis.T @ anchor

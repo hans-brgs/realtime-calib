@@ -338,6 +338,29 @@ def test_set_origin_at_center_anchors_the_marker_centroid() -> None:
     assert np.allclose(edge / np.linalg.norm(edge), [1.0, 0.0, 0.0], atol=1e-9)
 
 
+def test_set_ground_makes_the_board_normal_the_up_axis() -> None:
+    # 'Set ground': the operator declares the board ON THE FLOOR -> its normal
+    # becomes the world's up. In OpenCV terms the board must land in the y=0
+    # plane with normal -y, so every export basis (canonical -y -> platform up)
+    # renders the floor flat with no manual reorientation.
+    from calibration_service.calibration.extrinsic import (
+        quad_origin_transform,
+        reorient_result,
+    )
+
+    result = _fixture_result()
+    quad = result.board_quads[0]
+    assert quad is not None
+    moved = reorient_result(result, quad_origin_transform(quad, ground=True))
+    new_quad = np.asarray(moved.board_quads[0])
+    assert np.allclose(new_quad[:, 1], 0.0, atol=1e-9)  # board lies in the y=0 plane
+    x = new_quad[1] - new_quad[0]
+    y = new_quad[3] - new_quad[0]
+    normal = np.cross(x / np.linalg.norm(x), y / np.linalg.norm(y))
+    assert np.allclose(normal, [0.0, -1.0, 0.0], atol=1e-9)  # normal = canonical up
+    assert np.allclose(new_quad[0], [0.0, 0.0, 0.0], atol=1e-9)  # c0 = origin (charuco)
+
+
 def test_refine_preserves_a_reoriented_anchor() -> None:
     # Compute on synthetic data, reorient the world, then Minimize: the BA must
     # hold the anchor at its REORIENTED pose (not snap back to identity).
