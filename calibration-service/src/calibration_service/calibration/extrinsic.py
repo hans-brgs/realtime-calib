@@ -691,11 +691,16 @@ def axis_rotation_transform(axis: str, degrees: float) -> NDArray[np.float64]:
     return _transform(rotation, np.zeros(3))
 
 
-def quad_origin_transform(quad: list[list[float]]) -> NDArray[np.float64]:
+def quad_origin_transform(
+    quad: list[list[float]], *, at_center: bool = False
+) -> NDArray[np.float64]:
     """World-frame change G placing the origin + axes on a board quad ('Set origin').
 
     The quad's corner order (c0 bl, c1 br, c3 tl) defines the board basis B
     (board->world); the new world IS that board frame: ``x_new = B^-1 x_old``.
+    ``at_center`` anchors the origin on the quad centroid instead of c0 — the
+    single-ArUco convention (cv2 places the marker frame at its CENTER), whereas
+    a ChArUco board frame originates at its first chessboard corner.
     The basis is re-orthonormalised (the Kabsch quad is rigid, but guard anyway).
     """
     corners = np.asarray(quad, np.float64)
@@ -706,8 +711,9 @@ def quad_origin_transform(quad: list[list[float]]) -> NDArray[np.float64]:
     y = y / np.linalg.norm(y)
     z = np.cross(x, y)
     basis = np.column_stack([x, y, z])  # board->world rotation
+    anchor = corners.mean(axis=0) if at_center else corners[0]
     g_rotation = basis.T
-    g_translation = -basis.T @ corners[0]
+    g_translation = -basis.T @ anchor
     return _transform(g_rotation, g_translation)
 
 

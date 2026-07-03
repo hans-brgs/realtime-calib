@@ -629,7 +629,11 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
         quad = result.board_quads[body.group]
         if quad is None:
             raise HTTPException(status_code=422, detail="group has no board pose")
-        transform = quad_origin_transform(quad)
+        # Single-ArUco targets: the marker frame sits at its CENTER (cv2
+        # convention); a ChArUco board frame originates at its first corner.
+        board = manager.current().effective_extrinsic_board()
+        marker = board is not None and board.board_type is not BoardType.CHARUCO
+        transform = quad_origin_transform(quad, at_center=marker)
     else:
         if body.axis is None or body.degrees is None:
             raise HTTPException(status_code=422, detail="rotate needs axis + degrees")

@@ -317,6 +317,27 @@ def test_set_origin_puts_the_board_at_the_origin() -> None:
     assert abs(new_quad[3][2]) < 1e-9  # board plane = z=0
 
 
+def test_set_origin_at_center_anchors_the_marker_centroid() -> None:
+    # Single-ArUco targets: cv2's marker frame sits at the marker CENTER, not a
+    # corner — 'Set origin' must land the world origin on the quad centroid.
+    from calibration_service.calibration.extrinsic import (
+        quad_origin_transform,
+        reorient_result,
+    )
+
+    result = _fixture_result()
+    quad = result.board_quads[0]
+    assert quad is not None
+    moved = reorient_result(result, quad_origin_transform(quad, at_center=True))
+    new_quad = moved.board_quads[0]
+    assert new_quad is not None
+    assert np.allclose(np.asarray(new_quad).mean(axis=0), [0.0, 0.0, 0.0], atol=1e-9)
+    assert abs(new_quad[0][2]) < 1e-9  # board plane stays z=0
+    # Axes still follow the quad edges: c0 -> c1 along +x.
+    edge = np.asarray(new_quad[1]) - np.asarray(new_quad[0])
+    assert np.allclose(edge / np.linalg.norm(edge), [1.0, 0.0, 0.0], atol=1e-9)
+
+
 def test_refine_preserves_a_reoriented_anchor() -> None:
     # Compute on synthetic data, reorient the world, then Minimize: the BA must
     # hold the anchor at its REORIENTED pose (not snap back to identity).
