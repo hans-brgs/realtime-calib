@@ -1,10 +1,19 @@
 import { Bounds, Html, Line, OrbitControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { ActionIcon, Box, Group, Select, Slider, Text } from '@mantine/core';
-import { IconPlayerPauseFilled, IconPlayerPlayFilled } from '@tabler/icons-react';
+import { ActionIcon, Box, Button, Group, Select, Slider, Text } from '@mantine/core';
+import {
+  IconCrosshair,
+  IconPlayerPauseFilled,
+  IconPlayerPlayFilled,
+  IconWand,
+} from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
-import type { ExtrinsicResultPayload } from '@/transport/httpClient';
+import {
+  type ExtrinsicResultPayload,
+  minimizeExtrinsic,
+  orientExtrinsic,
+} from '@/transport/httpClient';
 
 // Extrinsic Result 3D review (spec 3d-extrinsic-review): labeled camera frustums at
 // their solved poses + the triangulated corner cloud of the scrubbed group + the
@@ -184,12 +193,34 @@ function GroupPoints({ positions, size }: { positions: Float32Array; size: numbe
   );
 }
 
-export function ArrayReview({ result }: { result: ExtrinsicResultPayload }) {
+export function ArrayReview({
+  result,
+  onResult,
+}: {
+  result: ExtrinsicResultPayload;
+  onResult: (updated: ExtrinsicResultPayload) => void;
+}) {
   const [conventionId, setConventionId] = useState('yup-rh');
   const [group, setGroup] = useState(0);
   const [playing, setPlaying] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [mutateError, setMutateError] = useState<string | null>(null);
   const convention = CONVENTIONS.find((c) => c.value === conventionId) ?? CONVENTIONS[1];
   const maxGroup = Math.max(0, result.group_count - 1);
+
+  // Mutating review actions (spec 3d-extrinsic-review): reorient the stored world
+  // frame / re-run the BA server-side, then swap in the updated result.
+  const mutate = async (action: () => Promise<ExtrinsicResultPayload>) => {
+    setBusy(true);
+    setMutateError(null);
+    try {
+      onResult(await action());
+    } catch (err) {
+      setMutateError(err instanceof Error ? err.message : 'action failed');
+    } finally {
+      setBusy(false);
+    }
+  };
 
   useEffect(() => {
     if (!playing) return;
@@ -248,6 +279,77 @@ export function ArrayReview({ result }: { result: ExtrinsicResultPayload }) {
           </Bounds>
           <OrbitControls makeDefault enablePan={false} />
         </Canvas>
+        <Box
+          style={{
+            position: 'absolute',
+            top: 10,
+            left: 10,
+            zIndex: 2,
+            padding: 8,
+            borderRadius: 8,
+            background: 'rgba(9,9,11,0.72)',
+            backdropFilter: 'blur(6px)',
+            border: '1px solid var(--rc-border)',
+            width: 190,
+          }}
+        >
+          <Text fz="0.62rem" c="dark.3" mb={6}>
+            World frame
+          </Text>
+          <Button
+            size="compact-xs"
+            fullWidth
+            variant="light"
+            leftSection={<IconCrosshair size={13} />}
+            disabled={busy || quad === null}
+            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_origin', group: current }))}
+          >
+            Set origin on board
+          </Button>
+          <Group gap={4} mt={6} grow>
+            {(['x', 'y', 'z'] as const).map((axis) => (
+              <Box key={axis} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  disabled={busy}
+                  onClick={() =>
+                    void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: 90 }))
+                  }
+                >
+                  +{axis}
+                </Button>
+                <Button
+                  size="compact-xs"
+                  variant="default"
+                  disabled={busy}
+                  onClick={() =>
+                    void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: -90 }))
+                  }
+                >
+                  −{axis}
+                </Button>
+              </Box>
+            ))}
+          </Group>
+          <Button
+            size="compact-xs"
+            fullWidth
+            mt={6}
+            variant="light"
+            color="violet"
+            loading={busy}
+            leftSection={<IconWand size={13} />}
+            onClick={() => void mutate(() => minimizeExtrinsic())}
+          >
+            Minimize (re-BA)
+          </Button>
+          {mutateError && (
+            <Text fz="0.6rem" c="var(--rc-error)" mt={4}>
+              {mutateError}
+            </Text>
+          )}
+        </Box>
         <Box style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, width: 240 }}>
           <Select
             size="xs"

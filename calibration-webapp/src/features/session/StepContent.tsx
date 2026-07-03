@@ -1,4 +1,4 @@
-import { IconCube, IconDownload } from '@tabler/icons-react';
+import { IconDownload } from '@tabler/icons-react';
 
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { TargetConfigScreen } from '@/features/board/TargetConfigScreen';
@@ -31,14 +31,6 @@ export function StepContent({ view, onNavigate }: ScreenRouterProps) {
       return <IntrinsicsScreen />;
     case 'extrinsic':
       return <ExtrinsicScreen />;
-    case 'review':
-      return (
-        <PlaceholderScreen
-          icon={IconCube}
-          title="Review 3D"
-          description="Inspect camera frustums, set the origin, and minimize reprojection error. High-fidelity screen coming in a later pass."
-        />
-      );
     case 'export':
       return (
         <PlaceholderScreen

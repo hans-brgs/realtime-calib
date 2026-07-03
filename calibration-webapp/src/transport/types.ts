@@ -7,7 +7,6 @@ export type WizardStep =
   | 'extrinsic_board_choice'
   | 'intrinsic_capture'
   | 'extrinsic_capture'
-  | 'review_3d'
   | 'export';
 
 // ADR-0019: two entry modes replace new/resume/load_intrinsic/load_full.

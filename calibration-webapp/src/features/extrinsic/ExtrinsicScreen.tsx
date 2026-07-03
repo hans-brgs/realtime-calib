@@ -257,16 +257,28 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
           px
         </Text>
       </Text>
-      {result.cameras.map((camera) => (
-        <Group key={camera} justify="space-between" mt="sm">
-          <Text fz="0.72rem" c="dark.2">
-            {camera} {camera === result.cameras[0] ? '· anchor' : ''}
-          </Text>
-          <Text fz="0.78rem" fw={600} className="rc-tnum">
-            {result.per_camera_error[camera]?.toFixed(3) ?? '—'} px
-          </Text>
-        </Group>
-      ))}
+      {result.cameras.map((camera) => {
+        const deviation = result.per_camera_error[camera];
+        // Spec deviation highlight: green <= 0.25 px, amber <= 0.5, red above.
+        const color =
+          deviation == null
+            ? undefined
+            : deviation <= 0.25
+              ? 'var(--rc-success)'
+              : deviation <= 0.5
+                ? 'var(--rc-warning)'
+                : 'var(--rc-error)';
+        return (
+          <Group key={camera} justify="space-between" mt="sm">
+            <Text fz="0.72rem" c="dark.2">
+              {camera} {camera === result.cameras[0] ? '· anchor' : ''}
+            </Text>
+            <Text fz="0.78rem" fw={600} className="rc-tnum" style={{ color }}>
+              {deviation?.toFixed(3) ?? '—'} px
+            </Text>
+          </Group>
+        );
+      })}
       <Group justify="space-between" mt="md">
         <Text fz="0.72rem" c="dark.2">
           Groups / 3D points
@@ -418,7 +430,7 @@ function ExtrinsicInner() {
                   </Center>
                 }
               >
-                <ArrayReview result={result} />
+                <ArrayReview result={result} onResult={setResult} />
               </Suspense>
             ) : (
               <Center h="100%">

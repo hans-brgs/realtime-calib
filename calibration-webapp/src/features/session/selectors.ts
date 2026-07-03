@@ -4,7 +4,7 @@
 import type { RootState } from '@/app/store';
 import type { Session, WizardStep } from '@/transport/types';
 
-export type StageId = 'cameras' | 'boards' | 'intrinsic' | 'extrinsic' | 'review' | 'export';
+export type StageId = 'cameras' | 'boards' | 'intrinsic' | 'extrinsic' | 'export';
 export type StageStatus = 'complete' | 'active' | 'todo' | 'locked';
 
 export interface Stage {
@@ -20,13 +20,13 @@ interface StageDef {
 }
 
 // Board definition comes first so the operator can print early, before wiring
-// cameras (ADR-0020 workflow).
+// cameras (ADR-0020 workflow). No "Review 3D" stage: the 3D review IS the Result
+// sub-step of Extrinsics (spec 3d-extrinsic-review / extrinsic-calibration-flow).
 const STAGES: StageDef[] = [
   { id: 'boards', label: 'Target Config', steps: ['intrinsic_board', 'extrinsic_board_choice'] },
   { id: 'cameras', label: 'Camera Setup', steps: ['camera_setup'] },
   { id: 'intrinsic', label: 'Intrinsics', steps: ['intrinsic_capture'] },
   { id: 'extrinsic', label: 'Extrinsics', steps: ['extrinsic_capture'] },
-  { id: 'review', label: 'Review 3D', steps: ['review_3d'] },
   { id: 'export', label: 'Export', steps: ['export'] },
 ];
 

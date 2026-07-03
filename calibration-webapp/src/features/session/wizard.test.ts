@@ -84,9 +84,11 @@ describe('selectStages (completion-driven)', () => {
     expect(stages[1]).toMatchObject({ id: 'cameras', status: 'locked' });
   });
 
-  it('load-from-files at review_3d with all done: stages complete, review active', () => {
+  it('all cameras extrinsic_done at extrinsic_capture: extrinsic active, export unlocked', () => {
+    // No "Review 3D" stage: the 3D review lives inside the Extrinsics Result
+    // sub-step, so a fully-solved array unlocks Export directly.
     const done = session({
-      step: 'review_3d',
+      step: 'extrinsic_capture',
       mode: 'load-from-files',
       intrinsic_board: board(),
       cameras: [camera({ status: 'extrinsic_done' })],
@@ -95,7 +97,7 @@ describe('selectStages (completion-driven)', () => {
     expect(stages.find((s) => s.id === 'boards')?.status).toBe('complete');
     expect(stages.find((s) => s.id === 'cameras')?.status).toBe('complete');
     expect(stages.find((s) => s.id === 'intrinsic')?.status).toBe('complete');
-    expect(stages.find((s) => s.id === 'extrinsic')?.status).toBe('complete');
-    expect(stages.find((s) => s.id === 'review')?.status).toBe('active');
+    expect(stages.find((s) => s.id === 'extrinsic')?.status).toBe('active');
+    expect(stages.find((s) => s.id === 'export')?.status).toBe('todo');
   });
 });

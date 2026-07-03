@@ -5,7 +5,6 @@ import {
   IconChevronLeft,
   IconCircle,
   IconCircleFilled,
-  IconCube,
   IconDownload,
   IconFocusCentered,
   IconLayoutDashboard,
@@ -32,7 +31,6 @@ const ICONS: Record<ViewId, ComponentType<IconProps>> = {
   boards: IconLayoutGrid,
   intrinsic: IconFocusCentered,
   extrinsic: IconTopologyStar3,
-  review: IconCube,
   export: IconDownload,
 };
 
