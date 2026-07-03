@@ -1,6 +1,17 @@
 # Dependencies
 /node_modules
 
+# Yarn Berry — keep the vendored release + config, ignore the rest
+.yarn/*
+!.yarn/releases
+!.yarn/patches
+!.yarn/plugins
+!.yarn/sdks
+!.yarn/versions
+.pnp.*
+.yarn/cache
+.yarn/install-state.gz
+
 # Production build
 /build
 

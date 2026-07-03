@@ -11,10 +11,6 @@ const config: Config = {
   tagline: 'Real-time multi-camera calibration — intrinsics, extrinsics, live feedback',
   favicon: 'img/favicon.png',
 
-  future: {
-    v4: true,
-  },
-
   // Production URL and base path for GitHub Pages project site.
   url: 'https://hans-brgs.github.io',
   baseUrl: '/realtime-calib/',
@@ -25,7 +21,12 @@ const config: Config = {
   trailingSlash: false,
 
   onBrokenLinks: 'warn',
-  onBrokenMarkdownLinks: 'warn',
+
+  markdown: {
+    hooks: {
+      onBrokenMarkdownLinks: 'warn',
+    },
+  },
 
   // English only for now; i18n scaffolding kept so locales can be added later.
   i18n: {

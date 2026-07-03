@@ -37,11 +37,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: yarn
-          cache-dependency-path: docs-site/yarn.lock
+
+      # Use the Yarn version pinned in package.json (packageManager field),
+      # served by the vendored release committed under docs-site/.yarn/releases.
+      - name: Enable Corepack
+        run: corepack enable
 
       - name: Install dependencies
-        run: yarn install --frozen-lockfile
+        run: yarn install --immutable
 
       - name: Build
         run: yarn build
