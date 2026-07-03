@@ -309,6 +309,10 @@ function ExtrinsicInner() {
   const cameraNames = cameras.map((c) => c.name);
   const allDone = cameras.length > 0 && cameras.every((c) => c.status === 'extrinsic_done');
   const anchor = cameras.find((c) => c.index === 0)?.name ?? cameraNames[0] ?? '—';
+  // Same fallback as the service's effective_extrinsic_board: the board frame
+  // anchor differs per target (marker center vs ChArUco first corner).
+  const extrinsicBoard = session?.extrinsic_board ?? session?.intrinsic_board ?? null;
+  const markerBoard = extrinsicBoard?.board_type === 'aruco';
 
   const [step, setStep] = useState<Step>(allDone ? 'result' : 'capture');
   const [recording, setRecording] = useState(false);
@@ -430,7 +434,7 @@ function ExtrinsicInner() {
                   </Center>
                 }
               >
-                <ArrayReview result={result} onResult={setResult} />
+                <ArrayReview result={result} onResult={setResult} markerBoard={markerBoard} />
               </Suspense>
             ) : (
               <Center h="100%">

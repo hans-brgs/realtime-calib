@@ -1,4 +1,4 @@
-import { Bounds, Html, Line, OrbitControls } from '@react-three/drei';
+import { Bounds, Html, Line, TrackballControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { ActionIcon, Box, Button, Group, Select, Slider, Text } from '@mantine/core';
 import {
@@ -147,13 +147,24 @@ function Frustum({ pose, size, color, m, anchor }: {
 }
 
 // Board outline + local xyz triad, derived from the quad's corner order (spec:
-// c0->c1 = board +x, c0->c3 = board +y, z = x cross y).
-function BoardWithTriad({ quad, m }: { quad: number[][]; m: number[][] }) {
+// c0->c1 = board +x, c0->c3 = board +y, z = x cross y). A single-ArUco marker's
+// frame sits at its CENTER (cv2 convention) — anchor the triad on the centroid;
+// a ChArUco board frame originates at its first chessboard corner (c0).
+function BoardWithTriad({ quad, m, centered }: {
+  quad: number[][];
+  m: number[][];
+  centered: boolean;
+}) {
   const corners = quad.map((c) => mulMV(m, c as Vec3));
   const x = unit(sub(corners[1], corners[0]));
   const y = unit(sub(corners[3], corners[0]));
   const z = unit(cross(x, y));
-  const origin = corners[0];
+  const origin = centered
+    ? scale(
+        corners.reduce((acc, corner) => add(acc, corner), [0, 0, 0] as Vec3),
+        1 / corners.length,
+      )
+    : corners[0];
   const len = norm(sub(corners[1], corners[0])) * 0.3;
   return (
     <>
@@ -190,9 +201,11 @@ function GroupPoints({ positions, size }: { positions: Float32Array; size: numbe
 export function ArrayReview({
   result,
   onResult,
+  markerBoard = false,
 }: {
   result: ExtrinsicResultPayload;
   onResult: (updated: ExtrinsicResultPayload) => void;
+  markerBoard?: boolean;
 }) {
   const dispatch = useAppDispatch();
   const conventionId = useAppSelector(selectConvention);
@@ -282,9 +295,11 @@ export function ArrayReview({
             {positions.length > 0 && (
               <GroupPoints positions={positions} size={sceneScale * 0.02} />
             )}
-            {quad && <BoardWithTriad quad={quad} m={convention.m} />}
+            {quad && <BoardWithTriad quad={quad} m={convention.m} centered={markerBoard} />}
           </Bounds>
-          <OrbitControls makeDefault enablePan={false} />
+          {/* Trackball, not Orbit: orbit clamps polar to [0, π] (blocks at the
+              poles), which fights a reoriented world — free 360° tumbling. */}
+          <TrackballControls makeDefault noPan rotateSpeed={3} />
         </Canvas>
         <Box
           style={{
