@@ -248,21 +248,29 @@ export function ArrayReview({ result }: { result: ExtrinsicResultPayload }) {
           </Bounds>
           <OrbitControls makeDefault enablePan={false} />
         </Canvas>
-        <Box style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, width: 230 }}>
+        <Box style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, width: 240 }}>
           <Select
             size="xs"
+            label="Display convention"
             value={conventionId}
             onChange={(value) => value && setConventionId(value)}
             data={CONVENTIONS.map(({ value, label }) => ({ value, label }))}
             comboboxProps={{ withinPortal: true }}
             styles={{
-              input: {
+              root: {
+                padding: 8,
+                borderRadius: 8,
                 background: 'rgba(9,9,11,0.72)',
                 backdropFilter: 'blur(6px)',
                 border: '1px solid var(--rc-border)',
               },
+              label: { fontSize: '0.62rem', color: 'var(--mantine-color-dark-3)' },
+              input: { background: 'var(--rc-input)', border: '1px solid var(--rc-border)' },
             }}
           />
+          <Text fz="0.6rem" c="dark.3" mt={4} px={8}>
+            Display only — export formats are chosen at the Export step.
+          </Text>
         </Box>
       </Box>
       <Group mt="sm" gap="sm" wrap="nowrap">
