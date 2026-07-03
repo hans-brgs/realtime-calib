@@ -435,3 +435,31 @@ def test_single_marker_board_solves_pairwise_and_full_chain() -> None:
     )
     assert np.allclose(solved["cam_2"][:3, :3], POSES["cam_2"][:3, :3], atol=1e-3)
     assert len(refined) == 6 * 4  # every marker corner triangulated per group
+
+
+def test_sweep_groups_builds_complete_instants_despite_rate_mismatch(tmp_path: Path) -> None:
+    # Real-rig regression: cameras record at EFFECTIVE rates differing by 20%+
+    # (frames skipped under load). Greedy head-pairing fragmented one physical
+    # instant into arbitrary 2-camera groups (pairing a camera that saw the board
+    # with one that didn't); nearest-neighbour matching onto the densest timeline
+    # must keep instants complete.
+    from calibration_service.calibration.extrinsic import sweep_groups
+
+    # cam_1 at ~18 fps (55 ms), cam_0 and cam_2 at ~15 fps (66 ms) with offsets.
+    (tmp_path / "cam_1.timestamps").write_text(
+        "".join(f"{i * 0.055:.6f}\n" for i in range(40))
+    )
+    for name, offset in (("cam_0", 0.020), ("cam_2", 0.041)):
+        (tmp_path / f"{name}.timestamps").write_text(
+            "".join(f"{i * 0.066 + offset:.6f}\n" for i in range(33))
+        )
+    groups = sweep_groups(tmp_path, ["cam_0", "cam_1", "cam_2"], 0.055 * 0.95)
+    sizes = sorted(len(g.frames) for g in groups)
+    # Mostly complete instants; no flood of fragmented pairs.
+    assert sizes.count(3) >= len(groups) * 0.6
+    # Full coverage of the sweep, not just its first seconds.
+    assert groups[-1].timestamp - groups[0].timestamp > 0.055 * 40 * 0.85
+    # A camera frame is consumed at most once across all groups.
+    for name in ("cam_0", "cam_1", "cam_2"):
+        used = [g.frames[name].payload for g in groups if name in g.frames]
+        assert len(used) == len(set(used))

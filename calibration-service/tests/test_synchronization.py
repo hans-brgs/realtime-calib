@@ -99,3 +99,19 @@ def test_covisibility_counts_pairs_only_when_both_see_the_board() -> None:
     assert graph.board_frames == {"cam_0": 3, "cam_1": 2, "cam_2": 2}
     assert graph.degree("cam_0") == 2
     assert graph.degree("cam_1", min_shared=2) == 1  # only cam_0 reaches 2 shared
+
+
+def test_drain_survives_desynchronized_stretches() -> None:
+    # Real-rig regression: a lone unpaired frame mid-sweep made a drain pass drop
+    # it and return None -> drain() read "done" and DISCARDED the rest of the
+    # recording (only the first seconds ever got grouped). The cleanup pass must
+    # retry, so pairs after the gap still come out.
+    sync = _sync(["cam_0", "cam_1"])
+    sync.add("cam_0", 10.000, "a1")
+    sync.add("cam_1", 10.010, "b1")  # pair 1
+    sync.add("cam_0", 10.100, "lone")  # cam_1 has nothing near 10.100
+    sync.add("cam_0", 10.200, "a2")
+    sync.add("cam_1", 10.210, "b2")  # pair 2, AFTER the gap
+    groups = sync.drain()
+    assert [g.frames["cam_0"].payload for g in groups] == ["a1", "a2"]
+    assert [g.frames["cam_1"].payload for g in groups] == ["b1", "b2"]

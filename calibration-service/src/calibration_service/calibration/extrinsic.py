@@ -42,7 +42,7 @@ from calibration_service.calibration.intrinsic import _cv_charuco_board
 from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
-from calibration_service.synchronization import FrameSynchronizer, SyncGroup
+from calibration_service.synchronization import SyncFrame, SyncGroup
 
 logger = logging.getLogger(__name__)
 
@@ -60,12 +60,23 @@ _BOARDS_SAMPLED = 10
 _DEFAULT_MIN_SHARED = 5
 # Detection budget over the sweep: groups are subsampled evenly to this cap
 # (detection dominates compute cost, like the intrinsic _MAX_DETECT_FRAMES).
+# Single-marker detection is ~10x cheaper than ChArUco AND each view carries only
+# 4 corners, so markers get a much larger budget (more views = the redundancy).
 _MAX_DETECT_GROUPS = 80
+_MAX_DETECT_GROUPS_SINGLE_MARKER = 240
+# Shared boards fed to stereoCalibrate per pair (see _BOARDS_SAMPLED); with only
+# 4 corners per marker view, average over more views.
+_BOARDS_SAMPLED_SINGLE_MARKER = 25
 # stereoCalibrate refinement on normalized points (Caliscope criteria).
 _STEREO_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 1e-3)
-# Bundle-adjustment settings (Caliscope capture_volume least_squares kwargs).
+# Bundle-adjustment settings (Caliscope capture_volume least_squares kwargs), with
+# one deliberate deviation: a HUBER loss instead of linear. Caliscope's 42-corner
+# ChArUco views drown an occasional misdetection; a 4-corner marker view does not,
+# and one bad frame poisons a linear BA (observed 17.7 px on the real rig). The
+# scale is in normalized-image units: ~2 px at a ~1350 px focal.
 _BA_FTOL = 1e-8
 _BA_MAX_NFEV = 1000
+_BA_HUBER_SCALE = 0.0015
 
 
 @dataclass(frozen=True)
@@ -227,10 +238,15 @@ def stereo_pairwise(
             if len(shared) < min_shared:
                 continue
 
+            boards_cap = (
+                _BOARDS_SAMPLED
+                if board.board_type is BoardType.CHARUCO
+                else _BOARDS_SAMPLED_SINGLE_MARKER
+            )
             object_points: list[NDArray[np.float32]] = []
             points_a: list[NDArray[np.float32]] = []
             points_b: list[NDArray[np.float32]] = []
-            for index in _diverse_group_indices(shared, _BOARDS_SAMPLED):
+            for index in _diverse_group_indices(shared, boards_cap):
                 det_a, det_b = groups[index][cam_a], groups[index][cam_b]
                 common = np.intersect1d(det_a.ids, det_b.ids)
                 sel_a = np.searchsorted(det_a.ids, common)
@@ -277,49 +293,41 @@ def chain_from_anchor(
 ) -> dict[str, NDArray[np.float64]]:
     """Chain every camera's world->cam 4x4 pose from the anchor (ADR-0012).
 
-    Builds a bidirectional transform graph from the pairwise estimates, fills
-    missing pairs by bridging through intermediates (lowest cumulative error wins,
-    Caliscope ``paired_pose_network``), then poses camera ``c`` as the anchor->c
-    transform; the anchor itself is identity. Raises ``ValueError`` when a camera
-    is unreachable from the anchor (no joint board views — guard-rail ADR-0012).
+    Builds a bidirectional transform graph from the pairwise estimates and takes
+    the lowest-cumulative-error PATH from the anchor to each camera (Dijkstra) —
+    a strict generalisation of Caliscope's bridge-filling: bridges compete with
+    poor direct estimates instead of only replacing missing ones. The anchor is
+    identity. Raises ``ValueError`` when a camera is unreachable from the anchor
+    (no joint board views — guard-rail ADR-0012).
     """
-    transforms: dict[tuple[str, str], tuple[NDArray[np.float64], float]] = {}
+    edges: dict[str, list[tuple[str, NDArray[np.float64], float]]] = {c: [] for c in cameras}
     for (cam_a, cam_b), pair in pairs.items():
         forward = _transform(pair.rotation, pair.translation)
-        transforms[(cam_a, cam_b)] = (forward, pair.error)
-        transforms[(cam_b, cam_a)] = (np.linalg.inv(forward), pair.error)
+        edges[cam_a].append((cam_b, forward, pair.error))
+        edges[cam_b].append((cam_a, np.linalg.inv(forward), pair.error))
 
-    changed = True
-    while changed:
-        changed = False
-        for origin in sorted(cameras):
-            for destination in sorted(cameras):
-                if origin == destination or (origin, destination) in transforms:
-                    continue
-                best: tuple[NDArray[np.float64], float] | None = None
-                for via in sorted(cameras):
-                    left = transforms.get((origin, via))
-                    right = transforms.get((via, destination))
-                    if left is None or right is None:
-                        continue
-                    candidate = (right[0] @ left[0], left[1] + right[1])
-                    if best is None or candidate[1] < best[1]:
-                        best = candidate
-                if best is not None:
-                    transforms[(origin, destination)] = best
-                    transforms[(destination, origin)] = (np.linalg.inv(best[0]), best[1])
-                    changed = True
-
+    # Lowest-cumulative-error path from the anchor to EVERY camera (Dijkstra on the
+    # pair graph). Unlike fill-missing-pairs-only bridging, this also routes AROUND
+    # a poor direct estimate: on the real rig cam_0|cam_1 measured 65x worse than
+    # its neighbours, and the 3-hop route beat the direct pair by an order of
+    # magnitude — the direct edge must compete with bridges, not shadow them.
+    cost: dict[str, float] = {anchor: 0.0}
     poses: dict[str, NDArray[np.float64]] = {anchor: np.eye(4)}
-    unreachable: list[str] = []
-    for camera in cameras:
-        if camera == anchor:
-            continue
-        entry = transforms.get((anchor, camera))
-        if entry is None:
-            unreachable.append(camera)
-        else:
-            poses[camera] = entry[0]
+    visited: set[str] = set()
+    while True:
+        current = min(
+            (c for c in cost if c not in visited), key=lambda c: cost[c], default=None
+        )
+        if current is None:
+            break
+        visited.add(current)
+        for neighbour, forward, error in edges.get(current, []):
+            candidate = cost[current] + error
+            if neighbour not in cost or candidate < cost[neighbour]:
+                cost[neighbour] = candidate
+                poses[neighbour] = forward @ poses[current]
+
+    unreachable = [c for c in cameras if c not in poses]
     if unreachable:
         raise ValueError(
             "cameras not co-visible with the anchor (need joint board views): "
@@ -499,15 +507,20 @@ def bundle_adjust(
         sparsity[2 * rows, n_cam_params + 3 * obs_point + k] = 1
         sparsity[2 * rows + 1, n_cam_params + 3 * obs_point + k] = 1
 
+    # Two-stage solve: a linear pass first (full gradients converge the geometry
+    # from the chained init), then a Huber pass from that solution so residual
+    # outliers — e.g. a misdetected 4-corner marker view — stop steering the fit.
+    # Huber alone stalls from a coarse init (everything starts beyond f_scale).
+    common = {
+        "jac_sparsity": sparsity,
+        "method": "trf",
+        "x_scale": "jac",
+        "ftol": _BA_FTOL,
+        "max_nfev": _BA_MAX_NFEV,
+    }
+    first = least_squares(residuals, x0, loss="linear", **common)
     result = least_squares(
-        residuals,
-        x0,
-        jac_sparsity=sparsity,
-        method="trf",
-        x_scale="jac",
-        loss="linear",
-        ftol=_BA_FTOL,
-        max_nfev=_BA_MAX_NFEV,
+        residuals, np.asarray(first.x, np.float64), loss="huber", f_scale=_BA_HUBER_SCALE, **common
     )
     solution = np.asarray(result.x, np.float64)
     logger.info("bundle adjustment: cost %.6f -> %.6f", float(result.cost), float(result.cost))
@@ -832,21 +845,55 @@ def sweep_groups(
 ) -> list[SyncGroup[int]]:
     """Synchronize a recorded sweep on its timestamp sidecars alone (no decoding).
 
+    Offline grouping is **nearest-neighbour matching onto a reference timeline**
+    (the camera with the most frames), NOT the live head-greedy pairing: real rigs
+    record at per-camera EFFECTIVE rates that differ by 20%+ (frames skipped under
+    load), and greedy head-windowing then fragments one physical instant into
+    arbitrary small pairs — grouping a camera that sees the board with one that
+    doesn't (real-rig bug). Here every reference frame becomes a candidate instant
+    and each other camera contributes its closest unused frame within the window,
+    so instants stay COMPLETE; a camera frame is consumed at most once.
+
     Payloads are per-camera frame indices; the same groups drive the Prepare
     scrubber (``GET /extrinsic/groups``) and the compute selection, so what the
     operator scrubs is exactly what the solver consumes.
     """
-    stamps = {name: read_timestamps(directory / f"{name}.timestamps") for name in names}
-    longest = max((len(series) for series in stamps.values()), default=0)
-    if longest == 0:
+    stamps = {
+        name: read_timestamps(directory / f"{name}.timestamps")
+        for name in names
+        if (directory / f"{name}.timestamps").is_file()
+    }
+    stamps = {name: series for name, series in stamps.items() if series}
+    if not stamps:
         raise ValueError(f"no recorded timestamps under {directory}")
-    synchronizer: FrameSynchronizer[int] = FrameSynchronizer(
-        names, window_s, max_buffer=longest + 1
-    )
-    for name, series in stamps.items():
-        for frame_index, timestamp in enumerate(series):
-            synchronizer.add(name, timestamp, frame_index)
-    return synchronizer.drain()
+
+    reference = max(stamps, key=lambda name: len(stamps[name]))
+    pointers = dict.fromkeys((n for n in stamps if n != reference), 0)
+
+    groups: list[SyncGroup[int]] = []
+    for ref_index, ref_time in enumerate(stamps[reference]):
+        members = {reference: SyncFrame(reference, ref_time, ref_index)}
+        for name, cursor in pointers.items():
+            series = stamps[name]
+            # Advance to this camera's frame closest to the reference instant.
+            while cursor + 1 < len(series) and abs(series[cursor + 1] - ref_time) <= abs(
+                series[cursor] - ref_time
+            ):
+                cursor += 1
+            pointers[name] = cursor
+            if cursor < len(series) and abs(series[cursor] - ref_time) <= window_s:
+                members[name] = SyncFrame(name, series[cursor], cursor)
+                pointers[name] = cursor + 1  # consumed: one group per frame
+        if len(members) >= 2:
+            timestamps = [frame.timestamp for frame in members.values()]
+            groups.append(
+                SyncGroup(
+                    frames=members,
+                    timestamp=sum(timestamps) / len(timestamps),
+                    spread=max(timestamps) - min(timestamps),
+                )
+            )
+    return groups
 
 
 def compute_extrinsic_from_sweep(
@@ -879,9 +926,14 @@ def compute_extrinsic_from_sweep(
         groups = [group for group in groups if group.spread <= max_spread_s]
     if stride is not None and stride > 1:
         groups = groups[::stride]
-    if len(groups) > _MAX_DETECT_GROUPS:
-        step = len(groups) / _MAX_DETECT_GROUPS
-        groups = [groups[int(i * step)] for i in range(_MAX_DETECT_GROUPS)]
+    budget = (
+        _MAX_DETECT_GROUPS
+        if board.board_type is BoardType.CHARUCO
+        else _MAX_DETECT_GROUPS_SINGLE_MARKER
+    )
+    if len(groups) > budget:
+        step = len(groups) / budget
+        groups = [groups[int(i * step)] for i in range(budget)]
     if not groups:
         raise ValueError("no synchronized groups in the sweep (check spread/stride)")
     logger.info("extrinsic compute: %d synchronized groups selected", len(groups))

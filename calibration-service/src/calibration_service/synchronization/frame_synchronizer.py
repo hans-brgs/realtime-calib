@@ -91,38 +91,46 @@ class FrameSynchronizer[T]:
     def try_emit(self, *, flush: bool = False) -> SyncGroup[T] | None:
         """Return the next synchronized group, or ``None`` if not ready.
 
-        ``flush=True`` (offline drain) emits as soon as the quorum is met,
-        without waiting for stragglers — all data is already buffered.
+        ``flush=True`` (offline drain) emits as soon as the quorum is met, without
+        waiting for stragglers — all data is already buffered. In flush mode a pass
+        that only dropped stale heads RETRIES with the advanced heads instead of
+        returning ``None``: ``drain()`` reads ``None`` as "done", and bailing after
+        a cleanup pass would silently discard the rest of the sweep (real-rig bug:
+        only the first seconds of an 18 s recording ever got grouped).
         """
-        heads = [buffer[0] for buffer in self._buffers.values() if buffer]
-        if len(heads) < _QUORUM:
+        while True:
+            heads = [buffer[0] for buffer in self._buffers.values() if buffer]
+            if len(heads) < _QUORUM:
+                return None
+
+            newest = max(frame.timestamp for frame in heads)
+            in_window = [f for f in heads if newest - f.timestamp <= self._window_s]
+
+            # Anti-famine: drop every stale head each pass (see module docstring).
+            dropped = 0
+            for frame in heads:
+                if newest - frame.timestamp > self._window_s:
+                    self._buffers[frame.camera].popleft()
+                    dropped += 1
+
+            if len(in_window) >= _QUORUM:
+                complete = len(in_window) >= self._active_count
+                waited_enough = any(
+                    len(self._buffers[f.camera]) >= self._wait_depth for f in in_window
+                )
+                if flush or complete or waited_enough:
+                    members = [self._buffers[f.camera].popleft() for f in in_window]
+                    timestamps = [m.timestamp for m in members]
+                    return SyncGroup(
+                        frames={m.camera: m for m in members},
+                        timestamp=sum(timestamps) / len(timestamps),
+                        spread=max(timestamps) - min(timestamps),
+                    )
+                return None  # live: instant batching — let stragglers land first
+
+            if flush and dropped:
+                continue  # progress was made; the next heads may pair up
             return None
-
-        newest = max(frame.timestamp for frame in heads)
-        in_window = [f for f in heads if newest - f.timestamp <= self._window_s]
-
-        # Anti-famine: drop every stale head each pass (see module docstring).
-        for frame in heads:
-            if newest - frame.timestamp > self._window_s:
-                self._buffers[frame.camera].popleft()
-
-        if len(in_window) < _QUORUM:
-            return None
-
-        complete = len(in_window) >= self._active_count
-        waited_enough = any(
-            len(self._buffers[f.camera]) >= self._wait_depth for f in in_window
-        )
-        if not (flush or complete or waited_enough):
-            return None  # instant batching: let stragglers land first
-
-        members = [self._buffers[f.camera].popleft() for f in in_window]
-        timestamps = [m.timestamp for m in members]
-        return SyncGroup(
-            frames={m.camera: m for m in members},
-            timestamp=sum(timestamps) / len(timestamps),
-            spread=max(timestamps) - min(timestamps),
-        )
 
     def drain(self) -> list[SyncGroup[T]]:
         """Emit every remaining group (offline mode: everything is buffered)."""
