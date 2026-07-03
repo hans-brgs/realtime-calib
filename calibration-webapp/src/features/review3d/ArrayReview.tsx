@@ -30,7 +30,7 @@ import {
 // screen (one source of truth) where it preselects the platform variant.
 type Vec3 = [number, number, number];
 
-const CAMERA_COLORS = ['#a78bfa', '#4ade80', '#38bdf8', '#fbbf24', '#f472b6', '#f87171'];
+const CAMERA_COLOR = '#a78bfa'; // one hue for the whole rig: cameras read by label
 const PLAY_FPS = 6;
 
 function rodriguesToMatrix(r: number[]): number[][] {
@@ -125,7 +125,8 @@ function Frustum({ pose, size, color, m, anchor }: {
         <Line key={i} points={[apex, c]} color={color} lineWidth={anchor ? 2 : 1.2} />
       ))}
       <Line points={[...corners, corners[0]]} color={color} lineWidth={anchor ? 2.4 : 1.6} />
-      <Html position={apex} center distanceFactor={size * 14} style={{ pointerEvents: 'none' }}>
+      {/* distanceFactor compensates the halved frustum size: labels stay legible. */}
+      <Html position={apex} center distanceFactor={size * 20} style={{ pointerEvents: 'none' }}>
         <div
           style={{
             padding: '2px 7px',
@@ -199,16 +200,28 @@ export function ArrayReview({
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mutateError, setMutateError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const convention = conventionByValue(conventionId);
   const maxGroup = Math.max(0, result.group_count - 1);
 
   // Mutating review actions (spec 3d-extrinsic-review): reorient the stored world
-  // frame / re-run the BA server-side, then swap in the updated result.
-  const mutate = async (action: () => Promise<ExtrinsicResultPayload>) => {
+  // frame / re-run the BA server-side, then swap in the updated result. Minimize
+  // reports its before -> after RMSE — without it a converged re-fit looks dead.
+  const mutate = async (action: () => Promise<ExtrinsicResultPayload>, report = false) => {
     setBusy(true);
     setMutateError(null);
+    setNotice(null);
     try {
-      onResult(await action());
+      const before = result.error;
+      const updated = await action();
+      onResult(updated);
+      if (report) {
+        setNotice(
+          Math.abs(before - updated.error) < 0.005
+            ? `already converged · ${updated.error.toFixed(2)} px`
+            : `RMSE ${before.toFixed(2)} → ${updated.error.toFixed(2)} px`,
+        );
+      }
     } catch (err) {
       setMutateError(err instanceof Error ? err.message : 'action failed');
     } finally {
@@ -225,7 +238,7 @@ export function ArrayReview({
   const poses = cameraPoses(result);
   const sceneScale =
     poses.reduce((sum, pose) => sum + norm(pose.position), 0) / Math.max(1, poses.length - 1) || 10;
-  const frustumSize = Math.max(0.5, sceneScale * 0.18);
+  const frustumSize = Math.max(0.25, sceneScale * 0.09);
 
   const current = Math.min(group, maxGroup);
   const groupPoints: number[] = [];
@@ -255,13 +268,13 @@ export function ArrayReview({
         >
           <ambientLight intensity={0.8} />
           <Bounds fit clip observe margin={1.25}>
-            <WorldAxes size={sceneScale * 0.5} />
+            <WorldAxes size={sceneScale * 0.2} />
             {poses.map((pose, i) => (
               <Frustum
                 key={pose.name}
                 pose={pose}
                 size={frustumSize}
-                color={CAMERA_COLORS[i % CAMERA_COLORS.length]}
+                color={CAMERA_COLOR}
                 m={convention.m}
                 anchor={i === 0}
               />
@@ -334,10 +347,15 @@ export function ArrayReview({
             color="violet"
             loading={busy}
             leftSection={<IconWand size={13} />}
-            onClick={() => void mutate(() => minimizeExtrinsic())}
+            onClick={() => void mutate(() => minimizeExtrinsic(), true)}
           >
             Minimize (re-BA)
           </Button>
+          {notice && (
+            <Text fz="0.6rem" c="teal.4" mt={4}>
+              {notice}
+            </Text>
+          )}
           {mutateError && (
             <Text fz="0.6rem" c="var(--rc-error)" mt={4}>
               {mutateError}

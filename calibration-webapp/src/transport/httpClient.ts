@@ -211,8 +211,9 @@ export type OrientRequest =
 export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/orient', body);
 
-// Re-run the bundle adjustment from the current result (persisted observations,
-// no redetection; the anchor keeps its — possibly reoriented — pose).
+// Filter the worst-residual observations (Caliscope quality loop) + re-run the
+// bundle adjustment. Repeat-safe: always re-filters from the full persisted
+// observations; the anchor keeps its — possibly reoriented — pose.
 export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/minimize');
 
