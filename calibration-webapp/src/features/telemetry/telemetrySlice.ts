@@ -16,11 +16,29 @@ export interface CoverageMetrics {
   grid_count: number;
 }
 
-interface TelemetryState {
-  coverage: Record<string, CoverageMetrics>;
+// Pairwise co-visibility pushed during the synchronized extrinsic sweep (ADR-0007/
+// 0023): per-pair joint board views, per-camera detection tallies, group count.
+export interface CovisibilityPair {
+  a: string;
+  b: string;
+  count: number;
 }
 
-const initialState: TelemetryState = { coverage: {} };
+export interface Covisibility {
+  type: 'covisibility';
+  phase: string;
+  cameras: string[];
+  pairs: CovisibilityPair[];
+  board_frames: Record<string, number>;
+  synced_groups: number;
+}
+
+interface TelemetryState {
+  coverage: Record<string, CoverageMetrics>;
+  covisibility: Covisibility | null;
+}
+
+const initialState: TelemetryState = { coverage: {}, covisibility: null };
 
 const telemetrySlice = createSlice({
   name: 'telemetry',
@@ -29,13 +47,23 @@ const telemetrySlice = createSlice({
     coverageReceived(state, action: PayloadAction<CoverageMetrics>) {
       state.coverage[action.payload.camera] = action.payload;
     },
+    covisibilityReceived(state, action: PayloadAction<Covisibility>) {
+      state.covisibility = action.payload;
+    },
+    covisibilityCleared(state) {
+      state.covisibility = null;
+    },
   },
 });
 
-export const { coverageReceived } = telemetrySlice.actions;
+export const { coverageReceived, covisibilityReceived, covisibilityCleared } =
+  telemetrySlice.actions;
 export default telemetrySlice.reducer;
 
 export const selectCoverage =
   (camera: string | null) =>
   (state: RootState): CoverageMetrics | null =>
     camera ? (state.telemetry.coverage[camera] ?? null) : null;
+
+export const selectCovisibility = (state: RootState): Covisibility | null =>
+  state.telemetry.covisibility;

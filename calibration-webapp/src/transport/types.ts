@@ -31,6 +31,10 @@ export interface CameraConfig {
   distortions?: number[] | null;
   calibration_error?: number | null;
   grid_count?: number | null;
+  // Extrinsic calibration result (ADR-0023): world (anchor) -> camera pose.
+  rotation?: number[] | null;
+  translation?: number[] | null;
+  extrinsic_error?: number | null;
 }
 
 export type BoardType = 'charuco' | 'aruco';

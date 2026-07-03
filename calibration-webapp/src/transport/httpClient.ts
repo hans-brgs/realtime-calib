@@ -126,3 +126,57 @@ export async function fetchToken(): Promise<TokenResponse> {
   }
   return (await response.json()) as TokenResponse;
 }
+
+// --- Extrinsic sweep (ADR-0023) -----------------------------------------------
+
+export const startExtrinsic = (): Promise<{ recording: boolean; cameras: number }> =>
+  postJson<{ recording: boolean; cameras: number }>('/extrinsic/start');
+
+export const stopExtrinsic = (): Promise<{ frames: Record<string, number> }> =>
+  postJson<{ frames: Record<string, number> }>('/extrinsic/stop');
+
+// Prepare-step knobs forwarded to the extrinsic compute; omitted fields use defaults.
+export interface ExtrinsicComputeParams {
+  stride?: number;
+  max_spread_ms?: number;
+  min_shared?: number;
+}
+
+export const computeExtrinsic = (params?: ExtrinsicComputeParams): Promise<Session> =>
+  postJson<Session>('/extrinsic/compute', params);
+
+// One synchronized group of the recorded sweep: per-camera frame index + timestamp
+// spread. What the Prepare scrubber lists is exactly what the compute consumes.
+export interface ExtrinsicGroup {
+  frames: Record<string, number>;
+  spread_ms: number;
+}
+
+export const fetchExtrinsicGroups = (query?: {
+  max_spread_ms?: number;
+  stride?: number;
+}): Promise<{ total: number; groups: ExtrinsicGroup[] }> => {
+  const params = new URLSearchParams();
+  if (query?.max_spread_ms !== undefined) params.set('max_spread_ms', String(query.max_spread_ms));
+  if (query?.stride !== undefined) params.set('stride', String(query.stride));
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  return getJson<{ total: number; groups: ExtrinsicGroup[] }>(`/extrinsic/groups${suffix}`);
+};
+
+export const extrinsicFrameUrl = (camera: string, index: number): string =>
+  `${API_URL}/extrinsic/${camera}/frame/${index}`;
+
+// Persisted array solve (poses + errors), for the Result view + reload.
+export interface ExtrinsicResultPayload {
+  cameras: string[];
+  rotations: Record<string, number[]>;
+  translations: Record<string, number[]>;
+  per_camera_error: Record<string, number>;
+  error: number;
+  pair_errors: Record<string, number>;
+  group_count: number;
+  point_count: number;
+}
+
+export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
+  getJson<ExtrinsicResultPayload>('/extrinsic/result');

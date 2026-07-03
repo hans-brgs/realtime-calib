@@ -32,8 +32,10 @@ const trackName = (ref: TrackReference): string => ref.publication.trackName;
 // (4 cameras -> 2x2); each tile letterboxes its frame (objectFit: contain) so the
 // camera ratio is respected with black bars rather than scrolling or cropping. Phone
 // / portrait: a single scrolling column of aspect-ratio tiles. See
-// multi-camera-preview / wizard-navigation.
-function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
+// multi-camera-preview / wizard-navigation. Exported for screens that already have
+// their own LiveKitRoom (e.g. the extrinsic capture, which shares the room with its
+// telemetry listener); PreviewGrid below wraps it with a self-contained room.
+export function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
   const compact = useMediaQuery('(max-width: 47.99em), (orientation: portrait)') ?? false;
   const trackRefs = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const cameras = trackRefs.filter(isTrackReference);

@@ -1,8 +1,9 @@
-import { IconCube, IconDownload, IconTopologyStar3 } from '@tabler/icons-react';
+import { IconCube, IconDownload } from '@tabler/icons-react';
 
 import { PlaceholderScreen } from '@/components/PlaceholderScreen';
 import { TargetConfigScreen } from '@/features/board/TargetConfigScreen';
 import { CameraSetupScreen } from '@/features/cameras/CameraSetupScreen';
+import { ExtrinsicScreen } from '@/features/extrinsic/ExtrinsicScreen';
 import { IntrinsicsScreen } from '@/features/intrinsic/IntrinsicsScreen';
 import { DashboardScreen } from '@/features/session/DashboardScreen';
 import { LoadFromFilesScreen } from '@/features/session/LoadFromFilesScreen';
@@ -29,13 +30,7 @@ export function StepContent({ view, onNavigate }: ScreenRouterProps) {
     case 'intrinsic':
       return <IntrinsicsScreen />;
     case 'extrinsic':
-      return (
-        <PlaceholderScreen
-          icon={IconTopologyStar3}
-          title="Extrinsics"
-          description="Synchronized capture and pairwise co-visibility from the anchor. High-fidelity screen coming in a later pass."
-        />
-      );
+      return <ExtrinsicScreen />;
     case 'review':
       return (
         <PlaceholderScreen

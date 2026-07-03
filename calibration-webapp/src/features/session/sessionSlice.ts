@@ -3,9 +3,11 @@ import { createAsyncThunk, createSlice } from '@reduxjs/toolkit';
 import type { RootState } from '@/app/store';
 import {
   type ComputeParams,
+  computeExtrinsic,
   computeIntrinsic,
   configureCameras,
   defineBoard,
+  type ExtrinsicComputeParams,
   fetchSession,
   fetchSessions,
 } from '@/transport/httpClient';
@@ -51,6 +53,11 @@ export const computeIntrinsicThunk = createAsyncThunk(
   ({ camera, params }: { camera: string; params?: ComputeParams }) => computeIntrinsic(camera, params),
 );
 
+export const computeExtrinsicThunk = createAsyncThunk(
+  'session/computeExtrinsic',
+  (params: ExtrinsicComputeParams | undefined) => computeExtrinsic(params),
+);
+
 const sessionSlice = createSlice({
   name: 'session',
   initialState,
@@ -76,6 +83,9 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(computeIntrinsicThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(computeExtrinsicThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(fetchRecentSessions.fulfilled, (state, action) => {
