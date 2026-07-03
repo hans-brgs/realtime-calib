@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from calibration_service.calibration import IntrinsicResult
+from calibration_service.calibration import ExtrinsicResult, IntrinsicResult
 from calibration_service.capture.enumeration import enumerate_camera_devices
 from calibration_service.models.board import CalibrationBoard
 from calibration_service.models.camera import CameraDevice
@@ -132,6 +132,25 @@ class SessionManager:
         session.step = WizardStep.EXTRINSIC_CAPTURE
         save_session(self._sessions_dir, session)
         logger.info("extrinsic capture started; step -> %s", session.step)
+        return session
+
+    def set_extrinsic_result(self, result: ExtrinsicResult) -> CalibrationSession:
+        """Store the solved array poses on the cameras and mark them done (ADR-0023)."""
+        session = self.current()
+        for camera in session.cameras:
+            rotation = result.rotations.get(camera.name)
+            if rotation is None:
+                continue  # solver refuses unreachable cameras upstream (guard-rail)
+            camera.rotation = rotation
+            camera.translation = result.translations[camera.name]
+            camera.extrinsic_error = result.per_camera_error.get(camera.name)
+            camera.status = CameraStatus.EXTRINSIC_DONE
+        save_session(self._sessions_dir, session)
+        logger.info(
+            "extrinsic result stored for %d camera(s) (rms=%.3f px)",
+            len(result.cameras),
+            result.error,
+        )
         return session
 
     def set_intrinsic_result(

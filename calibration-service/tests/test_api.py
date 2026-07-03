@@ -313,3 +313,59 @@ def test_extrinsic_stop_without_service_returns_empty_counts(tmp_path: Path) -> 
     response = _client(tmp_path).post("/extrinsic/stop")
     assert response.status_code == 200
     assert response.json() == {"frames": {}}
+
+
+def test_extrinsic_compute_guards(tmp_path: Path) -> None:
+    # No board / no cameras -> 422; with prereqs but no recording -> 404.
+    assert _client(tmp_path).post("/extrinsic/compute").status_code == 422
+    client, manager = _configured_client(tmp_path, intrinsic_done=True)
+    for camera in manager.current().cameras:  # give them intrinsics
+        camera.matrix = [[600.0, 0.0, 32.0], [0.0, 600.0, 24.0], [0.0, 0.0, 1.0]]
+        camera.distortions = [0.0] * 8
+    assert client.post("/extrinsic/compute").status_code == 404  # no manifest
+
+
+def test_extrinsic_compute_stores_result_and_persists_json(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from calibration_service.calibration.extrinsic import ExtrinsicResult
+    from calibration_service.transport import api as api_module
+
+    client, manager = _configured_client(tmp_path, intrinsic_done=True)
+    for camera in manager.current().cameras:
+        camera.matrix = [[600.0, 0.0, 32.0], [0.0, 600.0, 24.0], [0.0, 0.0, 1.0]]
+        camera.distortions = [0.0] * 8
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "manifest.json").write_text('{"cameras": []}')
+
+    fixture = ExtrinsicResult(
+        cameras=["cam_0", "cam_1"],
+        rotations={"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.01, -0.02, 0.3]},
+        translations={"cam_0": [0.0, 0.0, 0.0], "cam_1": [4.2, 0.1, -0.5]},
+        per_camera_error={"cam_0": 0.2, "cam_1": 0.3},
+        error=0.25,
+        pair_errors={"cam_0|cam_1": 0.004},
+        group_count=42,
+        point_count=1234,
+    )
+    monkeypatch.setattr(api_module, "compute_extrinsic_from_sweep", lambda *a, **k: fixture)
+
+    response = client.post("/extrinsic/compute", json={"stride": 2, "max_spread_ms": 12.0})
+    assert response.status_code == 200
+    cameras = {c["name"]: c for c in response.json()["cameras"]}
+    assert cameras["cam_1"]["rotation"] == [0.01, -0.02, 0.3]
+    assert cameras["cam_1"]["translation"] == [4.2, 0.1, -0.5]
+    assert cameras["cam_1"]["extrinsic_error"] == 0.3
+    assert cameras["cam_0"]["status"] == "extrinsic_done"
+
+    served = client.get("/extrinsic/result")
+    assert served.status_code == 200
+    body = served.json()
+    assert body["error"] == 0.25
+    assert body["pair_errors"] == {"cam_0|cam_1": 0.004}
+    assert body["group_count"] == 42
+
+
+def test_extrinsic_result_404_before_compute(tmp_path: Path) -> None:
+    assert _client(tmp_path).get("/extrinsic/result").status_code == 404

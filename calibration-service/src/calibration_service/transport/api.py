@@ -7,14 +7,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import Literal
 
+import numpy as np
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
-from calibration_service.calibration import compute_intrinsic_from_video
+from calibration_service.calibration import (
+    CameraModel,
+    compute_extrinsic_from_sweep,
+    compute_intrinsic_from_video,
+)
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
@@ -194,6 +200,9 @@ def _session_out(session: CalibrationSession) -> SessionOut:
                 distortions=c.distortions,
                 calibration_error=c.calibration_error,
                 grid_count=c.grid_count,
+                rotation=c.rotation,
+                translation=c.translation,
+                extrinsic_error=c.extrinsic_error,
             )
             for c in session.cameras
         ],
@@ -464,6 +473,98 @@ async def stop_extrinsic(request: Request) -> dict[str, object]:
     service = get_publish_service(request)
     counts = await service.stop_extrinsic_recording() if service is not None else {}
     return {"frames": counts}
+
+
+class ExtrinsicComputeRequest(BaseModel):
+    """Prepare-step knobs (ADR-0023); omitted fields use defaults."""
+
+    stride: int | None = None  # process every Nth synchronized group
+    max_spread_ms: float | None = None  # drop groups with a larger timestamp spread
+    min_shared: int | None = None  # minimum shared board views per camera pair
+
+
+def _native_camera_model(camera: CameraConfig) -> CameraModel:
+    """Solver intrinsics at the RECORDING resolution (undo the ADR-0015 scaling)."""
+    factor = camera.resize_factor or 1.0
+    matrix = np.asarray(camera.matrix, np.float64).copy()
+    matrix[0] /= factor
+    matrix[1] /= factor
+    return CameraModel(
+        name=camera.name,
+        matrix=matrix,
+        distortions=np.asarray(camera.distortions, np.float64),
+    )
+
+
+@router.post("/extrinsic/compute", response_model=SessionOut)
+async def compute_extrinsic(
+    request: Request, body: ExtrinsicComputeRequest | None = None
+) -> SessionOut:
+    """Solve the camera array from the recorded sweep and store it (ADR-0023).
+
+    Pairwise stereo init + transitive chaining from the anchor (camera index 0)
+    + bundle adjustment, off the event loop. The full result (poses, pair errors)
+    is persisted next to the recordings for the Result 3D view.
+    """
+    params = body or ExtrinsicComputeRequest()
+    manager = get_manager(request)
+    session = manager.current()
+    board = session.effective_extrinsic_board()
+    if board is None:
+        raise HTTPException(status_code=422, detail="no extrinsic board defined")
+    uncalibrated = [
+        c.name for c in session.cameras if c.matrix is None or c.distortions is None
+    ]
+    if len(session.cameras) < 2 or uncalibrated:
+        raise HTTPException(
+            status_code=422,
+            detail=f"cameras missing intrinsics: {', '.join(uncalibrated) or 'need >= 2'}",
+        )
+    directory = manager.extrinsic_dir()
+    if not (directory / "manifest.json").is_file():
+        raise HTTPException(status_code=404, detail="no extrinsic recording")
+
+    service = get_publish_service(request)
+    if service is not None:
+        await service.stop_extrinsic_recording()
+
+    anchor = min(session.cameras, key=lambda c: c.index)  # index 0 = anchor (ADR-0012)
+    models = [_native_camera_model(c) for c in session.cameras]
+    slowest_fps = min((min(c.fps, 30) for c in session.cameras if c.fps), default=30)
+    window_s = 0.95 / slowest_fps  # ADR-0007: strictly under one frame interval
+    max_spread_s = params.max_spread_ms / 1000.0 if params.max_spread_ms else None
+
+    loop = asyncio.get_running_loop()
+    try:
+        result = await loop.run_in_executor(
+            None,
+            lambda: compute_extrinsic_from_sweep(
+                directory,
+                board,
+                models,
+                anchor=anchor.name,
+                window_s=window_s,
+                stride=params.stride,
+                max_spread_s=max_spread_s,
+                min_shared=params.min_shared or 5,
+            ),
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    session = manager.set_extrinsic_result(result)
+    (directory / "result.json").write_text(json.dumps(asdict(result)))
+    return _session_out(session)
+
+
+@router.get("/extrinsic/result")
+async def extrinsic_result(request: Request) -> dict[str, object]:
+    """Serve the persisted array solve (poses + errors) for the Result 3D view."""
+    path = get_manager(request).extrinsic_dir() / "result.json"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail="no extrinsic result")
+    payload: dict[str, object] = json.loads(path.read_text())
+    return payload
 
 
 @router.post("/board", response_model=SessionOut)

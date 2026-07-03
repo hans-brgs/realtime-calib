@@ -17,6 +17,7 @@ dependencies = [
     "livekit-api>=1.1",
     # TOML read/write for the session folder (Caliscope-compatible, ADR-0002/0016).
     "rtoml>=0.12",
+    "scipy>=1.14",
 ]
 
 [dependency-groups]
