@@ -6,6 +6,10 @@ import type * as Preset from '@docusaurus/preset-classic';
 // Decisions: ADR-0024 (Docusaurus, docs-site/ in main repo, EN, GitHub Pages, versioned)
 // and ADR-0025 (AGPL-3.0 + commercial license + CLA).
 
+// In dev, serve from the root so `yarn start` works at http://localhost:3000/.
+// In production (GitHub Pages project site), serve under /realtime-calib/.
+const isDev = process.env.NODE_ENV === 'development';
+
 const config: Config = {
   title: 'realtime-calib',
   tagline: 'Real-time multi-camera calibration — intrinsics, extrinsics, live feedback',
@@ -13,7 +17,7 @@ const config: Config = {
 
   // Production URL and base path for GitHub Pages project site.
   url: 'https://hans-brgs.github.io',
-  baseUrl: '/realtime-calib/',
+  baseUrl: isDev ? '/' : '/realtime-calib/',
 
   organizationName: 'hans-brgs',
   projectName: 'realtime-calib',
