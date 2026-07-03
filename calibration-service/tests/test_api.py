@@ -369,3 +369,38 @@ def test_extrinsic_compute_stores_result_and_persists_json(
 
 def test_extrinsic_result_404_before_compute(tmp_path: Path) -> None:
     assert _client(tmp_path).get("/extrinsic/result").status_code == 404
+
+
+def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
+    from calibration_service.recording import CameraSpec, ExtrinsicRecorder
+
+    client, manager = _configured_client(tmp_path, intrinsic_done=True)
+    assert client.get("/extrinsic/groups").status_code == 404  # nothing recorded
+
+    directory = manager.extrinsic_dir()
+    recorder = ExtrinsicRecorder(
+        directory, [CameraSpec("cam_0", 64, 48, 30), CameraSpec("cam_1", 64, 48, 30)]
+    )
+    frame = np.zeros((48, 64, 3), dtype=np.uint8)
+    for g in range(3):  # aligned timestamps -> 3 clean groups
+        recorder.write("cam_0", frame, g / 30.0)
+        recorder.write("cam_1", frame, g / 30.0 + 0.002)
+    recorder.close()
+
+    body = client.get("/extrinsic/groups").json()
+    assert body["total"] == 3
+    assert len(body["groups"]) == 3
+    first = body["groups"][0]
+    assert first["frames"] == {"cam_0": 0, "cam_1": 0}
+    assert first["spread_ms"] == 2.0
+
+    # Stride keeps every other group; a tight spread filter keeps them all (2 ms).
+    strided = client.get("/extrinsic/groups", params={"stride": 2}).json()
+    assert len(strided["groups"]) == 2
+    filtered = client.get("/extrinsic/groups", params={"max_spread_ms": 1.0}).json()
+    assert filtered["groups"] == []
+
+    served = client.get("/extrinsic/cam_0/frame/1")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/jpeg"
+    assert client.get("/extrinsic/cam_0/frame/99").status_code == 404

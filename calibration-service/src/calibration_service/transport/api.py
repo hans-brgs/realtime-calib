@@ -20,6 +20,7 @@ from calibration_service.calibration import (
     CameraModel,
     compute_extrinsic_from_sweep,
     compute_intrinsic_from_video,
+    sweep_groups,
 )
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
@@ -565,6 +566,65 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
         raise HTTPException(status_code=404, detail="no extrinsic result")
     payload: dict[str, object] = json.loads(path.read_text())
     return payload
+
+
+def _sweep_window_s(session: CalibrationSession) -> float:
+    """Offline sync window: strictly under one frame interval (ADR-0007)."""
+    slowest_fps = min((min(c.fps, 30) for c in session.cameras if c.fps), default=30)
+    return 0.95 / slowest_fps
+
+
+@router.get("/extrinsic/groups")
+async def extrinsic_groups(
+    request: Request,
+    max_spread_ms: float | None = None,
+    stride: int | None = None,
+) -> dict[str, object]:
+    """Synchronized groups of the recorded sweep, for the Prepare scrubber (ADR-0023).
+
+    Synchronizes the timestamp sidecars only (no video decoding); what this lists
+    is exactly what the compute consumes under the same knobs.
+    """
+    manager = get_manager(request)
+    session = manager.current()
+    directory = manager.extrinsic_dir()
+    if not (directory / "manifest.json").is_file():
+        raise HTTPException(status_code=404, detail="no extrinsic recording")
+    names = [c.name for c in session.cameras]
+    loop = asyncio.get_running_loop()
+    try:
+        groups = await loop.run_in_executor(
+            None, sweep_groups, directory, names, _sweep_window_s(session)
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    total = len(groups)
+    if max_spread_ms is not None:
+        groups = [g for g in groups if g.spread * 1000.0 <= max_spread_ms]
+    if stride is not None and stride > 1:
+        groups = groups[::stride]
+    return {
+        "total": total,
+        "groups": [
+            {
+                "frames": {name: frame.payload for name, frame in group.frames.items()},
+                "spread_ms": round(group.spread * 1000.0, 2),
+            }
+            for group in groups
+        ],
+    }
+
+
+@router.get("/extrinsic/{camera}/frame/{index}")
+async def extrinsic_frame(request: Request, camera: str, index: int) -> Response:
+    """Serve frame ``index`` of a camera's extrinsic recording as JPEG (scrubber)."""
+    path = get_manager(request).extrinsic_dir() / f"{camera}.mkv"
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"no extrinsic recording for {camera}")
+    jpeg = await asyncio.get_running_loop().run_in_executor(None, read_frame_jpeg, path, index)
+    if jpeg is None:
+        raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
+    return Response(content=jpeg, media_type="image/jpeg")
 
 
 @router.post("/board", response_model=SessionOut)

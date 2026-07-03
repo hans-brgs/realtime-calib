@@ -6,6 +6,7 @@ from calibration_service.calibration.extrinsic import (
     CameraModel,
     ExtrinsicResult,
     compute_extrinsic_from_sweep,
+    sweep_groups,
 )
 from calibration_service.calibration.intrinsic import (
     IntrinsicResult,
@@ -22,4 +23,5 @@ __all__ = [
     "compute_extrinsic_from_sweep",
     "compute_intrinsic_from_video",
     "select_keyframes",
+    "sweep_groups",
 ]

@@ -42,7 +42,7 @@ from calibration_service.calibration.intrinsic import _cv_charuco_board
 from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
-from calibration_service.synchronization import FrameSynchronizer
+from calibration_service.synchronization import FrameSynchronizer, SyncGroup
 
 logger = logging.getLogger(__name__)
 
@@ -518,6 +518,28 @@ def _detect_group_frames(
     return [group for group in detections if len(group) >= 2]
 
 
+def sweep_groups(
+    directory: Path, names: list[str], window_s: float
+) -> list[SyncGroup[int]]:
+    """Synchronize a recorded sweep on its timestamp sidecars alone (no decoding).
+
+    Payloads are per-camera frame indices; the same groups drive the Prepare
+    scrubber (``GET /extrinsic/groups``) and the compute selection, so what the
+    operator scrubs is exactly what the solver consumes.
+    """
+    stamps = {name: read_timestamps(directory / f"{name}.timestamps") for name in names}
+    longest = max((len(series) for series in stamps.values()), default=0)
+    if longest == 0:
+        raise ValueError(f"no recorded timestamps under {directory}")
+    synchronizer: FrameSynchronizer[int] = FrameSynchronizer(
+        names, window_s, max_buffer=longest + 1
+    )
+    for name, series in stamps.items():
+        for frame_index, timestamp in enumerate(series):
+            synchronizer.add(name, timestamp, frame_index)
+    return synchronizer.drain()
+
+
 def compute_extrinsic_from_sweep(
     directory: Path,
     board: CalibrationBoard,
@@ -542,20 +564,7 @@ def compute_extrinsic_from_sweep(
         raise ValueError("extrinsic calibration needs at least 2 cameras")
     by_name = {model.name: model for model in models}
 
-    stamps = {
-        model.name: read_timestamps(directory / f"{model.name}.timestamps")
-        for model in models
-    }
-    longest = max((len(s) for s in stamps.values()), default=0)
-    if longest == 0:
-        raise ValueError(f"no recorded timestamps under {directory}")
-    synchronizer: FrameSynchronizer[int] = FrameSynchronizer(
-        [model.name for model in models], window_s, max_buffer=longest + 1
-    )
-    for name, series in stamps.items():
-        for frame_index, timestamp in enumerate(series):
-            synchronizer.add(name, timestamp, frame_index)
-    groups = synchronizer.drain()
+    groups = sweep_groups(directory, [model.name for model in models], window_s)
 
     if max_spread_s is not None:
         groups = [group for group in groups if group.spread <= max_spread_s]
