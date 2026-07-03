@@ -76,6 +76,9 @@ class CameraConfigOut(BaseModel):
     distortions: list[float] | None = None
     calibration_error: float | None = None
     grid_count: int | None = None
+    rotation: list[float] | None = None
+    translation: list[float] | None = None
+    extrinsic_error: float | None = None
 
 
 class BoardIn(BaseModel):
