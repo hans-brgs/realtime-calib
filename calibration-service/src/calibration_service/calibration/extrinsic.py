@@ -29,7 +29,7 @@ translations stay in squares until the export scales by ``square_size_mm``
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import cv2
@@ -105,6 +105,13 @@ class ExtrinsicResult:
     pair_errors: dict[str, float]  # "cam_a|cam_b" -> stereoCalibrate RMSE
     group_count: int  # synchronized groups used
     point_count: int  # triangulated 3D points in the BA
+    # 3D review scene data (spec 3d-extrinsic-review): the refined corner cloud with
+    # its group index (scrub), and per group the board's 4 outline corners in world
+    # coords (Kabsch fit; None when too few points). Corner order (b-l, b-r, t-r,
+    # t-l in board frame) lets the webapp derive the board's local xyz triad.
+    points: list[list[float]] = field(default_factory=list)
+    point_groups: list[int] = field(default_factory=list)
+    board_quads: list[list[list[float]] | None] = field(default_factory=list)
 
 
 def _transform(
@@ -265,24 +272,29 @@ def chain_from_anchor(
     return poses
 
 
+@dataclass(frozen=True)
+class Triangulation:
+    """DLT-triangulated corner cloud + the flat BA observation records."""
+
+    points3d: NDArray[np.float64]  # (P, 3)
+    point_group: NDArray[np.intp]  # (P,) synchronized-group index of each point
+    point_corner: NDArray[np.int32]  # (P,) charuco corner id of each point
+    obs_camera: NDArray[np.intp]  # (O,) index into camera_order
+    obs_point: NDArray[np.intp]  # (O,) index into points3d
+    obs_norm: NDArray[np.float64]  # (O, 2) undistorted normalized observations
+    obs_px: NDArray[np.float64]  # (O, 2) pixel observations (error reporting)
+    camera_order: list[str]
+
+
 def triangulate_groups(
     groups: list[dict[str, GroupDetection]],
     poses: dict[str, NDArray[np.float64]],
-) -> tuple[
-    NDArray[np.float64],
-    NDArray[np.intp],
-    NDArray[np.intp],
-    NDArray[np.float64],
-    NDArray[np.float64],
-    list[str],
-]:
+) -> Triangulation:
     """Triangulate every corner seen by >= 2 cameras; build the BA observation set.
 
     DLT with **all** observing rays: per point, stack ``x*P2 - P0`` / ``y*P2 - P1``
     rows (P = the camera's normalized [R|t]) into a 2Nx4 system and take the SVD
-    null-space — batched per camera-set like Caliscope ``point_data``. Returns
-    ``(points3d, obs_camera, obs_point, obs_norm, obs_px, camera_order)`` where the
-    ``obs_*`` arrays are flat parallel observation records for the BA.
+    null-space — batched per camera-set like Caliscope ``point_data``.
     """
     camera_order = sorted(poses)
     camera_index = {name: i for i, name in enumerate(camera_order)}
@@ -290,6 +302,7 @@ def triangulate_groups(
 
     point_ids: dict[tuple[int, int], int] = {}
     point_obs: list[list[tuple[int, float, float, float, float]]] = []
+    point_keys: list[tuple[int, int]] = []
     for group_idx, group in enumerate(groups):
         for name, detection in group.items():
             if name not in camera_index:
@@ -302,11 +315,17 @@ def triangulate_groups(
                     point = len(point_obs)
                     point_ids[key] = point
                     point_obs.append([])
+                    point_keys.append(key)
                 nx, ny = detection.corners_norm[row]
                 px, py = detection.corners_px[row]
                 point_obs[point].append((cam, float(nx), float(ny), float(px), float(py)))
 
-    kept = [obs for obs in point_obs if len({cam for cam, *_ in obs}) >= 2]
+    kept: list[list[tuple[int, float, float, float, float]]] = []
+    kept_keys: list[tuple[int, int]] = []
+    for obs, key in zip(point_obs, point_keys, strict=True):
+        if len({cam for cam, *_ in obs}) >= 2:
+            kept.append(obs)
+            kept_keys.append(key)
     if not kept:
         raise ValueError("no corner is seen by >= 2 cameras; the sweep lacks joint views")
 
@@ -339,13 +358,15 @@ def triangulate_groups(
             obs_point.append(point)
             obs_norm.append((nx, ny))
             obs_px.append((px, py))
-    return (
-        points3d,
-        np.asarray(obs_camera, np.intp),
-        np.asarray(obs_point, np.intp),
-        np.asarray(obs_norm, np.float64),
-        np.asarray(obs_px, np.float64),
-        camera_order,
+    return Triangulation(
+        points3d=points3d,
+        point_group=np.asarray([key[0] for key in kept_keys], np.intp),
+        point_corner=np.asarray([key[1] for key in kept_keys], np.int32),
+        obs_camera=np.asarray(obs_camera, np.intp),
+        obs_point=np.asarray(obs_point, np.intp),
+        obs_norm=np.asarray(obs_norm, np.float64),
+        obs_px=np.asarray(obs_px, np.float64),
+        camera_order=camera_order,
     )
 
 
@@ -469,6 +490,56 @@ def pixel_errors(
     return per_camera, overall
 
 
+def _kabsch(source: NDArray[np.float64], target: NDArray[np.float64]) -> NDArray[np.float64]:
+    """4x4 rigid transform (proper rotation) best mapping source -> target points.
+
+    Classic orthogonal Procrustes: SVD of the cross-covariance with a determinant
+    correction so planar point sets (the board) still yield a proper rotation.
+    """
+    source_center = source.mean(axis=0)
+    target_center = target.mean(axis=0)
+    covariance = (source - source_center).T @ (target - target_center)
+    u, _, vt = np.linalg.svd(covariance)
+    sign = float(np.sign(np.linalg.det(vt.T @ u.T))) or 1.0
+    rotation = vt.T @ np.diag([1.0, 1.0, sign]) @ u.T
+    translation = target_center - rotation @ source_center
+    return _transform(rotation, translation)
+
+
+def _group_board_quads(
+    triangulation: Triangulation,
+    points3d: NDArray[np.float64],
+    chess: NDArray[np.float64],
+    group_count: int,
+) -> list[list[list[float]] | None]:
+    """Per group, the board's 4 outline corners in world coords (Kabsch fit).
+
+    Corner order: board-frame (min,min) -> (max,min) -> (max,max) -> (min,max) —
+    the webapp derives the board's local xyz triad from it (x = c0->c1, y = c0->c3,
+    z = x cross y). ``None`` when a group has too few triangulated corners.
+    """
+    low, high = chess.min(axis=0), chess.max(axis=0)
+    outline = np.array(
+        [
+            [low[0], low[1], 0.0],
+            [high[0], low[1], 0.0],
+            [high[0], high[1], 0.0],
+            [low[0], high[1], 0.0],
+        ]
+    )
+    quads: list[list[list[float]] | None] = []
+    for group in range(group_count):
+        mask = triangulation.point_group == group
+        if int(mask.sum()) < _MIN_COMMON_CORNERS:
+            quads.append(None)
+            continue
+        board_points = chess[triangulation.point_corner[mask]]
+        pose = _kabsch(board_points, points3d[mask])
+        placed = outline @ pose[:3, :3].T + pose[:3, 3]
+        quads.append([[float(v) for v in corner] for corner in placed])
+    return quads
+
+
 def _detect_group_frames(
     directory: Path,
     groups_frames: list[dict[str, int]],
@@ -590,14 +661,25 @@ def compute_extrinsic_from_sweep(
 
     names = [model.name for model in models]
     poses = chain_from_anchor(pairs, names, anchor)
-    points3d, obs_camera, obs_point, obs_norm, obs_px, order = triangulate_groups(
-        detections, poses
-    )
+    triangulation = triangulate_groups(detections, poses)
+    order = triangulation.camera_order
     solved, points_opt = bundle_adjust(
-        order, poses, points3d, obs_camera, obs_point, obs_norm, anchor
+        order,
+        poses,
+        triangulation.points3d,
+        triangulation.obs_camera,
+        triangulation.obs_point,
+        triangulation.obs_norm,
+        anchor,
     )
     per_camera, overall = pixel_errors(
-        order, solved, points_opt, obs_camera, obs_point, obs_px, by_name
+        order,
+        solved,
+        points_opt,
+        triangulation.obs_camera,
+        triangulation.obs_point,
+        triangulation.obs_px,
+        by_name,
     )
 
     rotations: dict[str, list[float]] = {}
@@ -607,6 +689,7 @@ def compute_extrinsic_from_sweep(
         rotations[name] = [float(v) for v in rvec.reshape(3)]
         translations[name] = [float(v) for v in pose[:3, 3]]
 
+    chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
     return ExtrinsicResult(
         cameras=order,
         rotations=rotations,
@@ -616,4 +699,7 @@ def compute_extrinsic_from_sweep(
         pair_errors={f"{a}|{b}": pair.error for (a, b), pair in pairs.items()},
         group_count=len(detections),
         point_count=len(points_opt),
+        points=[[float(v) for v in point] for point in points_opt],
+        point_groups=[int(g) for g in triangulation.point_group],
+        board_quads=_group_board_quads(triangulation, points_opt, chess, len(detections)),
     )

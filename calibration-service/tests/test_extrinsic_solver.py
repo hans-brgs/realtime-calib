@@ -120,20 +120,20 @@ def test_chain_raises_on_unreachable_camera() -> None:
 
 def test_triangulation_recovers_world_points() -> None:
     groups = _groups(3)
-    points3d, obs_camera, obs_point, obs_norm, obs_px, order = triangulate_groups(
-        groups, POSES
-    )
-    assert order == ["cam_0", "cam_1", "cam_2"]
-    assert len(points3d) == 3 * len(CHESS)  # every corner seen by all cameras
-    assert len(obs_camera) == len(obs_point) == len(obs_norm) == len(obs_px)
+    tri = triangulate_groups(groups, POSES)
+    assert tri.camera_order == ["cam_0", "cam_1", "cam_2"]
+    assert len(tri.points3d) == 3 * len(CHESS)  # every corner seen by all cameras
+    assert len(tri.obs_camera) == len(tri.obs_point) == len(tri.obs_norm) == len(tri.obs_px)
+    assert set(tri.point_group.tolist()) == {0, 1, 2}
     # First group's points must match its ground-truth world coords (order of
     # first-encounter: group 0 corners come first).
-    assert np.allclose(points3d[: len(CHESS)], _board_world(0), atol=1e-6)
+    assert np.allclose(tri.points3d[: len(CHESS)], _board_world(0), atol=1e-6)
 
 
 def test_bundle_adjust_recovers_truth_with_anchor_fixed() -> None:
     groups = _groups(4)
-    points3d, obs_camera, obs_point, obs_norm, _, order = triangulate_groups(groups, POSES)
+    tri = triangulate_groups(groups, POSES)
+    points3d, order = tri.points3d, tri.camera_order
 
     # Perturb the non-anchor poses + the points; observations stay exact.
     rng = np.random.default_rng(7)
@@ -145,7 +145,7 @@ def test_bundle_adjust_recovers_truth_with_anchor_fixed() -> None:
     noisy_points = points3d + rng.normal(0.0, 0.03, points3d.shape)
 
     solved, refined = bundle_adjust(
-        order, perturbed, noisy_points, obs_camera, obs_point, obs_norm, "cam_0"
+        order, perturbed, noisy_points, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
     )
     assert np.allclose(solved["cam_0"], np.eye(4))  # anchor fixed by construction
     for name in ("cam_1", "cam_2"):
@@ -161,12 +161,12 @@ def test_bundle_adjust_recovers_truth_with_anchor_fixed() -> None:
 
 def test_pixel_errors_zero_on_exact_geometry() -> None:
     groups = _groups(2)
-    points3d, obs_camera, obs_point, _, obs_px, order = triangulate_groups(groups, POSES)
+    tri = triangulate_groups(groups, POSES)
     models = {
-        name: CameraModel(name=name, matrix=K, distortions=DIST) for name in order
+        name: CameraModel(name=name, matrix=K, distortions=DIST) for name in tri.camera_order
     }
     per_camera, overall = pixel_errors(
-        order, POSES, points3d, obs_camera, obs_point, obs_px, models
+        tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_px, models
     )
     assert overall < 1e-6
     assert all(error < 1e-6 for error in per_camera.values())
@@ -215,3 +215,22 @@ def test_sweep_orchestration_solves_from_sidecars(
     assert result.error < 0.1  # px, exact synthetic data
     assert result.group_count == 6
     assert result.point_count == 6 * len(CHESS)
+    # 3D review payload: every point carries its group; each group has a board quad
+    # whose corners match the ground-truth board placement (Kabsch fit).
+    assert len(result.points) == result.point_count
+    assert set(result.point_groups) == set(range(6))
+    assert len(result.board_quads) == 6
+    quad = result.board_quads[0]
+    assert quad is not None
+    low, high = CHESS.min(axis=0), CHESS.max(axis=0)
+    outline = np.array(
+        [
+            [low[0], low[1], 0.0],
+            [high[0], low[1], 0.0],
+            [high[0], high[1], 0.0],
+            [low[0], high[1], 0.0],
+        ]
+    )
+    tilt = _rot("x", 8.0 * np.sin(0.0)) @ _rot("y", 10.0 * np.cos(0.0))
+    expected = outline @ tilt.T + np.array([-3.0, -2.6, 9.0])
+    assert np.allclose(np.asarray(quad), expected, atol=5e-3)
