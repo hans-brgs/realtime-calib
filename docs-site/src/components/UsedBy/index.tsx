@@ -1,6 +1,7 @@
 import type {ReactNode} from 'react';
 import Link from '@docusaurus/Link';
 import useBaseUrl from '@docusaurus/useBaseUrl';
+import Heading from '@theme/Heading';
 import styles from './styles.module.css';
 
 type User = {
@@ -20,15 +21,16 @@ const USERS: User[] = [
   },
 ];
 
-function UserBadge({user}: {user: User}) {
+function UserCell({user}: {user: User}) {
   const logoUrl = useBaseUrl(user.logo ?? '');
   return (
-    <Link className={styles.userBadge} href={user.url} title={user.name}>
+    <Link className={styles.cell} href={user.url} title={user.name}>
       {user.logo ? (
-        <img className={styles.userLogo} src={logoUrl} alt={user.name} />
+        <img className={styles.logo} src={logoUrl} alt={user.name} />
       ) : (
-        <span className={styles.userWordmark}>{user.name}</span>
+        <span className={styles.wordmark}>{user.name}</span>
       )}
+      <span className={styles.name}>{user.name}</span>
     </Link>
   );
 }
@@ -37,10 +39,15 @@ export default function UsedBy(): ReactNode {
   return (
     <section className={styles.usedBy}>
       <div className="container">
-        <p className={styles.kicker}>Trusted in production by</p>
-        <div className={styles.logos}>
+        <Heading as="h2" className={styles.title}>
+          Already trusted in production
+        </Heading>
+        <p className={styles.subtitle}>
+          Powering real multi-camera calibration setups — not a lab demo.
+        </p>
+        <div className={styles.grid}>
           {USERS.map((user) => (
-            <UserBadge key={user.name} user={user} />
+            <UserCell key={user.name} user={user} />
           ))}
         </div>
       </div>

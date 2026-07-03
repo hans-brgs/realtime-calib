@@ -50,7 +50,16 @@
 }
 
 .ghostBtn {
-  --ifm-button-border-color: var(--rc-border-strong, #2a2a32);
+  background: var(--rc-surface-raised, #1c1c22);
+  color: #ffffff;
+  border: 1px solid var(--rc-text-dim, #6a6a74);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.ghostBtn:hover {
+  background: var(--rc-border, #232329);
+  border-color: var(--rc-accent, #8b5cf6);
+  color: #ffffff;
 }
 
 .heroNote {

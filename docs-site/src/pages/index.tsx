@@ -33,7 +33,7 @@ function HomepageHero() {
             Read the guides
           </Link>
           <Link
-            className={clsx('button button--outline button--lg', styles.ghostBtn)}
+            className={clsx('button button--lg', styles.ghostBtn)}
             href="https://github.com/hans-brgs/realtime-calib">
             ★ Star on GitHub
           </Link>

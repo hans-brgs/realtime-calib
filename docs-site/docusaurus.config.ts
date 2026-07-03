@@ -69,7 +69,8 @@ const config: Config = {
     image: 'img/social-card.png',
     colorMode: {
       defaultMode: 'dark',
-      respectPrefersColorScheme: true,
+      disableSwitch: true,
+      respectPrefersColorScheme: false,
     },
     navbar: {
       title: 'realtime-calib',

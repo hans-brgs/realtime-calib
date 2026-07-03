@@ -1,53 +1,81 @@
 .usedBy {
-  padding: 2.5rem 0 1rem;
+  padding: 4.5rem 0 4rem;
   text-align: center;
   border-top: 1px solid var(--rc-border, #232329);
+  background:
+    radial-gradient(60% 60% at 50% 0%, rgba(139, 92, 246, 0.06), transparent 70%);
 }
 
-.kicker {
-  font-family: var(--ifm-heading-font-family);
-  font-size: 0.8rem;
-  letter-spacing: 0.1em;
-  text-transform: uppercase;
-  color: var(--rc-text-dim, #6a6a74);
-  margin-bottom: 1.25rem;
+.title {
+  font-size: clamp(1.6rem, 3.5vw, 2.2rem);
+  margin-bottom: 0.6rem;
 }
 
-.logos {
+.subtitle {
+  color: var(--rc-text-muted, #9a9aa5);
+  font-size: 1.05rem;
+  margin-bottom: 2.5rem;
+}
+
+/* Algolia-style framed grid of logo cells. Auto-fills as more users are added. */
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 240px));
+  justify-content: center;
+  gap: 1rem;
+  max-width: 1040px;
+  margin: 0 auto;
+}
+
+.cell {
   display: flex;
-  flex-wrap: wrap;
-  gap: 2rem;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.9rem;
+  min-height: 150px;
+  padding: 1.75rem 1.25rem;
+  border-radius: 14px;
+  background: var(--rc-surface, #16161b);
+  border: 1px solid var(--rc-border, #232329);
+  transition: border-color 160ms ease, transform 160ms ease, background 160ms ease;
 }
 
-.userBadge {
-  display: inline-flex;
-  align-items: center;
-  opacity: 0.75;
-  transition: opacity 160ms ease;
-}
-
-.userBadge:hover {
-  opacity: 1;
+.cell:hover {
   text-decoration: none;
+  transform: translateY(-3px);
+  border-color: var(--rc-accent, #8b5cf6);
+  background: var(--rc-surface-raised, #1c1c22);
 }
 
-.userLogo {
-  height: 34px;
+.logo {
+  height: 42px;
   width: auto;
-  opacity: 0.9;
+  max-width: 80%;
+  object-fit: contain;
+  opacity: 0.95;
 }
 
 /* The Inmersiv wordmark is black artwork; invert it to read on the dark theme. */
-[data-theme='dark'] .userLogo {
+[data-theme='dark'] .logo {
   filter: invert(1) brightness(1.1);
 }
 
-.userWordmark {
+.wordmark {
   font-family: var(--ifm-heading-font-family);
-  font-size: 1.35rem;
+  font-size: 1.5rem;
   font-weight: 600;
-  letter-spacing: 0.02em;
   color: var(--rc-text-secondary, #bcbcc6);
+}
+
+.name {
+  font-size: 0.85rem;
+  letter-spacing: 0.03em;
+  color: var(--rc-text-dim, #6a6a74);
+}
+
+@media (max-width: 480px) {
+  .grid {
+    grid-template-columns: minmax(200px, 1fr);
+  }
 }
