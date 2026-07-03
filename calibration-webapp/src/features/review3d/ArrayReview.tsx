@@ -1,0 +1,296 @@
+import { Bounds, Html, Line, OrbitControls } from '@react-three/drei';
+import { Canvas } from '@react-three/fiber';
+import { ActionIcon, Box, Group, Select, Slider, Text } from '@mantine/core';
+import { IconPlayerPauseFilled, IconPlayerPlayFilled } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
+
+import type { ExtrinsicResultPayload } from '@/transport/httpClient';
+
+// Extrinsic Result 3D review (spec 3d-extrinsic-review): labeled camera frustums at
+// their solved poses + the triangulated corner cloud of the scrubbed group + the
+// board outline with its local xyz triad. The convention selector RE-EXPRESSES the
+// scene in the target platform's axes (display-only basis change — the solved data
+// stays canonical OpenCV per ADR-0002; the same choice will drive export variants).
+type Vec3 = [number, number, number];
+
+interface Convention {
+  value: string;
+  label: string;
+  m: number[][]; // basis change: canonical OpenCV world coords -> displayed coords
+  up: Vec3; // three.js camera up for this convention
+}
+
+const CONVENTIONS: Convention[] = [
+  { value: 'opencv', label: 'OpenCV · Y↓ RH (canonical)', m: [[1, 0, 0], [0, 1, 0], [0, 0, 1]], up: [0, -1, 0] },
+  { value: 'yup-rh', label: 'Y-up RH · three.js/OpenGL', m: [[1, 0, 0], [0, -1, 0], [0, 0, -1]], up: [0, 1, 0] },
+  { value: 'zup-rh', label: 'Z-up RH · Blender/ROS', m: [[1, 0, 0], [0, 0, 1], [0, -1, 0]], up: [0, 0, 1] },
+  { value: 'yup-lh', label: 'Y-up LH · Unity', m: [[1, 0, 0], [0, -1, 0], [0, 0, 1]], up: [0, 1, 0] },
+  { value: 'zup-lh', label: 'Z-up LH · Unreal', m: [[0, 0, 1], [1, 0, 0], [0, -1, 0]], up: [0, 0, 1] },
+];
+
+const CAMERA_COLORS = ['#a78bfa', '#4ade80', '#38bdf8', '#fbbf24', '#f472b6', '#f87171'];
+const PLAY_FPS = 6;
+
+function rodriguesToMatrix(r: number[]): number[][] {
+  const theta = Math.hypot(r[0], r[1], r[2]);
+  if (theta < 1e-12) {
+    return [
+      [1, 0, 0],
+      [0, 1, 0],
+      [0, 0, 1],
+    ];
+  }
+  const [kx, ky, kz] = [r[0] / theta, r[1] / theta, r[2] / theta];
+  const c = Math.cos(theta);
+  const s = Math.sin(theta);
+  const v = 1 - c;
+  return [
+    [kx * kx * v + c, kx * ky * v - kz * s, kx * kz * v + ky * s],
+    [kx * ky * v + kz * s, ky * ky * v + c, ky * kz * v - kx * s],
+    [kx * kz * v - ky * s, ky * kz * v + kx * s, kz * kz * v + c],
+  ];
+}
+
+const mulMV = (m: number[][], p: Vec3): Vec3 => [
+  m[0][0] * p[0] + m[0][1] * p[1] + m[0][2] * p[2],
+  m[1][0] * p[0] + m[1][1] * p[1] + m[1][2] * p[2],
+  m[2][0] * p[0] + m[2][1] * p[1] + m[2][2] * p[2],
+];
+
+const sub = (a: Vec3, b: Vec3): Vec3 => [a[0] - b[0], a[1] - b[1], a[2] - b[2]];
+const add = (a: Vec3, b: Vec3): Vec3 => [a[0] + b[0], a[1] + b[1], a[2] + b[2]];
+const scale = (a: Vec3, s: number): Vec3 => [a[0] * s, a[1] * s, a[2] * s];
+const norm = (a: Vec3): number => Math.hypot(a[0], a[1], a[2]);
+const unit = (a: Vec3): Vec3 => scale(a, 1 / (norm(a) || 1));
+const cross = (a: Vec3, b: Vec3): Vec3 => [
+  a[1] * b[2] - a[2] * b[1],
+  a[2] * b[0] - a[0] * b[2],
+  a[0] * b[1] - a[1] * b[0],
+];
+
+// A camera's world-space pose from the solved world->cam (R, t): position -R^T t,
+// local axes = rows of R (cam axes expressed in world) -> columns of R^T.
+interface CameraPose {
+  name: string;
+  position: Vec3;
+  axisX: Vec3;
+  axisY: Vec3;
+  axisZ: Vec3;
+}
+
+function cameraPoses(result: ExtrinsicResultPayload): CameraPose[] {
+  return result.cameras.map((name) => {
+    const rot = rodriguesToMatrix(result.rotations[name] ?? [0, 0, 0]);
+    const t = (result.translations[name] ?? [0, 0, 0]) as Vec3;
+    const position: Vec3 = [
+      -(rot[0][0] * t[0] + rot[1][0] * t[1] + rot[2][0] * t[2]),
+      -(rot[0][1] * t[0] + rot[1][1] * t[1] + rot[2][1] * t[2]),
+      -(rot[0][2] * t[0] + rot[1][2] * t[1] + rot[2][2] * t[2]),
+    ];
+    return {
+      name,
+      position,
+      axisX: [rot[0][0], rot[0][1], rot[0][2]],
+      axisY: [rot[1][0], rot[1][1], rot[1][2]],
+      axisZ: [rot[2][0], rot[2][1], rot[2][2]],
+    };
+  });
+}
+
+function Frustum({ pose, size, color, m, anchor }: {
+  pose: CameraPose;
+  size: number;
+  color: string;
+  m: number[][];
+  anchor: boolean;
+}) {
+  const apex = mulMV(m, pose.position);
+  const corner = (sx: number, sy: number): Vec3 =>
+    mulMV(
+      m,
+      add(
+        pose.position,
+        add(
+          scale(pose.axisZ, size),
+          add(scale(pose.axisX, sx * size * 0.62), scale(pose.axisY, sy * size * 0.42)),
+        ),
+      ),
+    );
+  const corners = [corner(-1, -1), corner(1, -1), corner(1, 1), corner(-1, 1)];
+  return (
+    <>
+      {corners.map((c, i) => (
+        <Line key={i} points={[apex, c]} color={color} lineWidth={anchor ? 2 : 1.2} />
+      ))}
+      <Line points={[...corners, corners[0]]} color={color} lineWidth={anchor ? 2.4 : 1.6} />
+      <Html position={apex} center distanceFactor={size * 14} style={{ pointerEvents: 'none' }}>
+        <div
+          style={{
+            padding: '2px 7px',
+            borderRadius: 10,
+            background: 'rgba(9,9,11,0.78)',
+            border: `1px solid ${color}`,
+            color: '#e4e4e7',
+            fontSize: 11,
+            whiteSpace: 'nowrap',
+          }}
+        >
+          {pose.name}
+          {anchor ? ' · anchor' : ''}
+        </div>
+      </Html>
+    </>
+  );
+}
+
+// Board outline + local xyz triad, derived from the quad's corner order (spec:
+// c0->c1 = board +x, c0->c3 = board +y, z = x cross y).
+function BoardWithTriad({ quad, m }: { quad: number[][]; m: number[][] }) {
+  const corners = quad.map((c) => mulMV(m, c as Vec3));
+  const x = unit(sub(corners[1], corners[0]));
+  const y = unit(sub(corners[3], corners[0]));
+  const z = unit(cross(x, y));
+  const origin = corners[0];
+  const len = norm(sub(corners[1], corners[0])) * 0.3;
+  return (
+    <>
+      <Line points={[...corners, corners[0]]} color="#e4e4e7" lineWidth={1.6} />
+      <Line points={[origin, add(origin, scale(x, len))]} color="#ef4444" lineWidth={2.4} />
+      <Line points={[origin, add(origin, scale(y, len))]} color="#4ade80" lineWidth={2.4} />
+      <Line points={[origin, add(origin, scale(z, len))]} color="#60a5fa" lineWidth={2.4} />
+    </>
+  );
+}
+
+function WorldAxes({ size }: { size: number }) {
+  const o: Vec3 = [0, 0, 0];
+  return (
+    <>
+      <Line points={[o, [size, 0, 0]]} color="#ef4444" lineWidth={1.2} />
+      <Line points={[o, [0, size, 0]]} color="#4ade80" lineWidth={1.2} />
+      <Line points={[o, [0, 0, size]]} color="#60a5fa" lineWidth={1.2} />
+    </>
+  );
+}
+
+function GroupPoints({ positions, size }: { positions: Float32Array; size: number }) {
+  return (
+    <points key={positions.length + '-' + positions[0]}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+      </bufferGeometry>
+      <pointsMaterial color="#fbbf24" size={size} sizeAttenuation />
+    </points>
+  );
+}
+
+export function ArrayReview({ result }: { result: ExtrinsicResultPayload }) {
+  const [conventionId, setConventionId] = useState('yup-rh');
+  const [group, setGroup] = useState(0);
+  const [playing, setPlaying] = useState(false);
+  const convention = CONVENTIONS.find((c) => c.value === conventionId) ?? CONVENTIONS[1];
+  const maxGroup = Math.max(0, result.group_count - 1);
+
+  useEffect(() => {
+    if (!playing) return;
+    const id = setInterval(() => setGroup((g) => (g >= maxGroup ? 0 : g + 1)), 1000 / PLAY_FPS);
+    return () => clearInterval(id);
+  }, [playing, maxGroup]);
+
+  const poses = cameraPoses(result);
+  const sceneScale =
+    poses.reduce((sum, pose) => sum + norm(pose.position), 0) / Math.max(1, poses.length - 1) || 10;
+  const frustumSize = Math.max(0.5, sceneScale * 0.18);
+
+  const current = Math.min(group, maxGroup);
+  const groupPoints: number[] = [];
+  result.point_groups.forEach((g, i) => {
+    if (g === current) {
+      const displayed = mulMV(convention.m, result.points[i] as Vec3);
+      groupPoints.push(displayed[0], displayed[1], displayed[2]);
+    }
+  });
+  const positions = new Float32Array(groupPoints);
+  const quad = result.board_quads[current] ?? null;
+
+  const camDistance = sceneScale * 1.6;
+  const initialCamera: Vec3 =
+    convention.up[2] === 1
+      ? [camDistance, -camDistance, camDistance * 0.7]
+      : [camDistance, camDistance * 0.7, camDistance];
+
+  return (
+    <Box style={{ position: 'relative', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+      <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+        {/* Remount per convention: camera.up + controls are constructor-time settings. */}
+        <Canvas
+          key={conventionId}
+          camera={{ position: initialCamera, up: convention.up, fov: 50 }}
+          style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
+        >
+          <ambientLight intensity={0.8} />
+          <Bounds fit clip observe margin={1.25}>
+            <WorldAxes size={sceneScale * 0.5} />
+            {poses.map((pose, i) => (
+              <Frustum
+                key={pose.name}
+                pose={pose}
+                size={frustumSize}
+                color={CAMERA_COLORS[i % CAMERA_COLORS.length]}
+                m={convention.m}
+                anchor={i === 0}
+              />
+            ))}
+            {positions.length > 0 && (
+              <GroupPoints positions={positions} size={sceneScale * 0.02} />
+            )}
+            {quad && <BoardWithTriad quad={quad} m={convention.m} />}
+          </Bounds>
+          <OrbitControls makeDefault enablePan={false} />
+        </Canvas>
+        <Box style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, width: 230 }}>
+          <Select
+            size="xs"
+            value={conventionId}
+            onChange={(value) => value && setConventionId(value)}
+            data={CONVENTIONS.map(({ value, label }) => ({ value, label }))}
+            comboboxProps={{ withinPortal: true }}
+            styles={{
+              input: {
+                background: 'rgba(9,9,11,0.72)',
+                backdropFilter: 'blur(6px)',
+                border: '1px solid var(--rc-border)',
+              },
+            }}
+          />
+        </Box>
+      </Box>
+      <Group mt="sm" gap="sm" wrap="nowrap">
+        <ActionIcon
+          variant="light"
+          color="violet"
+          size="lg"
+          aria-label={playing ? 'Pause' : 'Play'}
+          onClick={() => setPlaying((p) => !p)}
+        >
+          {playing ? <IconPlayerPauseFilled size={16} /> : <IconPlayerPlayFilled size={16} />}
+        </ActionIcon>
+        <Slider
+          flex={1}
+          min={0}
+          max={maxGroup}
+          value={current}
+          onChange={(value) => {
+            setPlaying(false);
+            setGroup(value);
+          }}
+          label={null}
+          color="violet"
+        />
+        <Text className="rc-tnum" fz="0.72rem" c="dark.2" w={110} ta="right" style={{ flex: 'none' }}>
+          group {current} / {maxGroup}
+        </Text>
+      </Group>
+    </Box>
+  );
+}

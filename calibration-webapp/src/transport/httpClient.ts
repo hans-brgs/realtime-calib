@@ -166,7 +166,10 @@ export const fetchExtrinsicGroups = (query?: {
 export const extrinsicFrameUrl = (camera: string, index: number): string =>
   `${API_URL}/extrinsic/${camera}/frame/${index}`;
 
-// Persisted array solve (poses + errors), for the Result view + reload.
+// Persisted array solve (poses + errors + 3D review scene data), for the Result
+// view + reload. Points carry their synchronized-group index (scrub); board_quads
+// give each group's board outline in world coords (corner order c0..c3 lets the
+// scene derive the board's local xyz triad).
 export interface ExtrinsicResultPayload {
   cameras: string[];
   rotations: Record<string, number[]>;
@@ -176,6 +179,9 @@ export interface ExtrinsicResultPayload {
   pair_errors: Record<string, number>;
   group_count: number;
   point_count: number;
+  points: number[][];
+  point_groups: number[];
+  board_quads: (number[][] | null)[];
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>

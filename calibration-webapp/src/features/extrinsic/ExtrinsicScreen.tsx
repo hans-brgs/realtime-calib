@@ -18,7 +18,7 @@ import {
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -46,6 +46,11 @@ import {
 } from '@/transport/httpClient';
 
 type Step = 'capture' | 'prepare' | 'computing' | 'result';
+
+// Lazy so three.js only ships when the operator reaches the 3D array review.
+const ArrayReview = lazy(() =>
+  import('@/features/review3d/ArrayReview').then((m) => ({ default: m.ArrayReview })),
+);
 
 const STEPS: { key: Step; label: string }[] = [
   { key: 'capture', label: 'Capture' },
@@ -403,17 +408,25 @@ function ExtrinsicInner() {
       >
         <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
           {step === 'result' ? (
-            // The Result sub-step IS the 3D array review (spec 3d-extrinsic-review);
-            // the interactive scene lands in the next pass — summary on the right.
-            <Center
-              h="100%"
-              style={{ border: '1px dashed var(--rc-border)', borderRadius: 'var(--mantine-radius-md)' }}
-            >
-              <Text c="dark.3" fz="0.84rem" ta="center" maw={300}>
-                3D array review (frustums, origin, ±xyz) coming next — the solved
-                array is on the right.
-              </Text>
-            </Center>
+            // The Result sub-step IS the 3D array review (spec 3d-extrinsic-review):
+            // labeled frustums + corner cloud + board triad + convention selector.
+            result ? (
+              <Suspense
+                fallback={
+                  <Center h="100%">
+                    <Loader size="sm" />
+                  </Center>
+                }
+              >
+                <ArrayReview result={result} />
+              </Suspense>
+            ) : (
+              <Center h="100%">
+                <Text c="dark.3" fz="0.84rem">
+                  Loading array…
+                </Text>
+              </Center>
+            )
           ) : scrubbing ? (
             <GroupScrubber
               cameras={cameraNames}
