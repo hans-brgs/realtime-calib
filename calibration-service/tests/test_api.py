@@ -255,3 +255,61 @@ def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> 
     assert body["coverage"] == [[0.0, 1.0]]
     assert body["image_coverage"] == 0.8
     assert body["orientation_bins"] == 5
+
+
+def _configured_client(
+    tmp_path: Path, *, intrinsic_done: bool
+) -> tuple[TestClient, SessionManager]:
+    """App with 2 configured cameras (+ board), optionally intrinsically calibrated."""
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": i,
+                    "device_path": f"/dev/v4l/by-path/cam{i}",
+                    "device_node": f"/dev/video{i}",
+                    "width": 64,
+                    "height": 48,
+                    "fps": 30,
+                }
+                for i in range(2)
+            ],
+        },
+    )
+    if intrinsic_done:
+        from calibration_service.models.session import CameraStatus
+
+        for camera in manager.current().cameras:
+            camera.status = CameraStatus.INTRINSIC_DONE
+    return client, manager
+
+
+def test_extrinsic_start_rejects_uncalibrated_cameras(tmp_path: Path) -> None:
+    client, _ = _configured_client(tmp_path, intrinsic_done=False)
+    response = client.post("/extrinsic/start")
+    assert response.status_code == 422
+    assert "missing intrinsics" in response.json()["detail"]
+
+
+def test_extrinsic_start_needs_two_cameras(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/extrinsic/start")  # no camera configured
+    assert response.status_code == 422
+    assert ">= 2 cameras" in response.json()["detail"]
+
+
+def test_extrinsic_start_503_without_capture_service(tmp_path: Path) -> None:
+    # Prerequisites pass but the test app has no publish service wired.
+    client, _ = _configured_client(tmp_path, intrinsic_done=True)
+    assert client.post("/extrinsic/start").status_code == 503
+
+
+def test_extrinsic_stop_without_service_returns_empty_counts(tmp_path: Path) -> None:
+    response = _client(tmp_path).post("/extrinsic/stop")
+    assert response.status_code == 200
+    assert response.json() == {"frames": {}}

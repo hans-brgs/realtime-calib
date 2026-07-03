@@ -28,9 +28,14 @@ from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
 from calibration_service.overlays import draw_overlay
-from calibration_service.recording import VideoRecorder
+from calibration_service.recording import CameraSpec, ExtrinsicRecorder, VideoRecorder
 from calibration_service.session.manager import SessionManager
-from calibration_service.telemetry import TELEMETRY_TOPIC, coverage_metrics_payload
+from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer
+from calibration_service.telemetry import (
+    TELEMETRY_TOPIC,
+    coverage_metrics_payload,
+    covisibility_payload,
+)
 from calibration_service.transport.livekit_publisher import LiveKitPublisher, mint_publish_token
 
 logger = logging.getLogger(__name__)
@@ -104,6 +109,16 @@ _RECONCILE_TICK_S = 1.0
 # Wizard views (webapp) whose screen needs every camera live at once (ADR-0021).
 _ALL_CAMERA_VIEWS = frozenset({"cameras", "extrinsic"})
 _INTRINSIC_VIEW = "intrinsic"
+# Extrinsic sweep: detection runs on EVERY camera, so a lower rate than the
+# single-camera intrinsic 30 Hz (4x native detections ~4 cores). Detection fires on
+# a shared wall-clock grid (int(now/period)) so all cameras detect the same instant
+# — their frame timestamps then differ by at most ~1 frame interval, which the sync
+# window accommodates. Live-feedback only; the compute re-detects the recordings.
+# Provisional 15 Hz; goal is to match the intrinsic 30 Hz once end-to-end CPU load
+# is validated on the real 4-camera rig (operator request).
+_EXTRINSIC_DETECT_PERIOD_S = 1 / 15
+# Co-visibility matrix push rate (small payload; the gauges don't need more).
+_COVISIBILITY_PERIOD_S = 0.33
 
 
 def _preview_size(width: int, height: int) -> tuple[int, int]:
@@ -155,6 +170,17 @@ class CameraPublishService:
         self._recorder: VideoRecorder | None = None
         self._recording_camera: str | None = None
         self._recorder_lock = asyncio.Lock()
+        # Synchronized extrinsic sweep (ADR-0007/0023): every camera records to its
+        # own video + timestamp sidecar; detections feed the synchronizer + the
+        # co-visibility graph for the live gauges. Per-camera write locks let the N
+        # loops write concurrently (different files) while stop still serialises
+        # close against in-flight writes camera by camera.
+        self._extrinsic: ExtrinsicRecorder | None = None
+        self._extrinsic_locks: dict[str, asyncio.Lock] = {}
+        self._extrinsic_stop_lock = asyncio.Lock()
+        self._ext_sync: FrameSynchronizer[bool] | None = None
+        self._ext_graph: CovisibilityGraph | None = None
+        self._last_covisibility = 0.0
 
     def set_active_view(self, view: str | None) -> None:
         """Report the operator's current wizard view; drives the live set (ADR-0021)."""
@@ -200,8 +226,75 @@ class CameraPublishService:
             logger.info("stopped recording (%d frames)", recorder.frames)
             return recorder.frames
 
-    def _build_detector(self) -> BoardDetector | None:
-        board = self._sessions.current().intrinsic_board
+    async def start_extrinsic_recording(self) -> None:
+        """Begin the synchronized multi-camera sweep (ADR-0007, [[calibration-recording]]).
+
+        Every configured camera records to ``extrinsic/<cam>.mkv`` + a timestamp
+        sidecar; per-camera detections feed the synchronizer + co-visibility graph.
+        """
+        await self.stop_extrinsic_recording()
+        await self.stop_intrinsic_recording()
+        self.set_active_intrinsic(None)
+        cameras = self._sessions.current().cameras
+        if len(cameras) < 2:
+            raise ValueError("extrinsic capture needs at least 2 configured cameras")
+        specs = [
+            CameraSpec(c.name, c.width, c.height, min(c.fps, _RECORD_FPS) if c.fps else _RECORD_FPS)
+            for c in cameras
+        ]
+        names = [c.name for c in cameras]
+        # Sync window: detections fire on a shared wall-clock grid, so members of one
+        # instant differ by at most ~one camera frame interval (ADR-0007: < 1/fps).
+        window = 1.2 * max(1.0 / c.fps if c.fps else 1.0 / _DEFAULT_FPS for c in cameras)
+        async with self._extrinsic_stop_lock:
+            self._extrinsic_locks = {name: asyncio.Lock() for name in names}
+            self._ext_sync = FrameSynchronizer(names, window)
+            self._ext_graph = CovisibilityGraph(names)
+            self._last_covisibility = 0.0
+            self._extrinsic = ExtrinsicRecorder(self._sessions.extrinsic_dir(), specs)
+        self._reconcile.set()  # keep/reopen every camera while the sweep runs
+        logger.info("recording extrinsic sweep of %d cameras", len(specs))
+
+    async def stop_extrinsic_recording(self) -> dict[str, int]:
+        """Finalise the synchronized sweep; return per-camera frame counts."""
+        async with self._extrinsic_stop_lock:
+            recorder = self._extrinsic
+            if recorder is None:
+                return {}
+            self._extrinsic = None  # loops stop scheduling new writes
+            # Wait out in-flight writes: once each per-camera lock is acquired, no
+            # write scheduled against the old recorder can still be running.
+            for lock in self._extrinsic_locks.values():
+                async with lock:
+                    pass
+            self._ext_sync = None
+            self._ext_graph = None
+            loop = asyncio.get_running_loop()
+            counts = await loop.run_in_executor(None, recorder.close)
+        self._reconcile.set()
+        return counts
+
+    def _feed_extrinsic(
+        self, camera: str, timestamp: float, detection: BoardDetection, now: float
+    ) -> dict[str, object] | None:
+        """Feed one detection to the synchronizer; return a co-visibility payload when due.
+
+        Called from the capture coroutines only (single-threaded event loop, no lock).
+        """
+        sync, graph = self._ext_sync, self._ext_graph
+        if sync is None or graph is None:
+            return None
+        sync.add(camera, timestamp, detection.found)
+        while (group := sync.try_emit()) is not None:
+            graph.record({name: frame.payload for name, frame in group.frames.items()})
+        if now - self._last_covisibility >= _COVISIBILITY_PERIOD_S:
+            self._last_covisibility = now
+            return covisibility_payload(graph)
+        return None
+
+    def _build_detector(self, *, extrinsic: bool = False) -> BoardDetector | None:
+        session = self._sessions.current()
+        board = session.effective_extrinsic_board() if extrinsic else session.intrinsic_board
         return BoardDetector(board) if board is not None else None
 
     async def start(self) -> None:
@@ -292,6 +385,8 @@ class CameraPublishService:
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONCILE_TICK_S)
         finally:
+            # A room drop mid-sweep must not leave N dangling video files open.
+            await self.stop_extrinsic_recording()
             for name in list(open_cams):
                 camera, task = open_cams.pop(name)
                 await self._stop_capture(publisher, name, camera, task)
@@ -299,6 +394,10 @@ class CameraPublishService:
 
     def _desired_cameras(self, by_name: dict[str, _PublishTarget]) -> set[str]:
         """The cameras that should be live for the current view (ADR-0021)."""
+        if self._extrinsic is not None:
+            # A synchronized sweep in progress needs every camera regardless of a
+            # view flap (the set is what we WANT live — ADR-0021 semantics).
+            return set(by_name)
         view = self._active_view
         if view is None or view in _ALL_CAMERA_VIEWS:
             return set(by_name)  # None = not reported yet -> publish all (safe default)
@@ -395,18 +494,23 @@ class CameraPublishService:
         but only ``retrieve()``s (decodes) one when the target interval has elapsed —
         honouring the chosen fps even if the driver ignores ``CAP_PROP_FPS``, and
         skipping the JPEG decode of frames we would drop. The preview published to
-        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder. The
-        camera in intrinsic capture (``_active_intrinsic``) also gets board detection,
-        burn-in overlay, ~10 Hz coverage telemetry and disk recording (native res); the
-        others push raw. A read failure (USB blip) is skipped, not fatal.
+        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder.
+
+        Detection modes: the camera in intrinsic capture (``_active_intrinsic``) gets
+        board detection + burn-in + telemetry + recording; during a synchronized
+        extrinsic sweep (ADR-0007) EVERY camera detects, on a shared wall-clock grid
+        so the instants align across cameras, feeds the synchronizer/co-visibility,
+        and records its own video + timestamp sidecar. A read failure (USB blip) is
+        skipped, not fatal.
         """
         executor = self._capture_executor
         preview_size = _preview_size(target.width, target.height) if target.width else None
         capture_period = 1.0 / target.fps if target.fps else 0.0
         detector: BoardDetector | None = None
+        detector_extrinsic = False  # which board the current detector was built for
         last_detection: BoardDetection | None = None
         last_telemetry = 0.0
-        last_detect = 0.0
+        last_tick = 0
         last_record = 0.0
         last_push = 0.0
         last_capture = 0.0
@@ -426,25 +530,43 @@ class CameraPublishService:
             if preview_size is None:
                 preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
 
-            active = self._active_intrinsic == target.name
+            extrinsic = self._extrinsic is not None
+            active = extrinsic or self._active_intrinsic == target.name
             if not active:
                 detector = None
+            elif detector is not None and detector_extrinsic != extrinsic:
+                detector = None  # board target changed (intrinsic <-> extrinsic sweep)
 
             # Publish the (downscaled) preview at a capped rate to spare the encoder.
             if now - last_push >= _PUSH_PERIOD_S:
                 last_push = now
                 if active:
                     if detector is None:
-                        detector = self._build_detector()
-                    if detector is not None and now - last_detect >= _DETECT_PERIOD_S:
-                        last_detect = now
+                        detector = self._build_detector(extrinsic=extrinsic)
+                        detector_extrinsic = extrinsic
+                    # Detection fires on a wall-clock grid: during a sweep all cameras
+                    # detect the SAME instant (sync-friendly timestamps, ADR-0007); for
+                    # the single intrinsic camera the grid is just its 30 Hz cadence.
+                    period = _EXTRINSIC_DETECT_PERIOD_S if extrinsic else _DETECT_PERIOD_S
+                    tick = int(now / period)
+                    if detector is not None and tick != last_tick:
+                        last_tick = tick
                         preview, detection = await loop.run_in_executor(
                             executor, _process_frame, detector, frame.image, preview_size
                         )
                         last_detection = detection
+                        if extrinsic:
+                            covis = self._feed_extrinsic(
+                                target.name, frame.timestamp, detection, now
+                            )
+                            if covis is not None:
+                                await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
                         if now - last_telemetry >= _TELEMETRY_PERIOD_S:
                             last_telemetry = now
-                            payload = json.dumps(coverage_metrics_payload(target.name, detection))
+                            phase = "extrinsic" if extrinsic else "intrinsic"
+                            payload = json.dumps(
+                                coverage_metrics_payload(target.name, detection, phase)
+                            )
                             await publisher.send_data(payload, TELEMETRY_TOPIC)
                     else:
                         # Redraw the last detection (no re-detect) so the overlay is steady.
@@ -459,11 +581,28 @@ class CameraPublishService:
                     publisher.push(target.name, small)
 
             # Record the RAW native frame (detection fidelity), throttled, off event loop.
-            if active and now - last_record >= _RECORD_PERIOD_S:
-                last_record = now
-                async with self._recorder_lock:
-                    if self._recorder is not None:
-                        await loop.run_in_executor(executor, self._recorder.write, frame.image)
+            if now - last_record >= _RECORD_PERIOD_S:
+                if extrinsic:
+                    last_record = now
+                    lock = self._extrinsic_locks.get(target.name)
+                    recorder = self._extrinsic
+                    if lock is not None and recorder is not None:
+                        async with lock:
+                            if self._extrinsic is recorder:  # not closed meanwhile
+                                await loop.run_in_executor(
+                                    executor,
+                                    recorder.write,
+                                    target.name,
+                                    frame.image,
+                                    frame.timestamp,
+                                )
+                elif self._active_intrinsic == target.name:
+                    last_record = now
+                    async with self._recorder_lock:
+                        if self._recorder is not None:
+                            await loop.run_in_executor(
+                                executor, self._recorder.write, frame.image
+                            )
             await asyncio.sleep(0)
         logger.info("capture loop %s exiting (disconnected)", target.name)
 

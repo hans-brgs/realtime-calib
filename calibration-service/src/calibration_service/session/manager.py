@@ -21,7 +21,7 @@ from calibration_service.models.session import (
     WizardStep,
     session_status,
 )
-from calibration_service.recording import intrinsic_capture_path
+from calibration_service.recording import extrinsic_dir, intrinsic_capture_path
 from calibration_service.session.config_store import load_board_config, save_board_config
 from calibration_service.session.store import (
     SESSION_FILE,
@@ -121,6 +121,18 @@ class SessionManager:
     def intrinsic_metrics_path(self, camera_name: str) -> Path:
         """Path of the persisted review metrics (coverage/orientation/poses, ADR-0022)."""
         return self.intrinsic_video_path(camera_name).with_name("metrics.json")
+
+    def extrinsic_dir(self) -> Path:
+        """Folder of the synchronized extrinsic sweep (videos + timestamp sidecars)."""
+        return extrinsic_dir(self._sessions_dir, self._session_id)
+
+    def begin_extrinsic_capture(self) -> CalibrationSession:
+        """Advance the wizard to the extrinsic capture step and persist it."""
+        session = self.current()
+        session.step = WizardStep.EXTRINSIC_CAPTURE
+        save_session(self._sessions_dir, session)
+        logger.info("extrinsic capture started; step -> %s", session.step)
+        return session
 
     def set_intrinsic_result(
         self, camera_name: str, result: IntrinsicResult

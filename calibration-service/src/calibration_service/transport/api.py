@@ -421,6 +421,48 @@ async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
     return payload
 
 
+@router.post("/extrinsic/start")
+async def start_extrinsic(request: Request) -> dict[str, object]:
+    """Begin the synchronized multi-camera extrinsic sweep (ADR-0007/0023).
+
+    Prerequisites (spec extrinsic-calibration-flow): >= 2 configured cameras, every
+    camera intrinsically calibrated, and an (effective) extrinsic board defined.
+    """
+    manager = get_manager(request)
+    session = manager.current()
+    if len(session.cameras) < 2:
+        raise HTTPException(status_code=422, detail="extrinsic capture needs >= 2 cameras")
+    missing = [
+        c.name
+        for c in session.cameras
+        if c.status not in (CameraStatus.INTRINSIC_DONE, CameraStatus.EXTRINSIC_DONE)
+    ]
+    if missing:
+        raise HTTPException(
+            status_code=422, detail=f"cameras missing intrinsics: {', '.join(missing)}"
+        )
+    if session.effective_extrinsic_board() is None:
+        raise HTTPException(status_code=422, detail="no extrinsic board defined")
+
+    service = get_publish_service(request)
+    if service is None:
+        raise HTTPException(status_code=503, detail="capture service unavailable")
+    try:
+        await service.start_extrinsic_recording()
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    manager.begin_extrinsic_capture()
+    return {"recording": True, "cameras": len(session.cameras)}
+
+
+@router.post("/extrinsic/stop")
+async def stop_extrinsic(request: Request) -> dict[str, object]:
+    """Finalise the synchronized sweep; per-camera videos + sidecars are on disk."""
+    service = get_publish_service(request)
+    counts = await service.stop_extrinsic_recording() if service is not None else {}
+    return {"frames": counts}
+
+
 @router.post("/board", response_model=SessionOut)
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
     try:
