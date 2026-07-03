@@ -21,6 +21,7 @@ import {
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
@@ -52,51 +53,14 @@ const ArrayReview = lazy(() =>
   import('@/features/review3d/ArrayReview').then((m) => ({ default: m.ArrayReview })),
 );
 
-const STEPS: { key: Step; label: string }[] = [
-  { key: 'capture', label: 'Capture' },
-  { key: 'prepare', label: 'Prepare' },
-  { key: 'computing', label: 'Computing' },
-  { key: 'result', label: 'Result' },
+const PHASES = [
+  { key: 'capture', label: 'Capture', sub: 'synchronized sweep' },
+  { key: 'prepare', label: 'Prepare', sub: 'groups + thresholds' },
+  { key: 'computing', label: 'Computing', sub: 'pairs + chain + BA' },
+  { key: 'result', label: 'Result', sub: '3D review + orient' },
 ];
 
 const PLAY_FPS = 8;
-
-function StepIndicator({ step }: { step: Step }) {
-  const idx = STEPS.findIndex((s) => s.key === step);
-  return (
-    <Group gap={8} mb="md">
-      {STEPS.map((s, i) => {
-        const active = i === idx;
-        const done = i < idx;
-        return (
-          <Group
-            key={s.key}
-            gap={7}
-            px={12}
-            py={6}
-            style={{
-              borderRadius: 'var(--mantine-radius-sm)',
-              background: active ? 'rgba(167,139,250,0.14)' : 'var(--rc-panel)',
-              border: `1px solid ${active ? 'var(--rc-accent)' : 'var(--rc-border)'}`,
-            }}
-          >
-            <Text
-              fz="0.7rem"
-              fw={700}
-              className="rc-tnum"
-              c={active ? 'var(--rc-accent-bright)' : done ? 'var(--rc-success)' : 'dark.3'}
-            >
-              {done ? '✓' : i + 1}
-            </Text>
-            <Text fz="0.78rem" c={active ? undefined : 'dark.2'}>
-              {s.label}
-            </Text>
-          </Group>
-        );
-      })}
-    </Group>
-  );
-}
 
 // Routes both telemetry payload types from the shared data channel to the store.
 function TelemetryListener() {
@@ -416,7 +380,7 @@ function ExtrinsicInner() {
   return (
     <>
       <TelemetryListener />
-      <StepIndicator step={step} />
+      <PhaseStepper phases={PHASES} current={step} />
 
       <Box
         className="rc-camsetup-grid"

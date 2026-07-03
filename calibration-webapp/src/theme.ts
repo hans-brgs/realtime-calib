@@ -1,4 +1,4 @@
-import { Button, Card, createTheme, Paper, Progress } from '@mantine/core';
+import { Button, Card, createTheme, Paper, Progress, SegmentedControl } from '@mantine/core';
 
 // realtime-calib design system (imported from Claude Design "Design System.dc.html").
 // Dark, violet-accented language: Sora for display, Manrope for body + tabular values,
@@ -36,7 +36,7 @@ const dark: [string, string, string, string, string, string, string, string, str
   '#16161b', // 5 input / raised
   '#0f0f12', // 6 panel / card
   '#0c0c0f', // 7 sidebar / topbar / body
-  '#09090b', // 8 page (deepest)
+  '#0a0a0e', // 8 page (deepest; hue-shifted off the bar so controls never blend in)
   '#050506', // 9
 ];
 
@@ -82,7 +82,7 @@ export const theme = createTheme({
     success: '#34d399',
     warning: '#fbbf24',
     error: '#f87171',
-    surfacePage: '#09090b',
+    surfacePage: '#0a0a0e',
     surfaceBar: '#0c0c0f',
     surfacePanel: '#0f0f12',
     surfaceInput: '#16161b',
@@ -110,6 +110,17 @@ export const theme = createTheme({
     }),
     Progress: Progress.extend({
       defaultProps: { radius: 'xl', size: 'sm' },
+    }),
+    // Raised control surface + accent thumb (design seg()): Mantine's dark default
+    // put the root on dark[8] = the page color, making the control invisible.
+    SegmentedControl: SegmentedControl.extend({
+      styles: {
+        root: {
+          background: 'var(--rc-input)',
+          border: '1px solid var(--rc-border)',
+        },
+        indicator: { background: 'rgba(167, 139, 250, 0.16)' },
+      },
     }),
   },
 });

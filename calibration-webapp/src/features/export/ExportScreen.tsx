@@ -11,7 +11,7 @@ import {
   Text,
 } from '@mantine/core';
 import { IconDownload, IconFileExport, IconLock } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -28,10 +28,11 @@ import {
   exportCalibration,
 } from '@/transport/httpClient';
 
-// Export screen (spec calibration-export). Anti-confusion guards: the convention is
-// re-displayed EXPLICITLY (up + handedness + platforms, shared state with the 3D
-// review) and the artifacts are MULTI-selectable — the canonical Caliscope TOML is
-// always included (locked), platform variants are additive integration files.
+// Export screen (spec calibration-export, merged model): ONE Artifacts card —
+// "you export what you see". The convention dropdown (shared state with the 3D
+// review) and the units selector live at the top; the variant matching the
+// displayed convention is checked + LOCKED (always exported, badge "3D view"),
+// the canonical Caliscope TOML is always included, other artifacts are additive.
 const VARIANTS = CONVENTIONS.filter((c) => c.exportFormat !== null);
 
 export function ExportScreen() {
@@ -48,14 +49,9 @@ export function ExportScreen() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
 
-  // The review's convention preselects its platform variant (added, never removes
-  // the operator's other choices).
-  useEffect(() => {
-    if (convention.exportFormat) {
-      const format = convention.exportFormat;
-      setSelected((current) => new Set(current).add(format));
-    }
-  }, [convention.exportFormat]);
+  // "Export what you see": the variant of the displayed convention is not a
+  // preference to track — it is force-included at export time (locked checkbox).
+  const lockedFormat = convention.exportFormat;
 
   const toggle = (format: string, checked: boolean) => {
     setSelected((current) => {
@@ -73,7 +69,11 @@ export function ExportScreen() {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await exportCalibration([...selected], units);
+      const formats = new Set(selected);
+      if (lockedFormat) {
+        formats.add(lockedFormat);
+      }
+      const response = await exportCalibration([...formats], units);
       setFiles(response.files);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'export failed');
@@ -119,18 +119,19 @@ export function ExportScreen() {
           }}
         >
           <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
-            Platform variants — convention &amp; units
+            Artifacts — you export what you see
           </Text>
-          <Select
-            value={conventionId}
-            onChange={(value) => value && dispatch(conventionSelected(value))}
-            data={CONVENTIONS.map(({ value, detail }) => ({ value, label: detail }))}
-            comboboxProps={{ withinPortal: true }}
-          />
-          <Group mt="sm" gap="sm" align="center">
-            <Text fz="0.72rem" c="dark.2">
-              World units
-            </Text>
+          <Group gap="sm" align="flex-end" wrap="wrap">
+            <Select
+              flex={1}
+              miw={260}
+              label="Displayed convention (3D review)"
+              value={conventionId}
+              onChange={(value) => value && dispatch(conventionSelected(value))}
+              data={CONVENTIONS.map(({ value, detail }) => ({ value, label: detail }))}
+              comboboxProps={{ withinPortal: true }}
+              styles={{ label: { fontSize: '0.66rem', color: 'var(--mantine-color-dark-3)' } }}
+            />
             <SegmentedControl
               size="xs"
               value={units}
@@ -141,47 +142,58 @@ export function ExportScreen() {
               ]}
             />
           </Group>
-          <Text fz="0.66rem" c="dark.3" mt={6}>
-            Convention shared with the 3D review's display selector. Both apply to
-            the platform JSONs only — the canonical camera_array.toml always stays
-            OpenCV, in mm.
-          </Text>
-        </Box>
-
-        <Box
-          p="md"
-          mb="md"
-          style={{
-            border: '1px solid var(--rc-border)',
-            borderRadius: 'var(--mantine-radius-lg)',
-            background: 'var(--rc-panel)',
-          }}
-        >
-          <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
-            Artifacts
+          <Text fz="0.66rem" c="dark.3" mt={6} mb="sm">
+            The variant of the displayed convention is always exported. Units apply
+            to the platform JSONs — the canonical camera_array.toml stays OpenCV, mm.
           </Text>
           <Stack gap="sm">
             <Checkbox
               checked
               disabled
-              label="camera_array.toml — Caliscope · canonical OpenCV (always included)"
+              label={
+                <Group gap={8} wrap="nowrap">
+                  <span>camera_array.toml — Caliscope · canonical OpenCV</span>
+                  {lockedFormat === null && (
+                    <Badge size="xs" variant="light" color="violet" style={{ flex: 'none' }}>
+                      3D view
+                    </Badge>
+                  )}
+                </Group>
+              }
             />
             <Checkbox
               checked={selected.has('aniposelib')}
               onChange={(e) => toggle('aniposelib', e.currentTarget.checked)}
               label="camera_array_aniposelib.toml — aniposelib · canonical OpenCV"
             />
-            {VARIANTS.map((variant) => (
-              <Checkbox
-                key={variant.value}
-                checked={selected.has(variant.exportFormat ?? '')}
-                onChange={(e) => toggle(variant.exportFormat ?? '', e.currentTarget.checked)}
-                label={`camera_array_${variant.exportFormat}.json — ${variant.detail}`}
-              />
-            ))}
+            {VARIANTS.map((variant) => {
+              const format = variant.exportFormat ?? '';
+              const locked = format === lockedFormat;
+              return (
+                <Checkbox
+                  key={variant.value}
+                  checked={locked || selected.has(format)}
+                  disabled={locked}
+                  onChange={(e) => toggle(format, e.currentTarget.checked)}
+                  label={
+                    <Group gap={8} wrap="nowrap">
+                      <span>{`camera_array_${format}.json — ${variant.detail}`}</span>
+                      {locked && (
+                        <Badge size="xs" variant="light" color="violet" style={{ flex: 'none' }}>
+                          3D view
+                        </Badge>
+                      )}
+                    </Group>
+                  }
+                />
+              );
+            })}
           </Stack>
+          <Text fz="0.66rem" c="dark.3" mt="sm" className="rc-tnum">
+            Destination: {session?.session_dir ?? 'sessions/…'}/export/
+          </Text>
           <Button
-            mt="md"
+            mt="sm"
             fullWidth
             loading={busy}
             leftSection={<IconFileExport size={16} />}

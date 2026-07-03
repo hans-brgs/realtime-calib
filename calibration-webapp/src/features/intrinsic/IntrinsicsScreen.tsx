@@ -25,6 +25,7 @@ import { Track } from 'livekit-client';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
@@ -295,49 +296,12 @@ function PreparePanel({
   );
 }
 
-const STEPS: { key: Step; label: string }[] = [
-  { key: 'capture', label: 'Capture' },
-  { key: 'prepare', label: 'Prepare' },
-  { key: 'computing', label: 'Computing' },
-  { key: 'results', label: 'Results' },
+const PHASES = [
+  { key: 'capture', label: 'Capture', sub: 'live capture + video' },
+  { key: 'prepare', label: 'Prepare', sub: 'replay + trim + stride' },
+  { key: 'computing', label: 'Computing', sub: 'keyframes + solve' },
+  { key: 'results', label: 'Results', sub: 'params + coverage' },
 ];
-
-function StepIndicator({ step }: { step: Step }) {
-  const idx = STEPS.findIndex((s) => s.key === step);
-  return (
-    <Group gap={8} mb="md">
-      {STEPS.map((s, i) => {
-        const active = i === idx;
-        const done = i < idx;
-        return (
-          <Group
-            key={s.key}
-            gap={7}
-            px={12}
-            py={6}
-            style={{
-              borderRadius: 'var(--mantine-radius-sm)',
-              background: active ? 'rgba(167,139,250,0.14)' : 'var(--rc-panel)',
-              border: `1px solid ${active ? 'var(--rc-accent)' : 'var(--rc-border)'}`,
-            }}
-          >
-            <Text
-              fz="0.7rem"
-              fw={700}
-              className="rc-tnum"
-              c={active ? 'var(--rc-accent-bright)' : done ? 'var(--rc-success)' : 'dark.3'}
-            >
-              {done ? '✓' : i + 1}
-            </Text>
-            <Text fz="0.78rem" c={active ? undefined : 'dark.2'}>
-              {s.label}
-            </Text>
-          </Group>
-        );
-      })}
-    </Group>
-  );
-}
 
 function TelemetryListener() {
   const dispatch = useAppDispatch();
@@ -506,7 +470,7 @@ function IntrinsicsInner() {
         }))}
         mb="md"
       />
-      <StepIndicator step={step} />
+      <PhaseStepper phases={PHASES} current={step} />
 
       <Box
         className="rc-camsetup-grid"

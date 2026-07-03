@@ -5,7 +5,7 @@
  */
 
 :root {
-  --rc-page: #09090b;
+  --rc-page: #0a0a0e;
   --rc-bar: #0c0c0f;
   --rc-panel: #0f0f12;
   --rc-input: #16161b;
@@ -56,6 +56,13 @@ body {
 /* Live numeric values (FPS, resolutions, errors) read better tabular. */
 .rc-tnum {
   font-variant-numeric: tabular-nums;
+}
+
+/* Segmented controls: the active label picks up the accent (thumb is a violet
+   tint, themed in theme.ts — Mantine's default white-on-dark reads flat). */
+.mantine-SegmentedControl-control[data-active] .mantine-SegmentedControl-label,
+.mantine-SegmentedControl-label[data-active] {
+  color: var(--rc-accent-bright);
 }
 
 /* Camera Setup: preview + settings column side by side, stacking on narrow viewports. */

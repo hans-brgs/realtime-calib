@@ -412,7 +412,7 @@ export function ArrayReview({
             }}
           />
           <Text fz="0.6rem" c="dark.3" mt={4} px={8}>
-            Display only — export formats are chosen at the Export step.
+            Shared with Export — the displayed convention is always exported.
           </Text>
         </Box>
       </Box>

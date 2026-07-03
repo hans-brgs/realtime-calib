@@ -59,6 +59,7 @@ export interface BoardConfigRequest {
 
 export interface Session {
   session_id: string;
+  session_dir?: string; // host-relative session folder (e.g. "sessions/default")
   step: WizardStep;
   mode: SessionMode;
   intrinsic_fps: number;
