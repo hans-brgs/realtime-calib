@@ -1,0 +1,11 @@
+{
+  "label": "Contributing",
+  "position": 7,
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Contributing",
+    "description": "Set up a dev environment, understand the license, and sign the CLA."
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "label": "Reference",
+  "position": 4,
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Reference",
+    "description": "Factual reference: configuration format, HTTP API, data entities and output files."
+  }
+}

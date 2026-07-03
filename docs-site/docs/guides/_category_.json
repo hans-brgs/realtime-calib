@@ -1,0 +1,11 @@
+{
+  "label": "Guides",
+  "position": 3,
+  "collapsible": true,
+  "collapsed": false,
+  "link": {
+    "type": "generated-index",
+    "title": "Guides",
+    "description": "Task-oriented, how-to guides for each step of the calibration workflow."
+  }
+}

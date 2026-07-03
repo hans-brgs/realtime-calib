@@ -1,0 +1,53 @@
+.usedBy {
+  padding: 2.5rem 0 1rem;
+  text-align: center;
+  border-top: 1px solid var(--rc-border, #232329);
+}
+
+.kicker {
+  font-family: var(--ifm-heading-font-family);
+  font-size: 0.8rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--rc-text-dim, #6a6a74);
+  margin-bottom: 1.25rem;
+}
+
+.logos {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 2rem;
+  align-items: center;
+  justify-content: center;
+}
+
+.userBadge {
+  display: inline-flex;
+  align-items: center;
+  opacity: 0.75;
+  transition: opacity 160ms ease;
+}
+
+.userBadge:hover {
+  opacity: 1;
+  text-decoration: none;
+}
+
+.userLogo {
+  height: 34px;
+  width: auto;
+  opacity: 0.9;
+}
+
+/* The Inmersiv wordmark is black artwork; invert it to read on the dark theme. */
+[data-theme='dark'] .userLogo {
+  filter: invert(1) brightness(1.1);
+}
+
+.userWordmark {
+  font-family: var(--ifm-heading-font-family);
+  font-size: 1.35rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--rc-text-secondary, #bcbcc6);
+}

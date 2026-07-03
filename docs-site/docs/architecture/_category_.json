@@ -1,0 +1,11 @@
+{
+  "label": "Architecture",
+  "position": 6,
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Architecture",
+    "description": "System architecture and the public subset of Architecture Decision Records."
+  }
+}

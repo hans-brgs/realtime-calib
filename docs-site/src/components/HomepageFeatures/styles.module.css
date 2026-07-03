@@ -1,0 +1,39 @@
+.features {
+  padding: 4rem 0 2rem;
+}
+
+.featureCol {
+  margin-bottom: 1.75rem;
+}
+
+.featureCard {
+  height: 100%;
+  padding: 1.75rem 1.5rem;
+  border-radius: 14px;
+  background: var(--rc-surface, #16161b);
+  border: 1px solid var(--rc-border, #232329);
+  transition: border-color 160ms ease, transform 160ms ease;
+}
+
+.featureCard:hover {
+  border-color: var(--rc-accent, #8b5cf6);
+  transform: translateY(-3px);
+}
+
+.featureIcon {
+  font-size: 1.9rem;
+  line-height: 1;
+  margin-bottom: 0.9rem;
+}
+
+.featureTitle {
+  font-size: 1.15rem;
+  margin-bottom: 0.5rem;
+}
+
+.featureText {
+  color: var(--rc-text-muted, #9a9aa5);
+  font-size: 0.98rem;
+  line-height: 1.6;
+  margin: 0;
+}
