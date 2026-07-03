@@ -338,6 +338,8 @@ def test_extrinsic_compute_stores_result_and_persists_json(
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "manifest.json").write_text('{"cameras": []}')
+    for name in ("cam_0", "cam_1"):  # sidecars: the sync window derives from them
+        (directory / f"{name}.timestamps").write_text("0.000000\n0.033000\n0.066000\n")
 
     fixture = ExtrinsicResult(
         cameras=["cam_0", "cam_1"],

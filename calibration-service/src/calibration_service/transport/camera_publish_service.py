@@ -109,6 +109,7 @@ _RECONCILE_TICK_S = 1.0
 # Wizard views (webapp) whose screen needs every camera live at once (ADR-0021).
 _ALL_CAMERA_VIEWS = frozenset({"cameras", "extrinsic"})
 _INTRINSIC_VIEW = "intrinsic"
+_EXTRINSIC_VIEW = "extrinsic"
 # Extrinsic sweep: detection runs on EVERY camera, so a lower rate than the
 # single-camera intrinsic 30 Hz (4x native detections ~4 cores). Detection fires on
 # a shared wall-clock grid (int(now/period)) so all cameras detect the same instant
@@ -530,7 +531,12 @@ class CameraPublishService:
             if preview_size is None:
                 preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
 
-            extrinsic = self._extrinsic is not None
+            sweeping = self._extrinsic is not None  # synchronized recording running
+            # Detection also runs on EVERY camera while the operator is on the
+            # extrinsic view BEFORE starting the sweep (overlay = "does it detect?"
+            # sanity check) — but the synchronizer/co-visibility only feed while
+            # actually recording (a preview must not inflate the pair counts).
+            extrinsic = sweeping or self._active_view == _EXTRINSIC_VIEW
             active = extrinsic or self._active_intrinsic == target.name
             if not active:
                 detector = None
@@ -555,7 +561,7 @@ class CameraPublishService:
                             executor, _process_frame, detector, frame.image, preview_size
                         )
                         last_detection = detection
-                        if extrinsic:
+                        if sweeping:
                             covis = self._feed_extrinsic(
                                 target.name, frame.timestamp, detection, now
                             )
@@ -582,7 +588,7 @@ class CameraPublishService:
 
             # Record the RAW native frame (detection fidelity), throttled, off event loop.
             if now - last_record >= _RECORD_PERIOD_S:
-                if extrinsic:
+                if sweeping:
                     last_record = now
                     lock = self._extrinsic_locks.get(target.name)
                     recorder = self._extrinsic

@@ -25,8 +25,10 @@ from calibration_service.calibration import (
     CameraModel,
     ExtrinsicResult,
     axis_rotation_transform,
+    board_unit_mm,
     compute_extrinsic_from_sweep,
     compute_intrinsic_from_video,
+    derive_sweep_window,
     quad_origin_transform,
     refine_result,
     reorient_result,
@@ -547,8 +549,12 @@ async def compute_extrinsic(
 
     anchor = min(session.cameras, key=lambda c: c.index)  # index 0 = anchor (ADR-0012)
     models = [_native_camera_model(c) for c in session.cameras]
-    slowest_fps = min((min(c.fps, 30) for c in session.cameras if c.fps), default=30)
-    window_s = 0.95 / slowest_fps  # ADR-0007: strictly under one frame interval
+    # Window from the RECORDED cadence (sidecars), not the configured fps: the
+    # effective write rate can sit well below it (ADR-0007 intent = real interval).
+    try:
+        window_s = derive_sweep_window(directory, [c.name for c in session.cameras])
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     max_spread_s = params.max_spread_ms / 1000.0 if params.max_spread_ms else None
 
     loop = asyncio.get_running_loop()
@@ -666,12 +672,6 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     return payload
 
 
-def _sweep_window_s(session: CalibrationSession) -> float:
-    """Offline sync window: strictly under one frame interval (ADR-0007)."""
-    slowest_fps = min((min(c.fps, 30) for c in session.cameras if c.fps), default=30)
-    return 0.95 / slowest_fps
-
-
 @router.get("/extrinsic/groups")
 async def extrinsic_groups(
     request: Request,
@@ -681,7 +681,8 @@ async def extrinsic_groups(
     """Synchronized groups of the recorded sweep, for the Prepare scrubber (ADR-0023).
 
     Synchronizes the timestamp sidecars only (no video decoding); what this lists
-    is exactly what the compute consumes under the same knobs.
+    is exactly what the compute consumes under the same knobs. The window derives
+    from the RECORDED cadence (sidecar median inter-frame delta), not the config fps.
     """
     manager = get_manager(request)
     session = manager.current()
@@ -691,9 +692,8 @@ async def extrinsic_groups(
     names = [c.name for c in session.cameras]
     loop = asyncio.get_running_loop()
     try:
-        groups = await loop.run_in_executor(
-            None, sweep_groups, directory, names, _sweep_window_s(session)
-        )
+        window_s = await loop.run_in_executor(None, derive_sweep_window, directory, names)
+        groups = await loop.run_in_executor(None, sweep_groups, directory, names, window_s)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     total = len(groups)
@@ -754,7 +754,7 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
 
     directory = manager.export_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    square = board.square_size_mm
+    square = board_unit_mm(board)  # square side (ChArUco) or marker side (ArUco)
     files: list[dict[str, object]] = []
 
     rtoml.dump(caliscope_document(session, square), directory / "camera_array.toml")

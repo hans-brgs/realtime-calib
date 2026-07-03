@@ -369,3 +369,69 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
     # Already-optimal geometry: the other cameras stay put within tolerance.
     assert np.allclose(minimized.rotations["cam_1"], turned.rotations["cam_1"], atol=1e-4)
     assert np.allclose(minimized.translations["cam_1"], turned.translations["cam_1"], atol=1e-3)
+
+
+def test_derive_sweep_window_follows_recorded_cadence(tmp_path: Path) -> None:
+    from calibration_service.calibration.extrinsic import derive_sweep_window
+
+    # Real-rig regression: config said 30 fps but the effective write cadence was
+    # ~18 fps (55 ms) — the window must follow the DATA, not the config.
+    for name, offset in (("cam_0", 0.0), ("cam_1", 0.012)):
+        stamps = "".join(f"{i * 0.055 + offset:.6f}\n" for i in range(60))
+        (tmp_path / f"{name}.timestamps").write_text(stamps)
+    window = derive_sweep_window(tmp_path, ["cam_0", "cam_1"])
+    assert window == pytest.approx(0.95 * 0.055, rel=0.02)
+    # A camera absent from the sweep is skipped, not fatal.
+    assert derive_sweep_window(tmp_path, ["cam_0", "cam_9"]) > 0
+    with pytest.raises(ValueError, match="no recorded timestamps"):
+        derive_sweep_window(tmp_path, ["cam_9"])
+
+
+MARKER_BOARD = CalibrationBoard(
+    board_type=BoardType.ARUCO,
+    dictionary="DICT_4X4_100",
+    columns=1,
+    rows=1,
+    marker_id=8,
+    marker_size_mm=31.5,
+)
+
+
+def _marker_groups(count: int = 6) -> list[dict[str, GroupDetection]]:
+    from calibration_service.calibration.extrinsic import board_object_points
+
+    marker = board_object_points(MARKER_BOARD)  # 4 canonical corners, ids 0..3
+    ids = np.arange(4, dtype=np.int32)
+    groups: list[dict[str, GroupDetection]] = []
+    for g in range(count):
+        tilt = _rot("x", 10.0 * np.sin(g * 1.1)) @ _rot("y", 12.0 * np.cos(g * 0.7))
+        offset = np.array([-1.5 + 0.6 * g, -1.0 + 0.4 * g, 8.0 + 0.5 * g])
+        world = marker @ tilt.T + offset
+        group: dict[str, GroupDetection] = {}
+        for name, pose in POSES.items():
+            norm, px = _project(world, pose)
+            group[name] = GroupDetection(ids=ids, corners_px=px, corners_norm=norm)
+        groups.append(group)
+    return groups
+
+
+def test_single_marker_board_solves_pairwise_and_full_chain() -> None:
+    # Real-rig regression: the extrinsic target is a single ArUco marker (4 corners
+    # per view) — the solver must accept it end to end, not just ChArUco.
+    from calibration_service.calibration.extrinsic import board_unit_mm
+
+    assert board_unit_mm(MARKER_BOARD) == 31.5  # unit = marker side, not square
+    groups = _marker_groups()
+    pairs = stereo_pairwise(groups, MARKER_BOARD, min_shared=3)
+    assert ("cam_0", "cam_1") in pairs
+    pair = pairs[("cam_0", "cam_1")]
+    assert np.allclose(pair.rotation, POSES["cam_1"][:3, :3], atol=1e-3)
+    assert np.allclose(pair.translation, POSES["cam_1"][:3, 3], atol=1e-3)
+
+    poses = chain_from_anchor(pairs, list(POSES), "cam_0")
+    tri = triangulate_groups(groups, poses)
+    solved, refined = bundle_adjust(
+        tri.camera_order, poses, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
+    )
+    assert np.allclose(solved["cam_2"][:3, :3], POSES["cam_2"][:3, :3], atol=1e-3)
+    assert len(refined) == 6 * 4  # every marker corner triangulated per group

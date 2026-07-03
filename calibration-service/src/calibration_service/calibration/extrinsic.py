@@ -47,8 +47,11 @@ from calibration_service.synchronization import FrameSynchronizer, SyncGroup
 logger = logging.getLogger(__name__)
 
 # A pair needs this many common corners in a group for it to count as a shared
-# board view (Caliscope legacy_stereocal min points; also the DLT/PnP floor).
+# board view (Caliscope legacy_stereocal min points; also the DLT/PnP floor). A
+# single-ArUco-marker board only ever yields its 4 corners, which is enough for
+# the planar (homography-path) pose inside stereoCalibrate — see _min_corners().
 _MIN_COMMON_CORNERS = 6
+_MIN_CORNERS_SINGLE_MARKER = 4
 # Shared boards actually fed to stereoCalibrate per pair, picked for temporal
 # diversity (Caliscope boards_sampled).
 _BOARDS_SAMPLED = 10
@@ -124,6 +127,57 @@ def _transform(
     return matrix
 
 
+def board_object_points(board: CalibrationBoard) -> NDArray[np.float64]:
+    """3D reference points of the extrinsic target, indexed by detection corner id.
+
+    ChArUco: the chessboard corners (id = charuco corner id; unit = square side).
+    Single ArUco marker: its 4 canonical corners TL,TR,BR,BL (ids remapped 0..3 by
+    the compute detection; unit = MARKER side) — matching the detector's canonical
+    square and cv2's stable corner order across views.
+    """
+    if board.board_type is BoardType.CHARUCO:
+        return np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
+    return np.array(
+        [[-0.5, 0.5, 0.0], [0.5, 0.5, 0.0], [0.5, -0.5, 0.0], [-0.5, -0.5, 0.0]], np.float64
+    )
+
+
+def board_unit_mm(board: CalibrationBoard) -> float:
+    """Physical size (mm) of one board unit: square side (ChArUco) or marker side."""
+    if board.board_type is BoardType.CHARUCO:
+        return board.square_size_mm
+    return board.marker_size_mm
+
+
+def _min_corners(board: CalibrationBoard) -> int:
+    """Minimum common corners for a usable shared view (4 for a single marker)."""
+    return _MIN_COMMON_CORNERS if board.board_type is BoardType.CHARUCO else (
+        _MIN_CORNERS_SINGLE_MARKER
+    )
+
+
+def derive_sweep_window(directory: Path, names: list[str]) -> float:
+    """Sync window derived from the RECORDED cadence, not the configured fps.
+
+    The capture loop's effective write rate can be well below the camera fps
+    (detection/encode contention) — observed ~18 fps for a 30 fps config. A window
+    below one REAL frame interval keeps pairing unambiguous (ADR-0007 intent):
+    0.95 x the slowest camera's median inter-frame delta, clamped to sane bounds.
+    """
+    medians: list[float] = []
+    for name in names:
+        path = directory / f"{name}.timestamps"
+        if not path.is_file():
+            continue  # camera missing from the sweep: sync simply excludes it
+        stamps = read_timestamps(path)
+        if len(stamps) >= 2:
+            deltas = np.diff(np.asarray(stamps, np.float64))
+            medians.append(float(np.median(deltas)))
+    if not medians:
+        raise ValueError(f"no recorded timestamps under {directory}")
+    return float(np.clip(0.95 * max(medians), 0.02, 0.25))
+
+
 def _diverse_group_indices(candidates: list[tuple[int, int]], cap: int) -> list[int]:
     """Pick up to ``cap`` group indices spread over time, best corner count per bin.
 
@@ -150,12 +204,14 @@ def stereo_pairwise(
 ) -> dict[tuple[str, str], PairEstimate]:
     """Estimate the primary->secondary transform of every co-visible camera pair.
 
-    For each pair, shared boards (>= ``_MIN_COMMON_CORNERS`` common ids in a
-    group) are collected, subsampled for temporal diversity, and fed to
-    ``cv2.stereoCalibrate`` in **normalized coordinates** (identity K, zero
-    distortion, ``CALIB_FIX_INTRINSIC`` — only R|T are optimised, Caliscope).
+    For each pair, shared boards (enough common ids in a group — 6 for ChArUco,
+    the 4 marker corners for a single-ArUco target) are collected, subsampled for
+    temporal diversity, and fed to ``cv2.stereoCalibrate`` in **normalized
+    coordinates** (identity K, zero distortion, ``CALIB_FIX_INTRINSIC`` — only
+    R|T are optimised, Caliscope).
     """
-    chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
+    chess = board_object_points(board)
+    min_corners = _min_corners(board)
     names = sorted({name for group in groups for name in group})
     pairs: dict[tuple[str, str], PairEstimate] = {}
     for i, cam_a in enumerate(names):
@@ -166,7 +222,7 @@ def stereo_pairwise(
                 if det_a is None or det_b is None:
                     continue
                 common = np.intersect1d(det_a.ids, det_b.ids)
-                if len(common) >= _MIN_COMMON_CORNERS:
+                if len(common) >= min_corners:
                     shared.append((index, len(common)))
             if len(shared) < min_shared:
                 continue
@@ -518,6 +574,7 @@ def _group_board_quads(
     points3d: NDArray[np.float64],
     chess: NDArray[np.float64],
     group_count: int,
+    min_corners: int = _MIN_COMMON_CORNERS,
 ) -> list[list[list[float]] | None]:
     """Per group, the board's 4 outline corners in world coords (Kabsch fit).
 
@@ -537,7 +594,7 @@ def _group_board_quads(
     quads: list[list[list[float]] | None] = []
     for group in range(group_count):
         mask = point_group == group
-        if int(mask.sum()) < _MIN_COMMON_CORNERS:
+        if int(mask.sum()) < min_corners:
             quads.append(None)
             continue
         board_points = chess[point_corner[mask]]
@@ -686,7 +743,7 @@ def refine_result(
         rotations[name] = [float(v) for v in np.asarray(rvec).reshape(3)]
         translations[name] = [float(v) for v in pose[:3, 3]]
 
-    chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
+    chess = board_object_points(board)
     return ExtrinsicResult(
         cameras=result.cameras,
         rotations=rotations,
@@ -704,6 +761,7 @@ def refine_result(
             refined,
             chess,
             result.group_count,
+            min_corners=_min_corners(board),
         ),
     )
 
@@ -714,8 +772,16 @@ def _detect_group_frames(
     models: dict[str, CameraModel],
     board: CalibrationBoard,
 ) -> list[dict[str, GroupDetection]]:
-    """Detect the board on each selected (camera, frame-index) and normalize corners."""
+    """Detect the board on each selected (camera, frame-index) and normalize corners.
+
+    Single-ArUco targets: the detector reports every corner under the marker id
+    (e.g. [8,8,8,8]); remap to per-CORNER ids 0..3 (cv2's TL,TR,BR,BL order is
+    stable across views) so cross-camera correspondence + ``board_object_points``
+    indexing work like the ChArUco path.
+    """
     detector = BoardDetector(board)
+    single_marker = board.board_type is not BoardType.CHARUCO
+    min_corners = _min_corners(board)
     needed: dict[str, list[tuple[int, int]]] = {}
     for position, group in enumerate(groups_frames):
         for name, frame_index in group.items():
@@ -737,13 +803,17 @@ def _detect_group_frames(
                     not detection.found
                     or detection.ids is None
                     or detection.corners is None
-                    or detection.count < _MIN_COMMON_CORNERS
+                    or detection.count < min_corners
                 ):
                     continue
-                ids = detection.ids.reshape(-1).astype(np.int32)
-                order = np.argsort(ids)  # sorted ids: searchsorted in stereo_pairwise
-                ids = ids[order]
-                pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
+                if single_marker:
+                    ids = np.arange(detection.count, dtype=np.int32)  # corner index
+                    pixels = detection.corners.reshape(-1, 2).astype(np.float64)
+                else:
+                    ids = detection.ids.reshape(-1).astype(np.int32)
+                    order = np.argsort(ids)  # sorted: searchsorted in stereo_pairwise
+                    ids = ids[order]
+                    pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
                 normalized = cv2.undistortPoints(
                     pixels.reshape(-1, 1, 2), model.matrix, model.distortions
                 ).reshape(-1, 2)
@@ -797,9 +867,8 @@ def compute_extrinsic_from_sweep(
     groups), evens the detection budget over the sweep, then detects only the
     selected frames and runs pairwise -> chaining -> triangulation -> BA. Also
     returns the BA observations so 'Minimize' can refine later without redetecting.
+    Supports ChArUco boards and single-ArUco-marker targets (see board_object_points).
     """
-    if board.board_type is not BoardType.CHARUCO:
-        raise ValueError("extrinsic calibration requires a ChArUco board")
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
     by_name = {model.name: model for model in models}
@@ -858,7 +927,7 @@ def compute_extrinsic_from_sweep(
         rotations[name] = [float(v) for v in rvec.reshape(3)]
         translations[name] = [float(v) for v in pose[:3, 3]]
 
-    chess = np.asarray(_cv_charuco_board(board).getChessboardCorners(), np.float64)
+    chess = board_object_points(board)
     result = ExtrinsicResult(
         cameras=order,
         rotations=rotations,
@@ -876,6 +945,7 @@ def compute_extrinsic_from_sweep(
             points_opt,
             chess,
             len(detections),
+            min_corners=_min_corners(board),
         ),
     )
     ba_inputs = BAInputs(
