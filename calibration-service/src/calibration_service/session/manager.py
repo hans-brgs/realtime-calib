@@ -46,6 +46,10 @@ class SessionManager:
         self._session_id = session_id
         self._session: CalibrationSession | None = None
 
+    def session_dir_label(self) -> str:
+        """Host-relative session folder (compose mounts ./<root name> as the root)."""
+        return f"{self._sessions_dir.name}/{self._session_id}"
+
     def current(self) -> CalibrationSession:
         """Return the active session, loading from disk or creating it on first access.
 

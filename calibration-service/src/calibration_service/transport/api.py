@@ -129,6 +129,7 @@ class BoardOut(BoardIn):
 
 class SessionOut(BaseModel):
     session_id: str
+    session_dir: str = ""  # host-relative session folder (compose mounts ./sessions)
     step: str
     mode: str
     intrinsic_fps: int
@@ -196,9 +197,10 @@ def _to_board(item: BoardIn) -> CalibrationBoard:
     )
 
 
-def _session_out(session: CalibrationSession) -> SessionOut:
+def _session_out(session: CalibrationSession, manager: SessionManager) -> SessionOut:
     return SessionOut(
         session_id=session.session_id,
+        session_dir=manager.session_dir_label(),
         step=session.step,
         mode=session.mode,
         intrinsic_fps=session.intrinsic_fps,
@@ -261,7 +263,8 @@ def get_publish_service(request: Request) -> CameraPublishService | None:
 
 @router.get("/session", response_model=SessionOut)
 async def get_session(request: Request) -> SessionOut:
-    return _session_out(get_manager(request).current())
+    manager = get_manager(request)
+    return _session_out(manager.current(), manager)
 
 
 @router.get("/sessions", response_model=list[SessionSummaryOut])
@@ -286,14 +289,15 @@ async def detect_cameras(request: Request) -> list[DetectedCameraOut]:
 @router.post("/cameras/config", response_model=SessionOut)
 async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut:
     configs = [_to_camera_config(body.prefix, item) for item in body.cameras]
-    session = get_manager(request).configure_cameras(configs)
+    manager = get_manager(request)
+    session = manager.configure_cameras(configs)
 
     # Reactive republish: apply the new config to the live LiveKit tracks (option a).
     publish_service = get_publish_service(request)
     if publish_service is not None:
         await publish_service.refresh()
 
-    return _session_out(session)
+    return _session_out(session, manager)
 
 
 @router.get("/board/dictionaries", response_model=list[str])
@@ -435,7 +439,7 @@ async def compute_intrinsic(
     metrics_path = manager.intrinsic_metrics_path(camera)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
     metrics_path.write_text(json.dumps(metrics))
-    return _session_out(session)
+    return _session_out(session, manager)
 
 
 @router.get("/intrinsic/{camera}/metrics")
@@ -579,7 +583,7 @@ async def compute_extrinsic(
     (directory / "result.json").write_text(json.dumps(asdict(result)))
     # BA observations: lets Minimize refine later without redetecting the videos.
     (directory / "ba_inputs.json").write_text(json.dumps(asdict(ba_inputs)))
-    return _session_out(session)
+    return _session_out(session, manager)
 
 
 @router.get("/extrinsic/result")
@@ -819,13 +823,14 @@ async def export_archive(request: Request) -> Response:
 
 @router.post("/board", response_model=SessionOut)
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
+    manager = get_manager(request)
     try:
         board = _to_board(body.board)
         validate_board(board)
-        session = get_manager(request).define_board(body.target, board)
+        session = manager.define_board(body.target, board)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    return _session_out(session)
+    return _session_out(session, manager)
 
 
 @router.post("/board/preview")
