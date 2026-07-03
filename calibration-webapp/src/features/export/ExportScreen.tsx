@@ -5,6 +5,7 @@ import {
   Center,
   Checkbox,
   Group,
+  SegmentedControl,
   Select,
   Stack,
   Text,
@@ -42,6 +43,7 @@ export function ExportScreen() {
   const ready = cameras.length > 0 && cameras.every((c) => c.rotation != null);
 
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [units, setUnits] = useState<'mm' | 'm'>('mm');
   const [files, setFiles] = useState<ExportedFile[] | null>(null);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -71,7 +73,7 @@ export function ExportScreen() {
     setBusy(true);
     setMessage(null);
     try {
-      const response = await exportCalibration([...selected]);
+      const response = await exportCalibration([...selected], units);
       setFiles(response.files);
     } catch (err) {
       setMessage(err instanceof Error ? err.message : 'export failed');
@@ -117,7 +119,7 @@ export function ExportScreen() {
           }}
         >
           <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
-            Convention (platform variants)
+            Platform variants — convention &amp; units
           </Text>
           <Select
             value={conventionId}
@@ -125,9 +127,24 @@ export function ExportScreen() {
             data={CONVENTIONS.map(({ value, detail }) => ({ value, label: detail }))}
             comboboxProps={{ withinPortal: true }}
           />
+          <Group mt="sm" gap="sm" align="center">
+            <Text fz="0.72rem" c="dark.2">
+              World units
+            </Text>
+            <SegmentedControl
+              size="xs"
+              value={units}
+              onChange={(value) => setUnits(value as 'mm' | 'm')}
+              data={[
+                { label: 'mm', value: 'mm' },
+                { label: 'm', value: 'm' },
+              ]}
+            />
+          </Group>
           <Text fz="0.66rem" c="dark.3" mt={6}>
-            Shared with the 3D review's display selector. The canonical
-            camera_array.toml is NOT affected — it always stays OpenCV.
+            Convention shared with the 3D review's display selector. Both apply to
+            the platform JSONs only — the canonical camera_array.toml always stays
+            OpenCV, in mm.
           </Text>
         </Box>
 

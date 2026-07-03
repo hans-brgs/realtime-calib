@@ -203,9 +203,11 @@ export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
   getJson<ExtrinsicResultPayload>('/extrinsic/result');
 
 // Rigid world-frame changes on the solved array (spec 3d-extrinsic-review, mutating):
-// put the origin on one group's board, or rotate the frame ±90° about an axis.
+// put the origin on one group's board (set_ground additionally declares the board
+// ON THE FLOOR — its normal becomes the world's up), or rotate ±90° about an axis.
 export type OrientRequest =
   | { op: 'set_origin'; group: number }
+  | { op: 'set_ground'; group: number }
   | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number };
 
 export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPayload> =>
@@ -224,7 +226,10 @@ export interface ExportedFile {
   convention: string;
 }
 
-export const exportCalibration = (formats: string[]): Promise<{ files: ExportedFile[] }> =>
-  postJson<{ files: ExportedFile[] }>('/export', { formats });
+export const exportCalibration = (
+  formats: string[],
+  units: 'mm' | 'm' = 'mm', // platform JSONs only — the TOMLs keep their mm semantics
+): Promise<{ files: ExportedFile[] }> =>
+  postJson<{ files: ExportedFile[] }>('/export', { formats, units });
 
 export const exportArchiveUrl = (): string => `${API_URL}/export/archive`;

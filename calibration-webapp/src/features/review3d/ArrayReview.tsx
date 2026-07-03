@@ -2,6 +2,7 @@ import { Bounds, Html, Line, TrackballControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { ActionIcon, Box, Button, Group, Select, Slider, Text } from '@mantine/core';
 import {
+  IconArrowBarToDown,
   IconCrosshair,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
@@ -327,6 +328,19 @@ export function ArrayReview({
             onClick={() => void mutate(() => orientExtrinsic({ op: 'set_origin', group: current }))}
           >
             Set origin on board
+          </Button>
+          {/* Declares the board LYING ON THE FLOOR: its normal becomes the world's
+              up, so every display/export convention lands the floor flat. */}
+          <Button
+            size="compact-xs"
+            fullWidth
+            mt={4}
+            variant="light"
+            leftSection={<IconArrowBarToDown size={13} />}
+            disabled={busy || quad === null}
+            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_ground', group: current }))}
+          >
+            Set ground on board
           </Button>
           <Group gap={4} mt={6} grow>
             {(['x', 'y', 'z'] as const).map((axis) => (
