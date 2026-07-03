@@ -19,10 +19,25 @@ export interface TokenResponse {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Surface the service's error `detail` (FastAPI) — "no camera pair shares >= 5
+// board views" is actionable, "POST /extrinsic/compute failed: 422" is not.
+async function errorFrom(response: Response, fallback: string): Promise<Error> {
+  try {
+    const body: unknown = await response.json();
+    const detail = (body as { detail?: unknown })?.detail;
+    if (typeof detail === 'string' && detail.length > 0) {
+      return new Error(detail);
+    }
+  } catch {
+    /* non-JSON error body: fall through to the generic message */
+  }
+  return new Error(fallback);
+}
+
 async function getJson<T>(path: string): Promise<T> {
   const response = await fetch(`${API_URL}${path}`);
   if (!response.ok) {
-    throw new Error(`GET ${path} failed: ${response.status}`);
+    throw await errorFrom(response, `GET ${path} failed: ${response.status}`);
   }
   return (await response.json()) as T;
 }
@@ -34,7 +49,7 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
     body: body !== undefined ? JSON.stringify(body) : undefined,
   });
   if (!response.ok) {
-    throw new Error(`POST ${path} failed: ${response.status}`);
+    throw await errorFrom(response, `POST ${path} failed: ${response.status}`);
   }
   return (await response.json()) as T;
 }
