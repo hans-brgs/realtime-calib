@@ -77,6 +77,12 @@ _STEREO_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 1e-3
 _BA_FTOL = 1e-8
 _BA_MAX_NFEV = 1000
 _BA_HUBER_SCALE = 0.0015
+# Minimize = Caliscope's quality loop (filter_point_estimates -> optimize): drop
+# the worst observations by CURRENT pixel residual, then re-fit. Product fraction
+# is 2.5% in both Caliscope eras (legacy FILTERED_FRACTION, current
+# filter_by_percentile_error(2.5)); min-per-camera floor from current Caliscope.
+_REFINE_FILTER_FRACTION = 0.025
+_REFINE_MIN_PER_CAMERA = 10
 
 
 @dataclass(frozen=True)
@@ -534,6 +540,32 @@ def bundle_adjust(
     return solved, solution[n_cam_params:].reshape(-1, 3)
 
 
+def _observation_residuals_px(
+    camera_order: list[str],
+    poses: dict[str, NDArray[np.float64]],
+    points3d: NDArray[np.float64],
+    obs_camera: NDArray[np.intp],
+    obs_point: NDArray[np.intp],
+    obs_px: NDArray[np.float64],
+    models: dict[str, CameraModel],
+) -> NDArray[np.float64]:
+    """Per-observation euclidean reprojection error in PIXELS (full K + distortion)."""
+    errors = np.zeros(len(obs_camera), np.float64)
+    for cam, name in enumerate(camera_order):
+        mask = obs_camera == cam
+        if not bool(mask.any()):
+            continue
+        pose = poses[name]
+        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        model = models[name]
+        projected, _ = cv2.projectPoints(
+            points3d[obs_point[mask]], rvec, pose[:3, 3], model.matrix, model.distortions
+        )
+        diff = projected.reshape(-1, 2) - obs_px[mask]
+        errors[mask] = np.linalg.norm(diff, axis=1)
+    return errors
+
+
 def pixel_errors(
     camera_order: list[str],
     poses: dict[str, NDArray[np.float64]],
@@ -544,25 +576,49 @@ def pixel_errors(
     models: dict[str, CameraModel],
 ) -> tuple[dict[str, float], float]:
     """Per-camera + overall RMSE in PIXELS (full K + distortion) for reporting."""
+    errors = _observation_residuals_px(
+        camera_order, poses, points3d, obs_camera, obs_point, obs_px, models
+    )
     per_camera: dict[str, float] = {}
-    squared: list[NDArray[np.float64]] = []
     for cam, name in enumerate(camera_order):
         mask = obs_camera == cam
-        if not bool(mask.any()):
-            per_camera[name] = 0.0
-            continue
-        pose = poses[name]
-        rvec, _ = cv2.Rodrigues(pose[:3, :3])
-        model = models[name]
-        projected, _ = cv2.projectPoints(
-            points3d[obs_point[mask]], rvec, pose[:3, 3], model.matrix, model.distortions
-        )
-        diff = projected.reshape(-1, 2) - obs_px[mask]
-        errors = np.asarray((diff**2).sum(axis=1), np.float64)
-        per_camera[name] = float(np.sqrt(errors.mean()))
-        squared.append(errors)
-    overall = float(np.sqrt(np.concatenate(squared).mean())) if squared else 0.0
+        per_camera[name] = float(np.sqrt((errors[mask] ** 2).mean())) if bool(mask.any()) else 0.0
+    overall = float(np.sqrt((errors**2).mean())) if len(errors) else 0.0
     return per_camera, overall
+
+
+def _filter_observations(
+    obs_camera: NDArray[np.intp],
+    obs_point: NDArray[np.intp],
+    residuals: NDArray[np.float64],
+    fraction: float,
+) -> NDArray[np.bool_]:
+    """Keep-mask dropping the worst ``fraction`` of observations by residual.
+
+    Caliscope's filter: global percentile over euclidean pixel errors, with two
+    restore guards — every 3D point keeps >= 2 observations (stays constrained in
+    the BA; legacy Caliscope deleted such points instead, but our scene arrays are
+    index-aligned with groups, so points are kept), and every camera keeps
+    >= _REFINE_MIN_PER_CAMERA observations (current Caliscope ``min_per_camera``).
+    Restored slots are the lowest-residual trimmed ones.
+    """
+    keep = residuals <= np.percentile(residuals, 100.0 * (1.0 - fraction))
+    for point in np.unique(obs_point[~keep]):
+        selected = np.flatnonzero(obs_point == point)
+        missing = 2 - int(keep[selected].sum())
+        if missing <= 0:
+            continue
+        dropped = selected[~keep[selected]]
+        keep[dropped[np.argsort(residuals[dropped])][:missing]] = True
+    for cam in np.unique(obs_camera[~keep]):
+        selected = np.flatnonzero(obs_camera == cam)
+        floor = min(_REFINE_MIN_PER_CAMERA, len(selected))
+        missing = floor - int(keep[selected].sum())
+        if missing <= 0:
+            continue
+        dropped = selected[~keep[selected]]
+        keep[dropped[np.argsort(residuals[dropped])][:missing]] = True
+    return keep
 
 
 def _kabsch(source: NDArray[np.float64], target: NDArray[np.float64]) -> NDArray[np.float64]:
@@ -720,10 +776,16 @@ def refine_result(
     board: CalibrationBoard,
     anchor: str,
 ) -> ExtrinsicResult:
-    """Re-run the bundle adjustment from the CURRENT result (spec 'Minimize').
+    """Filter outliers + re-run the bundle adjustment from the CURRENT result.
 
-    Uses the persisted observations — no re-detection — and holds the anchor at its
-    current pose, so an operator reorientation (origin/±xyz) is preserved.
+    The spec's 'Minimize': Caliscope's quality loop (filter_point_estimates ->
+    optimize) — drop the worst _REFINE_FILTER_FRACTION of the persisted
+    observations by their residual under the current fit, then re-fit and report
+    the post-filter RMSE. Always starts from the FULL persisted observations, so
+    repeat clicks converge instead of ratcheting data away (deviation from
+    Caliscope's cumulative GUI filter: we expose one button, not a fraction knob +
+    recalibrate reset). Holds the anchor at its current pose, so an operator
+    reorientation (origin/±xyz) is preserved. No re-detection.
     """
     poses: dict[str, NDArray[np.float64]] = {}
     for name in result.cameras:
@@ -735,18 +797,25 @@ def refine_result(
     obs_norm = np.asarray(ba_inputs.obs_norm, np.float64)
     obs_px = np.asarray(ba_inputs.obs_px, np.float64)
     points3d = np.asarray(result.points, np.float64)
+    model_map = {model.name: model for model in models}
+
+    residuals = _observation_residuals_px(
+        result.cameras, poses, points3d, obs_camera, obs_point, obs_px, model_map
+    )
+    keep = _filter_observations(obs_camera, obs_point, residuals, _REFINE_FILTER_FRACTION)
+    logger.info("minimize: %d/%d observations kept", int(keep.sum()), len(keep))
 
     solved, refined = bundle_adjust(
-        result.cameras, poses, points3d, obs_camera, obs_point, obs_norm, anchor
+        result.cameras, poses, points3d, obs_camera[keep], obs_point[keep], obs_norm[keep], anchor
     )
     per_camera, overall = pixel_errors(
         result.cameras,
         solved,
         refined,
-        obs_camera,
-        obs_point,
-        obs_px,
-        {model.name: model for model in models},
+        obs_camera[keep],
+        obs_point[keep],
+        obs_px[keep],
+        model_map,
     )
 
     rotations: dict[str, list[float]] = {}

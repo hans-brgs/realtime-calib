@@ -642,10 +642,13 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
 
 @router.post("/extrinsic/minimize")
 async def minimize_extrinsic(request: Request) -> dict[str, object]:
-    """Re-run the bundle adjustment from the current result (spec 'Minimize').
+    """Filter outliers + re-run the bundle adjustment (spec 'Minimize').
 
-    Uses the persisted BA observations (no redetection) and holds the anchor at
-    its current pose, preserving any operator reorientation.
+    Caliscope's quality loop: drops the worst 2.5% of the persisted BA
+    observations by current pixel residual, then re-fits (no redetection).
+    Repeat-safe: each run re-filters from the FULL persisted set, so clicks
+    converge to a fixed point instead of ratcheting data away. The anchor
+    keeps its current pose, preserving any operator reorientation.
     """
     manager = get_manager(request)
     session = manager.current()

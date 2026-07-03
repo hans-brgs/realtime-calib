@@ -371,6 +371,68 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
     assert np.allclose(minimized.translations["cam_1"], turned.translations["cam_1"], atol=1e-3)
 
 
+def test_refine_filters_outlier_observations() -> None:
+    # Minimize = Caliscope's filter -> optimize loop: corrupted observations must
+    # be DISCARDED by the refine (RMSE collapses back to the synthetic floor and
+    # the poses land on the truth), not merely tamed by the Huber loss.
+    from calibration_service.calibration.extrinsic import BAInputs, refine_result
+
+    tri = triangulate_groups(_groups(6), POSES)
+    obs_norm = tri.obs_norm.copy()
+    obs_px = tri.obs_px.copy()
+    corrupted = [int(np.flatnonzero(tri.obs_point == p)[0]) for p in (4, 30, 71)]
+    for index in corrupted:
+        obs_norm[index, 0] += 0.04  # ~32 px at f=800
+        obs_px[index, 0] += 32.0
+
+    solved, refined_points = bundle_adjust(
+        tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, obs_norm, "cam_0"
+    )
+    models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in tri.camera_order]
+    per_camera, overall = pixel_errors(
+        tri.camera_order,
+        solved,
+        refined_points,
+        tri.obs_camera,
+        tri.obs_point,
+        obs_px,
+        {m.name: m for m in models},
+    )
+    assert overall > 0.5  # the outliers dominate the unfiltered RMSE
+
+    rotations: dict[str, list[float]] = {}
+    translations: dict[str, list[float]] = {}
+    for name, pose in solved.items():
+        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        rotations[name] = [float(v) for v in rvec.reshape(3)]
+        translations[name] = [float(v) for v in pose[:3, 3]]
+    result = ExtrinsicResult(
+        cameras=tri.camera_order,
+        rotations=rotations,
+        translations=translations,
+        per_camera_error=per_camera,
+        error=overall,
+        pair_errors={},
+        group_count=6,
+        point_count=len(refined_points),
+        points=[[float(v) for v in p] for p in refined_points],
+        point_groups=[int(g) for g in tri.point_group],
+        board_quads=[None] * 6,
+    )
+    ba = BAInputs(
+        obs_camera=[int(v) for v in tri.obs_camera],
+        obs_point=[int(v) for v in tri.obs_point],
+        obs_norm=[[float(a), float(b)] for a, b in obs_norm],
+        obs_px=[[float(a), float(b)] for a, b in obs_px],
+        point_corner=[int(v) for v in tri.point_corner],
+    )
+    minimized = refine_result(result, ba, models, BOARD, "cam_0")
+    assert minimized.error < 0.05
+    rot_1, _ = cv2.Rodrigues(POSES["cam_1"][:3, :3])
+    assert np.allclose(minimized.rotations["cam_1"], rot_1.reshape(3), atol=1e-3)
+    assert np.allclose(minimized.translations["cam_1"], POSES["cam_1"][:3, 3], atol=1e-3)
+
+
 def test_derive_sweep_window_follows_recorded_cadence(tmp_path: Path) -> None:
     from calibration_service.calibration.extrinsic import derive_sweep_window
 
