@@ -77,7 +77,7 @@ services:
     command: --config /etc/livekit.yaml
     ports:
       - "7881:7881/tcp" # ICE-TCP fallback (must match livekit.yaml rtc.tcp_port)
-      - "50000-50010:50000-50010/udp" # WebRTC media (must match rtc.port_range_*)
+      - "7882:7882/udp" # WebRTC media, single muxed port (must match rtc.udp_port)
     environment:
       # Quoted: the ": " must stay part of the string, not be parsed as a YAML map.
       - "LIVEKIT_KEYS=${LIVEKIT_API_KEY}: ${LIVEKIT_API_SECRET}"
