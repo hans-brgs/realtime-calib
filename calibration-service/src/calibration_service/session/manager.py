@@ -46,6 +46,29 @@ class SessionManager:
         self._session_id = session_id
         self._session: CalibrationSession | None = None
 
+    def reorder_cameras(self, device_paths: list[str]) -> CalibrationSession:
+        """Permute camera indices to match the given device order and persist.
+
+        Lightweight companion to ``configure_cameras`` (which REBUILDS the
+        configs and drops calibrations): here each camera keeps its identity and
+        calibration — they belong to the physical device — and only ``index``
+        (anchor = 0, ADR-0012) and the position-based ``name`` change. Note:
+        recordings already on disk stay keyed by the OLD names (reordering is a
+        pre-calibration gesture in the wizard).
+        """
+        session = self.current()
+        by_path = {c.device_path: c for c in session.cameras}
+        if set(device_paths) != set(by_path) or len(device_paths) != len(by_path):
+            raise ValueError("device paths do not match the configured cameras")
+        for position, path in enumerate(device_paths):
+            camera = by_path[path]
+            camera.index = position
+            camera.name = f"{camera.prefix}_{position}"
+        session.cameras.sort(key=lambda c: c.index)
+        save_session(self._sessions_dir, session)
+        logger.info("cameras reordered: %s", ", ".join(device_paths))
+        return session
+
     def session_dir_label(self) -> str:
         """Host-relative session folder (compose mounts ./<root name> as the root)."""
         return f"{self._sessions_dir.name}/{self._session_id}"

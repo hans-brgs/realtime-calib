@@ -150,6 +150,9 @@ def caliscope_document(session: CalibrationSession, square_size_mm: float) -> di
         entry: dict[str, Any] = {
             "port": camera.index,
             "name": camera.name,  # additive extension
+            # Additive extension: stable v4l identifier, so consumers can
+            # reconcile camera id -> physical device without our session files.
+            "device_path": camera.device_path,
             "size": _output_size(camera),
             "matrix": camera.matrix,
             "distortions": camera.distortions,
@@ -230,6 +233,8 @@ def platform_variant(
         fov_deg = 2.0 * math.degrees(math.atan(size[1] / (2.0 * fy))) if fy else 0.0
         entry: dict[str, Any] = {
             "name": camera.name,
+            # Stable v4l identifier: reconcile camera id -> physical device.
+            "device_path": camera.device_path,
             "position": [float(v) for v in position],
             "quaternion": _quaternion_xyzw(rotation_c2w),
             "matrix": [[float(v) for v in row] for row in matrix],

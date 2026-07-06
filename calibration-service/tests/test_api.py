@@ -95,6 +95,66 @@ def test_configure_cameras_persists_and_advances(tmp_path: Path) -> None:
     assert reloaded.cameras[0].status.value == "configured"
 
 
+def test_reorder_cameras_persists_and_keeps_calibrations(tmp_path: Path) -> None:
+    # Drag-reorder persistence: /cameras/order permutes index + position-based
+    # name WITHOUT rebuilding the configs — calibrations follow the device.
+    client = _client(tmp_path)
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/cam-a",
+                    "device_node": "/dev/video0",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+                {
+                    "index": 1,
+                    "device_path": "/dev/v4l/by-path/cam-b",
+                    "device_node": "/dev/video2",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+            ],
+        },
+    )
+    # Give cam-a a calibration to prove it SURVIVES the reorder.
+    matrix = [[800.0, 0.0, 640.0], [0.0, 800.0, 360.0], [0.0, 0.0, 1.0]]
+    manager = SessionManager(tmp_path)
+    manager.current().cameras[0].matrix = matrix
+    reordered = manager.reorder_cameras(
+        ["/dev/v4l/by-path/cam-b", "/dev/v4l/by-path/cam-a"]
+    )
+    assert [c.device_path for c in reordered.cameras] == [
+        "/dev/v4l/by-path/cam-b",
+        "/dev/v4l/by-path/cam-a",
+    ]
+    assert [c.name for c in reordered.cameras] == ["cam_0", "cam_1"]
+    # The calibration moved WITH its device (cam-a is now index 1 / cam_1).
+    assert reordered.cameras[1].matrix == matrix
+
+    # Persisted: a fresh load sees the new order and the kept calibration.
+    reloaded = load_session(tmp_path, "default")
+    assert [c.device_path for c in reloaded.cameras] == [
+        "/dev/v4l/by-path/cam-b",
+        "/dev/v4l/by-path/cam-a",
+    ]
+    assert reloaded.cameras[1].matrix == matrix
+
+    # Route-level guard: unknown paths -> 422.
+    response = _client(tmp_path).post(
+        "/cameras/order", json={"device_paths": ["/dev/v4l/by-path/nope"]}
+    )
+    assert response.status_code == 422
+
+
 def test_list_sessions_summaries(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

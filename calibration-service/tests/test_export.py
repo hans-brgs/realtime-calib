@@ -68,6 +68,8 @@ def test_caliscope_document_round_trips_with_mm_translation() -> None:
     parsed = rtoml.loads(rtoml.dumps(document))
     cam_1 = parsed["cam_1"]
     assert cam_1["port"] == 1
+    # Additive id -> device reconciliation field (stable v4l path).
+    assert cam_1["device_path"] == "/dev/v4l/by-path/cam1"
     assert cam_1["size"] == [640, 480]  # output resolution (resize_factor 0.5)
     assert cam_1["matrix"] == K
     assert cam_1["distortions"] == DIST  # rational coefficients as calibrated
@@ -99,6 +101,7 @@ def test_unity_variant_position_and_quaternion() -> None:
     assert convention["camera_up"] == pytest.approx([0.0, 1.0, 0.0])
 
     cam_0, cam_1 = variant["cameras"]
+    assert cam_0["device_path"] == "/dev/v4l/by-path/cam0"  # id -> device link
     assert cam_0["position"] == pytest.approx([0.0, 0.0, 0.0])
     assert cam_0["quaternion"] == pytest.approx([0.0, 0.0, 0.0, 1.0])
     # p_cv = -R^T t = (0, 0, -80) mm; Unity basis diag(1,-1,1) keeps it unchanged.
