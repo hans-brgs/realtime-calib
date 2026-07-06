@@ -14,8 +14,8 @@ from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.export import (
-    aniposelib_document,
     caliscope_document,
+    export_targets,
     platform_variant,
 )
 from calibration_service.models.session import (
@@ -77,11 +77,17 @@ def test_caliscope_document_round_trips_with_mm_translation() -> None:
     assert parsed["cam_0"]["rotation"] == [0.0, 0.0, 0.0]  # anchor identity
 
 
-def test_aniposelib_document_has_metadata_and_fisheye() -> None:
-    document = aniposelib_document(_session(), SQUARE_MM, overall_error=0.31)
-    assert document["metadata"] == {"adjusted": True, "error": 0.31}
-    assert document["cam_0"]["fisheye"] is False
-    assert document["cam_1"]["translation"] == pytest.approx([80.0, 0.0, 0.0])
+def test_export_targets_catalog_lists_caliscope_plus_platforms() -> None:
+    # Backend = single source for the export catalog (ADR-0026): caliscope (TOML,
+    # OpenCV axes) + the four platform JSONs, with display metadata.
+    targets = {t.id: t for t in export_targets()}
+    assert set(targets) == {"caliscope", "threejs", "blender", "unity", "unreal"}
+    assert targets["caliscope"].filename == "camera_array.toml"
+    assert targets["caliscope"].kind == "toml"
+    assert targets["unity"].filename == "camera_array_unity.json"
+    assert targets["unity"].kind == "json"
+    assert targets["unity"].handedness == "left"
+    assert "Unity" in targets["unity"].label and "left-handed" in targets["unity"].label
 
 
 def test_unity_variant_position_and_quaternion() -> None:
@@ -153,18 +159,19 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     client.post("/board", json={"target": "intrinsic", "board": board})
 
     # Extrinsics incomplete -> 422 (no camera configured yet).
-    assert client.post("/export", json={"formats": []}).status_code == 422
+    assert client.post("/export", json={"formats": ["caliscope"]}).status_code == 422
 
     session = manager.current()
     session.cameras.extend(_session().cameras)
-    response = client.post("/export", json={"formats": ["aniposelib", "unity"]})
+
+    # Nothing is forced (ADR-0026): an empty selection is rejected, and the
+    # canonical TOML is only written when 'caliscope' is checked.
+    assert client.post("/export", json={"formats": []}).status_code == 422
+
+    response = client.post("/export", json={"formats": ["caliscope", "unity"]})
     assert response.status_code == 200
     names = [f["name"] for f in response.json()["files"]]
-    assert names == [
-        "camera_array.toml",
-        "camera_array_aniposelib.toml",
-        "camera_array_unity.json",
-    ]
+    assert names == ["camera_array.toml", "camera_array_unity.json"]  # catalog order
     unity = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
     assert unity["world_units"] == "mm"
     assert unity["anchor"] == "cam_0"
@@ -181,3 +188,46 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
 
     assert client.post("/export", json={"formats": ["nope"]}).status_code == 422
     assert manager.current().step.value == "export"  # wizard advanced
+
+
+def test_export_preview_renders_without_writing(tmp_path: Path) -> None:
+    # Dry-run (ADR-0026): the preview returns the exact bytes each target would
+    # write, but touches no disk. Content must match what /export then writes.
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    manager.current().cameras.extend(_session().cameras)
+
+    preview = client.post("/export/preview", json={"formats": ["caliscope", "unity"], "units": "m"})
+    assert preview.status_code == 200
+    files = {f["name"]: f for f in preview.json()["files"]}
+    assert set(files) == {"camera_array.toml", "camera_array_unity.json"}
+    assert files["camera_array.toml"]["language"] == "toml"
+    assert files["camera_array_unity.json"]["language"] == "json"
+    assert not manager.export_dir().exists()  # nothing written
+
+    client.post("/export", json={"formats": ["unity"], "units": "m"})
+    written = (manager.export_dir() / "camera_array_unity.json").read_text()
+    assert written == files["camera_array_unity.json"]["content"]
+
+
+def test_export_config_persists_across_reload(tmp_path: Path) -> None:
+    # The export config (units + targets) is session state (ADR-0026): restored
+    # on reopen, exposed on the session payload.
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    client.post("/export/config", json={"formats": ["caliscope", "blender"], "units": "m"})
+    assert client.get("/session").json()["export_targets"] == ["caliscope", "blender"]
+
+    reopened = SessionManager(tmp_path)
+    session = reopened.current()
+    assert session.export_units == "m"
+    assert session.export_targets == ["caliscope", "blender"]
+
+
+def test_export_conventions_catalog_route(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    catalog = client.get("/export/conventions").json()["targets"]
+    ids = [t["id"] for t in catalog]
+    assert ids == ["caliscope", "threejs", "blender", "unity", "unreal"]

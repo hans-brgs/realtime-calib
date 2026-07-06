@@ -36,8 +36,8 @@ from calibration_service.calibration import (
 )
 from calibration_service.export import (
     PLATFORM_FORMATS,
-    aniposelib_document,
     caliscope_document,
+    export_targets,
     platform_variant,
 )
 from calibration_service.models.board import BoardType, CalibrationBoard
@@ -134,6 +134,8 @@ class SessionOut(BaseModel):
     mode: str
     intrinsic_fps: int
     optimization_strategy: str
+    export_units: str = "mm"  # persisted export config (ADR-0026), restored on reopen
+    export_targets: list[str] = []
     cameras: list[CameraConfigOut]
     intrinsic_board: BoardOut | None
     extrinsic_board: BoardOut | None
@@ -205,6 +207,8 @@ def _session_out(session: CalibrationSession, manager: SessionManager) -> Sessio
         mode=session.mode,
         intrinsic_fps=session.intrinsic_fps,
         optimization_strategy=session.optimization_strategy,
+        export_units=session.export_units,
+        export_targets=list(session.export_targets),
         cameras=[
             CameraConfigOut(
                 index=c.index,
@@ -743,63 +747,116 @@ async def extrinsic_frame(request: Request, camera: str, index: int) -> Response
     return Response(content=jpeg, media_type="image/jpeg")
 
 
+_EXPORT_TARGET_IDS = {"caliscope", *PLATFORM_FORMATS}
+
+
 class ExportRequest(BaseModel):
-    """Artifacts to export. The canonical Caliscope TOML is ALWAYS written; the
-    optional list adds 'aniposelib' and/or platform variants (threejs, blender,
-    unity, unreal) — see spec calibration-export. ``units`` applies to the
-    platform JSONs only (the TOMLs keep their fixed mm semantics, ADR-0002)."""
+    """Targets to export (ADR-0026): all optional, none forced. 'caliscope' writes
+    camera_array.toml; platform ids (threejs/blender/unity/unreal) write a JSON
+    each. ``units`` applies to the platform JSONs only (the TOML stays mm)."""
 
     formats: list[str] = []
     units: Literal["mm", "m"] = "mm"
 
 
-@router.post("/export")
-async def export_calibration(request: Request, body: ExportRequest) -> dict[str, object]:
-    """Write the calibration export folder and list the produced files."""
-    manager = get_manager(request)
-    session = manager.current()
+def _export_board(session: CalibrationSession) -> CalibrationBoard:
+    """Validate the session is exportable and return its board (ADR-0026)."""
     board = session.effective_extrinsic_board()
     if board is None:
         raise HTTPException(status_code=422, detail="no board defined")
     if not session.cameras or any(c.rotation is None for c in session.cameras):
         raise HTTPException(status_code=422, detail="extrinsic calibration incomplete")
-    unknown = [f for f in body.formats if f not in PLATFORM_FORMATS and f != "aniposelib"]
+    return board
+
+
+def _reject_unknown_formats(formats: list[str]) -> None:
+    unknown = [f for f in formats if f not in _EXPORT_TARGET_IDS]
     if unknown:
         raise HTTPException(status_code=422, detail=f"unknown formats: {', '.join(unknown)}")
 
-    result_path = manager.extrinsic_dir() / "result.json"
-    overall_error: float | None = None
-    if result_path.is_file():
-        overall_error = json.loads(result_path.read_text()).get("error")
+
+def _render_target(
+    session: CalibrationSession, target_id: str, square: float, units: str
+) -> tuple[str, str]:
+    """Serialized content of one export target — no disk write (dry-run + write)."""
+    if target_id == "caliscope":
+        return "toml", rtoml.dumps(caliscope_document(session, square))
+    variant = platform_variant(session, target_id, square, units=units)
+    return "json", json.dumps(variant, indent=2)
+
+
+@router.post("/export")
+async def export_calibration(request: Request, body: ExportRequest) -> dict[str, object]:
+    """Write the selected export targets to the session folder and list them."""
+    manager = get_manager(request)
+    session = manager.current()
+    board = _export_board(session)
+    _reject_unknown_formats(body.formats)
+    if not body.formats:
+        raise HTTPException(status_code=422, detail="select at least one artifact")
 
     directory = manager.export_dir()
     directory.mkdir(parents=True, exist_ok=True)
     square = board_unit_mm(board)  # square side (ChArUco) or marker side (ArUco)
+    selected = set(body.formats)
     files: list[dict[str, object]] = []
-
-    rtoml.dump(caliscope_document(session, square), directory / "camera_array.toml")
-    files.append({"name": "camera_array.toml", "convention": "opencv (canonical)"})
-    if "aniposelib" in body.formats:
-        rtoml.dump(
-            aniposelib_document(session, square, overall_error),
-            directory / "camera_array_aniposelib.toml",
-        )
-        files.append({"name": "camera_array_aniposelib.toml", "convention": "opencv (canonical)"})
-    for format_id in body.formats:
-        if format_id not in PLATFORM_FORMATS:
+    for target in export_targets():  # catalog order, stable output
+        if target.id not in selected:
             continue
-        variant = platform_variant(session, format_id, square, units=body.units)
-        name = f"camera_array_{format_id}.json"
-        (directory / name).write_text(json.dumps(variant, indent=2))
-        convention = variant["convention"]
-        assert isinstance(convention, dict)
-        label = f"{convention['label']} · {convention['platforms']}"
-        files.append({"name": name, "convention": label})
+        _language, content = _render_target(session, target.id, square, body.units)
+        (directory / target.filename).write_text(content)
+        files.append({"name": target.filename, "convention": target.label})
 
+    manager.set_export_config(body.units, body.formats)
     manager.mark_exported()
-    logger_files = ", ".join(str(f["name"]) for f in files)
-    logging.getLogger(__name__).info("exported: %s", logger_files)
+    logging.getLogger(__name__).info("exported: %s", ", ".join(str(f["name"]) for f in files))
     return {"files": files}
+
+
+@router.get("/export/conventions")
+async def export_conventions() -> dict[str, object]:
+    """Catalog of selectable export targets — backend = single source (ADR-0026)."""
+    return {"targets": [asdict(t) for t in export_targets()]}
+
+
+class ExportPreviewRequest(BaseModel):
+    """Dry-run preview: render the selected targets' content without writing."""
+
+    formats: list[str] = []
+    units: Literal["mm", "m"] = "mm"
+
+
+@router.post("/export/preview")
+async def export_preview(request: Request, body: ExportPreviewRequest) -> dict[str, object]:
+    """Return the exact bytes each selected target would write, without touching disk."""
+    session = get_manager(request).current()
+    board = _export_board(session)
+    _reject_unknown_formats(body.formats)
+    square = board_unit_mm(board)
+    selected = set(body.formats)
+    files: list[dict[str, object]] = []
+    for target in export_targets():
+        if target.id not in selected:
+            continue
+        language, content = _render_target(session, target.id, square, body.units)
+        files.append({"name": target.filename, "language": language, "content": content})
+    return {"files": files}
+
+
+class ExportConfigRequest(BaseModel):
+    """Persist the export config (units + targets) so it survives a reopen."""
+
+    formats: list[str] = []
+    units: Literal["mm", "m"] = "mm"
+
+
+@router.post("/export/config", response_model=SessionOut)
+async def update_export_config(request: Request, body: ExportConfigRequest) -> SessionOut:
+    """Store the export config on the session (ADR-0026) without writing files."""
+    _reject_unknown_formats(body.formats)
+    manager = get_manager(request)
+    session = manager.set_export_config(body.units, body.formats)
+    return _session_out(session, manager)
 
 
 @router.get("/export/archive")

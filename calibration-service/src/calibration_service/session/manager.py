@@ -141,6 +141,15 @@ class SessionManager:
         save_session(self._sessions_dir, session)
         return session
 
+    def set_export_config(self, units: str, targets: list[str]) -> CalibrationSession:
+        """Persist the export config (units + selected targets) so it is restored
+        on reopen (ADR-0026). The truth stays result.json; this is a preference."""
+        session = self.current()
+        session.export_units = units
+        session.export_targets = list(targets)
+        save_session(self._sessions_dir, session)
+        return session
+
     def begin_extrinsic_capture(self) -> CalibrationSession:
         """Advance the wizard to the extrinsic capture step and persist it."""
         session = self.current()

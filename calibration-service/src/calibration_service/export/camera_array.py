@@ -82,8 +82,49 @@ CONVENTIONS: dict[str, Convention] = {
     ),
 }
 
-# formats accepted by POST /export; the canonical Caliscope TOML is always written.
+# Platform-variant format ids (the JSON targets); 'caliscope' (the TOML) is the
+# fifth selectable target, all optional and equal (ADR-0026).
 PLATFORM_FORMATS = tuple(CONVENTIONS)
+
+
+@dataclass(frozen=True)
+class ExportTarget:
+    """A selectable export artifact for the export screen (ADR-0026)."""
+
+    id: str  # "caliscope" | platform format id
+    filename: str
+    kind: str  # "toml" | "json" — drives the code-highlight language
+    label: str  # sub-label: destination + axes/handedness
+    up: str  # "y" | "z" | "" (caliscope keeps OpenCV axes)
+    handedness: str  # "right" | "left" | ""
+
+
+def export_targets() -> list[ExportTarget]:
+    """Catalog of selectable export targets — the backend is the single source
+    (ADR-0026): the webapp fetches this instead of a parallel client-side copy."""
+    targets = [
+        ExportTarget(
+            id="caliscope",
+            filename="camera_array.toml",
+            kind="toml",
+            label="Caliscope · OpenCV axes",
+            up="",
+            handedness="",
+        )
+    ]
+    for format_id, convention in CONVENTIONS.items():
+        up_label = "Y-up" if convention.up == "y" else "Z-up"
+        targets.append(
+            ExportTarget(
+                id=format_id,
+                filename=f"camera_array_{format_id}.json",
+                kind="json",
+                label=f"{convention.platforms} · {up_label} · {convention.handedness}-handed",
+                up=convention.up,
+                handedness=convention.handedness,
+            )
+        )
+    return targets
 
 
 def _output_size(camera: CameraConfig) -> list[int]:
@@ -119,25 +160,6 @@ def caliscope_document(session: CalibrationSession, square_size_mm: float) -> di
             entry["rotation"] = camera.rotation
             entry["translation"] = _translation_mm(camera, square_size_mm)
         document[f"cam_{camera.index}"] = {k: v for k, v in entry.items() if v is not None}
-    return document
-
-
-def aniposelib_document(
-    session: CalibrationSession, square_size_mm: float, overall_error: float | None
-) -> dict[str, Any]:
-    """``camera_array_aniposelib.toml``: the aniposelib CameraGroup layout."""
-    document: dict[str, Any] = {}
-    for camera in session.cameras:
-        document[f"cam_{camera.index}"] = {
-            "name": camera.name,
-            "size": _output_size(camera),
-            "matrix": camera.matrix,
-            "distortions": camera.distortions,
-            "rotation": camera.rotation or [0.0, 0.0, 0.0],
-            "translation": _translation_mm(camera, square_size_mm),
-            "fisheye": False,
-        }
-    document["metadata"] = {"adjusted": True, "error": overall_error or 0.0}
     return document
 
 

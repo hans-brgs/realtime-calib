@@ -164,6 +164,8 @@ def _to_dict(session: CalibrationSession) -> dict[str, object]:
         "mode": session.mode.value,
         "intrinsic_fps": session.intrinsic_fps,
         "optimization_strategy": session.optimization_strategy,
+        "export_units": session.export_units,
+        "export_targets": list(session.export_targets),
         "cameras": [_camera_to_dict(c) for c in session.cameras],
     }
 
@@ -177,4 +179,6 @@ def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
         cameras=cameras,
         intrinsic_fps=int(data["intrinsic_fps"]),
         optimization_strategy=str(data["optimization_strategy"]),
+        export_units=str(data.get("export_units", "mm")),
+        export_targets=[str(t) for t in data.get("export_targets", [])],
     )

@@ -94,6 +94,10 @@ class CalibrationSession:
     optimization_strategy: str = "coverage-aware"
     intrinsic_board: CalibrationBoard | None = None
     extrinsic_board: CalibrationBoard | None = None
+    # Persisted export config (ADR-0026): restored on reopen. The truth (poses)
+    # lives in result.json; this is a lightweight "how I export" preference.
+    export_units: str = "mm"
+    export_targets: list[str] = field(default_factory=list)
 
     def effective_extrinsic_board(self) -> CalibrationBoard | None:
         """Extrinsic board, inheriting the intrinsic one when not set explicitly."""
