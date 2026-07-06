@@ -31,7 +31,11 @@ import {
 } from '@/features/cameras/captureOptions';
 import { detectCamerasThunk, selectDetectedCameras, selectDetectStatus } from '@/features/cameras/camerasSlice';
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
-import { applyCameraConfig, selectSession } from '@/features/session/sessionSlice';
+import {
+  applyCameraConfig,
+  reorderCamerasThunk,
+  selectSession,
+} from '@/features/session/sessionSlice';
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -210,10 +214,21 @@ export function CameraSetupScreen() {
 
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
-    if (over && active.id !== over.id) {
-      setOrder((current) =>
-        arrayMove(current, current.indexOf(String(active.id)), current.indexOf(String(over.id))),
-      );
+    if (!over || active.id === over.id) {
+      return;
+    }
+    const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
+    setOrder(next);
+    // Persist the reorder immediately when these devices are already configured
+    // (index = position, calibrations kept server-side — /cameras/order). Before
+    // the first Apply there is nothing to persist: the order ships with Apply.
+    const configured = session?.cameras ?? [];
+    if (
+      configured.length > 0 &&
+      configured.length === next.length &&
+      configured.every((camera) => next.includes(camera.device_path))
+    ) {
+      void dispatch(reorderCamerasThunk(next));
     }
   };
 

@@ -235,6 +235,11 @@ export interface ExportTarget {
   handedness: string;
 }
 
+// Persist a drag-reorder (device paths in the chosen order). Unlike /cameras/config
+// this keeps calibrations — only index + position-based name change.
+export const reorderCameras = (devicePaths: string[]): Promise<Session> =>
+  postJson<Session>('/cameras/order', { device_paths: devicePaths });
+
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>
   getJson<{ targets: ExportTarget[] }>('/export/conventions').then((r) => r.targets);
 

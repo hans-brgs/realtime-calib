@@ -10,6 +10,7 @@ import {
   type ExtrinsicComputeParams,
   fetchSession,
   fetchSessions,
+  reorderCameras,
 } from '@/transport/httpClient';
 import type {
   BoardConfigRequest,
@@ -42,6 +43,13 @@ export const fetchRecentSessions = createAsyncThunk('session/recent', () => fetc
 
 export const applyCameraConfig = createAsyncThunk('session/applyConfig', (request: ConfigRequest) =>
   configureCameras(request),
+);
+
+// Drag-reorder persistence (index = position, anchor = 0): unlike applyCameraConfig
+// this keeps calibrations — the backend only permutes index + position-based name.
+export const reorderCamerasThunk = createAsyncThunk(
+  'session/reorderCameras',
+  (devicePaths: string[]) => reorderCameras(devicePaths),
 );
 
 export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request: BoardConfigRequest) =>
@@ -77,6 +85,9 @@ const sessionSlice = createSlice({
         state.error = action.error.message ?? 'failed';
       })
       .addCase(applyCameraConfig.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(reorderCamerasThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(applyBoardConfig.fulfilled, (state, action) => {
