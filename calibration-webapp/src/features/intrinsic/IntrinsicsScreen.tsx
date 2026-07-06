@@ -1,9 +1,4 @@
-import {
-  isTrackReference,
-  LiveKitRoom,
-  useDataChannel,
-  useTracks,
-} from '@livekit/components-react';
+import { isTrackReference, useDataChannel, useTracks } from '@livekit/components-react';
 import {
   Box,
   Button,
@@ -39,7 +34,6 @@ import {
 import {
   fetchIntrinsicFrameCount,
   fetchIntrinsicMetrics,
-  fetchToken,
   type IntrinsicMetrics,
   setActiveIntrinsic,
   startIntrinsic,
@@ -683,53 +677,18 @@ function IntrinsicsInner() {
 
 // Intrinsic calibration per camera (ADR-0022 sub-FSM capture → prepare → computing →
 // results): sweep the board (live burn-in + gauges), replay + tune the sampling in
-// Prepare, compute from the recording, then review the result + coverage.
+// Prepare, compute from the recording, then review the result + coverage. The
+// LiveKit room lives at the App level (RoomProvider) — this screen only consumes it.
 export function IntrinsicsScreen() {
-  const [connection, setConnection] = useState<{ serverUrl: string; token: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchToken()
-      .then((response) => {
-        if (!cancelled) {
-          setConnection({ serverUrl: import.meta.env.VITE_LIVEKIT_URL, token: response.token });
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       <ScreenHeader
         title="Intrinsics"
         subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
       />
-      {error ? (
-        <Center style={{ flex: 1 }}>
-          <Text c="red">{error}</Text>
-        </Center>
-      ) : !connection ? (
-        <Center style={{ flex: 1 }}>
-          <Loader />
-        </Center>
-      ) : (
-        <LiveKitRoom
-          serverUrl={connection.serverUrl}
-          token={connection.token}
-          connect
-          audio={false}
-          video={false}
-          style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-        >
-          <IntrinsicsInner />
-        </LiveKitRoom>
-      )}
+      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <IntrinsicsInner />
+      </Box>
     </Box>
   );
 }

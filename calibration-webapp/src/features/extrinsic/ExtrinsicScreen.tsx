@@ -1,4 +1,4 @@
-import { LiveKitRoom, useDataChannel } from '@livekit/components-react';
+import { useDataChannel } from '@livekit/components-react';
 import {
   ActionIcon,
   Box,
@@ -40,7 +40,6 @@ import {
   extrinsicFrameUrl,
   fetchExtrinsicGroups,
   fetchExtrinsicResult,
-  fetchToken,
   setCaptureView,
   startExtrinsic,
   stopExtrinsic,
@@ -600,52 +599,17 @@ function ExtrinsicInner() {
 // Extrinsic array calibration (ADR-0023, spec extrinsic-calibration-flow): ONE pass
 // for the whole rig — synchronized sweep (co-visibility live) → prepare (group
 // scrubber + knobs) → compute (stereo init + chaining + BA) → result (3D review).
+// The LiveKit room lives at the App level (RoomProvider) — this screen consumes it.
 export function ExtrinsicScreen() {
-  const [connection, setConnection] = useState<{ serverUrl: string; token: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchToken()
-      .then((response) => {
-        if (!cancelled) {
-          setConnection({ serverUrl: import.meta.env.VITE_LIVEKIT_URL, token: response.token });
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       <ScreenHeader
         title="Extrinsics"
         subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
       />
-      {error ? (
-        <Center style={{ flex: 1 }}>
-          <Text c="red">{error}</Text>
-        </Center>
-      ) : !connection ? (
-        <Center style={{ flex: 1 }}>
-          <Loader />
-        </Center>
-      ) : (
-        <LiveKitRoom
-          serverUrl={connection.serverUrl}
-          token={connection.token}
-          connect
-          audio={false}
-          video={false}
-          style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-        >
-          <ExtrinsicInner />
-        </LiveKitRoom>
-      )}
+      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <ExtrinsicInner />
+      </Box>
     </Box>
   );
 }
