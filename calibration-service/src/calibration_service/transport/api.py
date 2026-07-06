@@ -603,13 +603,14 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
 class OrientRequest(BaseModel):
     """Reorient the solved world frame (spec 3d-extrinsic-review, mutating).
 
-    ``set_origin`` = neutral, Caliscope behavior (world := board frame, wherever
-    the board is). ``set_ground`` = the operator declares the board on the FLOOR:
-    same origin, but the board normal becomes the world's up.
+    ``set_frame`` = the single framing gesture (ADR-0026): world origin on the
+    board (marker center / ChArUco c0), axes aligned to it, and the board normal
+    put on the export-up axis (-y canonical) so a floor-laid board lands level.
+    ``rotate`` reorients ±90° about an axis for any other placement.
     """
 
-    op: Literal["set_origin", "set_ground", "rotate"]
-    group: int | None = None  # set_origin/set_ground: group whose board is the reference
+    op: Literal["set_frame", "rotate"]
+    group: int | None = None  # set_frame: group whose board becomes the frame
     axis: Literal["x", "y", "z"] | None = None  # rotate
     degrees: float | None = None  # rotate (the UI sends +/-90)
 
@@ -630,13 +631,14 @@ def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) ->
 async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, object]:
     """Apply a rigid world-frame change to the solved array and persist it.
 
-    ``set_origin`` puts the world origin/axes on the board of one group;
-    ``rotate`` turns the frame ±90° about an axis. Reprojection quality is
-    invariant, so errors carry over; the updated result payload is returned.
+    ``set_frame`` puts the world origin/axes on the board of one group with its
+    normal on the up axis; ``rotate`` turns the frame ±90° about an axis.
+    Reprojection quality is invariant, so errors carry over; the updated result
+    payload is returned.
     """
     manager = get_manager(request)
     result = _load_extrinsic_result(manager)
-    if body.op in ("set_origin", "set_ground"):
+    if body.op == "set_frame":
         if body.group is None or not (0 <= body.group < len(result.board_quads)):
             raise HTTPException(status_code=422, detail="invalid group")
         quad = result.board_quads[body.group]
@@ -647,7 +649,7 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
         board = manager.current().effective_extrinsic_board()
         marker = board is not None and board.board_type is not BoardType.CHARUCO
         transform = quad_origin_transform(
-            quad, at_center=marker, ground=body.op == "set_ground"
+            quad, at_center=marker, ground=True
         )
     else:
         if body.axis is None or body.degrees is None:

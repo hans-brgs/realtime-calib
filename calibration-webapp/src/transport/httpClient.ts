@@ -202,12 +202,11 @@ export interface ExtrinsicResultPayload {
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
   getJson<ExtrinsicResultPayload>('/extrinsic/result');
 
-// Rigid world-frame changes on the solved array (spec 3d-extrinsic-review, mutating):
-// put the origin on one group's board (set_ground additionally declares the board
-// ON THE FLOOR — its normal becomes the world's up), or rotate ±90° about an axis.
+// Rigid world-frame changes on the solved array (spec 3d-extrinsic-review, ADR-0026):
+// set_frame puts the origin + axes on a group's board with its normal on the up axis
+// (the single framing gesture); rotate turns the frame ±90° about an axis.
 export type OrientRequest =
-  | { op: 'set_origin'; group: number }
-  | { op: 'set_ground'; group: number }
+  | { op: 'set_frame'; group: number }
   | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number };
 
 export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPayload> =>

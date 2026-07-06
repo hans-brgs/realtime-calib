@@ -1,8 +1,7 @@
 import { Bounds, Html, Line, TrackballControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
-import { ActionIcon, Box, Button, Group, Select, Slider, Text } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Slider, Text } from '@mantine/core';
 import {
-  IconArrowBarToDown,
   IconCrosshair,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
@@ -10,13 +9,6 @@ import {
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
-import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import {
-  CONVENTIONS,
-  conventionByValue,
-  conventionSelected,
-  selectConvention,
-} from '@/features/review3d/conventions';
 import {
   type ExtrinsicResultPayload,
   minimizeExtrinsic,
@@ -33,6 +25,16 @@ type Vec3 = [number, number, number];
 
 const CAMERA_COLOR = '#a78bfa'; // one hue for the whole rig: cameras read by label
 const PLAY_FPS = 6;
+
+// Fixed physical viewing frame (ADR-0026): the solved data is canonical OpenCV
+// (Y-down); we display it Y-up right-handed so "up is up". There is NO convention
+// selector here — the convention is an export codec, chosen at the Export step.
+const VIEW_BASIS: number[][] = [
+  [1, 0, 0],
+  [0, -1, 0],
+  [0, 0, -1],
+];
+const VIEW_UP: Vec3 = [0, 1, 0];
 
 function rodriguesToMatrix(r: number[]): number[][] {
   const theta = Math.hypot(r[0], r[1], r[2]);
@@ -208,14 +210,11 @@ export function ArrayReview({
   onResult: (updated: ExtrinsicResultPayload) => void;
   markerBoard?: boolean;
 }) {
-  const dispatch = useAppDispatch();
-  const conventionId = useAppSelector(selectConvention);
   const [group, setGroup] = useState(0);
   const [playing, setPlaying] = useState(false);
   const [busy, setBusy] = useState(false);
   const [mutateError, setMutateError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  const convention = conventionByValue(conventionId);
   const maxGroup = Math.max(0, result.group_count - 1);
 
   // Mutating review actions (spec 3d-extrinsic-review): reorient the stored world
@@ -258,7 +257,7 @@ export function ArrayReview({
   const groupPoints: number[] = [];
   result.point_groups.forEach((g, i) => {
     if (g === current) {
-      const displayed = mulMV(convention.m, result.points[i] as Vec3);
+      const displayed = mulMV(VIEW_BASIS, result.points[i] as Vec3);
       groupPoints.push(displayed[0], displayed[1], displayed[2]);
     }
   });
@@ -266,18 +265,13 @@ export function ArrayReview({
   const quad = result.board_quads[current] ?? null;
 
   const camDistance = sceneScale * 1.6;
-  const initialCamera: Vec3 =
-    convention.up[2] === 1
-      ? [camDistance, -camDistance, camDistance * 0.7]
-      : [camDistance, camDistance * 0.7, camDistance];
+  const initialCamera: Vec3 = [camDistance, camDistance * 0.7, camDistance];
 
   return (
     <Box style={{ position: 'relative', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
       <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {/* Remount per convention: camera.up + controls are constructor-time settings. */}
         <Canvas
-          key={conventionId}
-          camera={{ position: initialCamera, up: convention.up, fov: 50 }}
+          camera={{ position: initialCamera, up: VIEW_UP, fov: 50 }}
           style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
         >
           <ambientLight intensity={0.8} />
@@ -289,14 +283,14 @@ export function ArrayReview({
                 pose={pose}
                 size={frustumSize}
                 color={CAMERA_COLOR}
-                m={convention.m}
+                m={VIEW_BASIS}
                 anchor={i === 0}
               />
             ))}
             {positions.length > 0 && (
               <GroupPoints positions={positions} size={sceneScale * 0.02} />
             )}
-            {quad && <BoardWithTriad quad={quad} m={convention.m} centered={markerBoard} />}
+            {quad && <BoardWithTriad quad={quad} m={VIEW_BASIS} centered={markerBoard} />}
           </Bounds>
           {/* Trackball, not Orbit: orbit clamps polar to [0, π] (blocks at the
               poles), which fights a reoriented world — free 360° tumbling. */}
@@ -319,28 +313,17 @@ export function ArrayReview({
           <Text fz="0.62rem" c="dark.3" mb={6}>
             World frame
           </Text>
+          {/* Single framing gesture (ADR-0026): origin on the board + its normal on
+              the up axis, so a floor-laid board lands level in every export. */}
           <Button
             size="compact-xs"
             fullWidth
             variant="light"
             leftSection={<IconCrosshair size={13} />}
             disabled={busy || quad === null}
-            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_origin', group: current }))}
+            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_frame', group: current }))}
           >
-            Set origin on board
-          </Button>
-          {/* Declares the board LYING ON THE FLOOR: its normal becomes the world's
-              up, so every display/export convention lands the floor flat. */}
-          <Button
-            size="compact-xs"
-            fullWidth
-            mt={4}
-            variant="light"
-            leftSection={<IconArrowBarToDown size={13} />}
-            disabled={busy || quad === null}
-            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_ground', group: current }))}
-          >
-            Set ground on board
+            Set frame on board
           </Button>
           <Group gap={4} mt={6} grow>
             {(['x', 'y', 'z'] as const).map((axis) => (
@@ -391,30 +374,8 @@ export function ArrayReview({
             </Text>
           )}
         </Box>
-        <Box style={{ position: 'absolute', top: 10, right: 10, zIndex: 2, width: 240 }}>
-          <Select
-            size="xs"
-            label="Display convention"
-            value={conventionId}
-            onChange={(value) => value && dispatch(conventionSelected(value))}
-            data={CONVENTIONS.map(({ value, label }) => ({ value, label }))}
-            comboboxProps={{ withinPortal: true }}
-            styles={{
-              root: {
-                padding: 8,
-                borderRadius: 8,
-                background: 'rgba(9,9,11,0.72)',
-                backdropFilter: 'blur(6px)',
-                border: '1px solid var(--rc-border)',
-              },
-              label: { fontSize: '0.62rem', color: 'var(--mantine-color-dark-3)' },
-              input: { background: 'var(--rc-input)', border: '1px solid var(--rc-border)' },
-            }}
-          />
-          <Text fz="0.6rem" c="dark.3" mt={4} px={8}>
-            Shared with Export — the displayed convention is always exported.
-          </Text>
-        </Box>
+        {/* No convention selector (ADR-0026): the review shows the fixed physical
+            frame; the convention is an export codec, chosen at the Export step. */}
       </Box>
       <Group mt="sm" gap="sm" wrap="nowrap">
         <ActionIcon
