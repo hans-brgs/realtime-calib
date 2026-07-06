@@ -1,4 +1,5 @@
 import '@mantine/core/styles.css';
+import '@mantine/code-highlight/styles.css'; // after core styles (Export preview)
 import '@livekit/components-styles';
 
 import { MantineProvider } from '@mantine/core';

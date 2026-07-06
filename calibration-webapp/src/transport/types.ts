@@ -64,6 +64,8 @@ export interface Session {
   mode: SessionMode;
   intrinsic_fps: number;
   optimization_strategy: string;
+  export_units?: 'mm' | 'm'; // persisted export config (ADR-0026), restored on reopen
+  export_targets?: string[];
   cameras: CameraConfig[];
   intrinsic_board: Board | null;
   extrinsic_board: Board | null;

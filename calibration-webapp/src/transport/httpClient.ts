@@ -218,12 +218,42 @@ export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPay
 export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/minimize');
 
-// Calibration export (spec calibration-export): the canonical Caliscope TOML is
-// always written; formats adds 'aniposelib' and/or platform variants.
+// Calibration export (spec calibration-export, ADR-0026). Targets are all optional
+// ('caliscope' TOML + platform JSONs); the backend owns the catalog and preview.
 export interface ExportedFile {
   name: string;
   convention: string;
 }
+
+// One selectable target from the backend catalog (GET /export/conventions).
+export interface ExportTarget {
+  id: string;
+  filename: string;
+  kind: 'toml' | 'json';
+  label: string;
+  up: string;
+  handedness: string;
+}
+
+export const fetchExportTargets = (): Promise<ExportTarget[]> =>
+  getJson<{ targets: ExportTarget[] }>('/export/conventions').then((r) => r.targets);
+
+// Dry-run: the exact content each selected target would write, without touching disk.
+export interface PreviewFile {
+  name: string;
+  language: string;
+  content: string;
+}
+
+export const previewExport = (
+  formats: string[],
+  units: 'mm' | 'm',
+): Promise<PreviewFile[]> =>
+  postJson<{ files: PreviewFile[] }>('/export/preview', { formats, units }).then((r) => r.files);
+
+// Persist the export config (units + targets) on the session (restored on reopen).
+export const saveExportConfig = (formats: string[], units: 'mm' | 'm'): Promise<unknown> =>
+  postJson('/export/config', { formats, units });
 
 export const exportCalibration = (
   formats: string[],

@@ -23,6 +23,7 @@
     "@fontsource-variable/sora": "^5.2.8",
     "@livekit/components-react": "^2.9.14",
     "@livekit/components-styles": "^1.1.6",
+    "@mantine/code-highlight": "9.4.1",
     "@mantine/core": "9.4.1",
     "@mantine/hooks": "9.4.1",
     "@react-three/drei": "^10.6.1",
