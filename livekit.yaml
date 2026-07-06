@@ -14,11 +14,11 @@ bind_addresses:
   - "0.0.0.0"
 
 rtc:
-  # ALL WebRTC media multiplexed on ONE UDP port (LiveKit's recommended Docker
-  # setup). The previous 50000-50010 range (11 ports) could saturate transiently
-  # when zombie viewer sessions from screen navigations held ports for ~15-20 s,
-  # making ICE fail intermittently ("stream stuck on waiting").
-  udp_port: 7882
+  # WebRTC media UDP port range (published host==container in docker-compose.yml).
+  # Same structure as vision-services. The publisher reaches LiveKit over the shared
+  # bridge; the LAN browser reaches these ports at NODE_IP.
+  port_range_start: 50000
+  port_range_end: 50010
   # ICE-TCP fallback if UDP is blocked (published, host==container).
   tcp_port: 7881
   # Local network: advertise NODE_IP (injected), no external IP discovery.
