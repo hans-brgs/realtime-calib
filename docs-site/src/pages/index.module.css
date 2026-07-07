@@ -1,0 +1,120 @@
+.hero {
+  position: relative;
+  padding: 6rem 0 5rem;
+  text-align: center;
+  background:
+    radial-gradient(60% 80% at 50% -10%, rgba(139, 92, 246, 0.22), transparent 70%),
+    linear-gradient(180deg, var(--rc-bg-deep, #09090b), var(--rc-bg, #0f0f12));
+  border-bottom: 1px solid var(--rc-border, #232329);
+  overflow: hidden;
+}
+
+.eyebrow {
+  display: inline-block;
+  font-family: var(--ifm-heading-font-family);
+  font-size: 0.8rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--rc-accent-soft, #c4b5fd);
+  background: var(--rc-violet-tint, #2c2640);
+  border: 1px solid var(--rc-border-strong, #2a2a32);
+  padding: 0.3rem 0.8rem;
+  border-radius: 999px;
+  margin-bottom: 1.5rem;
+}
+
+.heroTitle {
+  font-size: clamp(2.6rem, 6vw, 4.2rem);
+  line-height: 1.05;
+  margin-bottom: 1rem;
+  background: linear-gradient(180deg, #ffffff, var(--rc-accent-soft, #c4b5fd));
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+}
+
+.heroTagline {
+  max-width: 720px;
+  margin: 0 auto 2rem;
+  font-size: 1.2rem;
+  line-height: 1.6;
+  color: var(--rc-text-secondary, #bcbcc6);
+}
+
+.heroButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  justify-content: center;
+  margin-bottom: 1.5rem;
+}
+
+.ghostBtn {
+  background: var(--rc-surface-raised, #1c1c22);
+  color: #ffffff;
+  border: 1px solid var(--rc-text-dim, #6a6a74);
+  transition: border-color 160ms ease, background 160ms ease;
+}
+
+.ghostBtn:hover {
+  background: var(--rc-border, #232329);
+  border-color: var(--rc-accent, #8b5cf6);
+  color: #ffffff;
+}
+
+.heroNote {
+  font-size: 0.95rem;
+  color: var(--rc-text-muted, #9a9aa5);
+}
+
+.heroNote code {
+  background: var(--rc-surface-raised, #1c1c22);
+  border: 1px solid var(--rc-border, #232329);
+}
+
+/* Support callout */
+.support {
+  padding: 4rem 0 5rem;
+}
+
+.supportCard {
+  max-width: 720px;
+  margin: 0 auto;
+  text-align: center;
+  padding: 2.5rem 2rem;
+  border-radius: 16px;
+  background:
+    radial-gradient(80% 120% at 50% 0%, rgba(139, 92, 246, 0.12), transparent 70%),
+    var(--rc-surface, #16161b);
+  border: 1px solid var(--rc-border, #232329);
+}
+
+.supportTitle {
+  font-size: 1.8rem;
+  margin-bottom: 0.75rem;
+}
+
+.supportText {
+  color: var(--rc-text-secondary, #bcbcc6);
+  margin-bottom: 1.5rem;
+}
+
+.supportButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.8rem;
+  justify-content: center;
+  margin-bottom: 1.25rem;
+}
+
+.supportFinePrint {
+  font-size: 0.9rem;
+  color: var(--rc-text-muted, #9a9aa5);
+  margin: 0;
+}
+
+@media (max-width: 600px) {
+  .hero {
+    padding: 4rem 0 3rem;
+  }
+}

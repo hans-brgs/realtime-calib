@@ -1,0 +1,103 @@
+/**
+ * realtime-calib documentation theme.
+ * Design tokens imported from the webapp "dark violet" design system (ADR-0017):
+ * near-black cool surfaces, violet accent (#8b5cf6), Sora (display) + Manrope (body).
+ * Fonts are self-hosted via @fontsource so the site has no external CDN dependency.
+ */
+
+/* Manrope — body / labels */
+@import '@fontsource/manrope/400.css';
+@import '@fontsource/manrope/500.css';
+@import '@fontsource/manrope/600.css';
+@import '@fontsource/manrope/700.css';
+
+/* Sora — display / headings / values */
+@import '@fontsource/sora/500.css';
+@import '@fontsource/sora/600.css';
+@import '@fontsource/sora/700.css';
+
+:root {
+  /* Violet accent ramp (Tailwind violet family, anchored on the design's #8b5cf6) */
+  --ifm-color-primary: #8b5cf6;
+  --ifm-color-primary-dark: #7c3aed;
+  --ifm-color-primary-darker: #6d28d9;
+  --ifm-color-primary-darkest: #5b21b6;
+  --ifm-color-primary-light: #a78bfa;
+  --ifm-color-primary-lighter: #c4b5fd;
+  --ifm-color-primary-lightest: #ddd6fe;
+
+  /* Typography */
+  --ifm-font-family-base: 'Manrope', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ifm-heading-font-family: 'Sora', var(--ifm-font-family-base);
+  --ifm-font-family-monospace: ui-monospace, 'SFMono-Regular', 'JetBrains Mono',
+    'Menlo', monospace;
+  --ifm-heading-font-weight: 600;
+  --ifm-font-weight-semibold: 600;
+
+  /* Semantic status colors from the design system */
+  --ifm-color-success: #34d399;
+  --ifm-color-warning: #fbbf24;
+  --ifm-color-danger: #f87171;
+
+  --ifm-code-font-size: 90%;
+  --ifm-navbar-item-padding-horizontal: 0.85rem;
+  --docusaurus-highlighted-code-line-bg: rgba(139, 92, 246, 0.12);
+
+  /* Project-specific tokens used by the landing page */
+  --rc-bg: #0f0f12;
+  --rc-bg-deep: #09090b;
+  --rc-surface: #16161b;
+  --rc-surface-raised: #1c1c22;
+  --rc-border: #232329;
+  --rc-border-strong: #2a2a32;
+  --rc-text: #ececf0;
+  --rc-text-secondary: #bcbcc6;
+  --rc-text-muted: #9a9aa5;
+  --rc-text-dim: #6a6a74;
+  --rc-accent: #8b5cf6;
+  --rc-accent-soft: #c4b5fd;
+  --rc-violet-tint: #2c2640;
+  --rc-success: #34d399;
+  --rc-warning: #fbbf24;
+  --rc-danger: #f87171;
+}
+
+/* Dark mode is the primary experience — mirrors the webapp. */
+[data-theme='dark'] {
+  --ifm-color-primary: #a78bfa;
+  --ifm-color-primary-dark: #8b5cf6;
+  --ifm-color-primary-darker: #7c3aed;
+  --ifm-color-primary-darkest: #6d28d9;
+  --ifm-color-primary-light: #c4b5fd;
+  --ifm-color-primary-lighter: #ddd6fe;
+  --ifm-color-primary-lightest: #ede9fe;
+
+  --ifm-background-color: var(--rc-bg);
+  --ifm-background-surface-color: var(--rc-surface);
+  --ifm-navbar-background-color: rgba(15, 15, 18, 0.85);
+  --ifm-footer-background-color: var(--rc-bg-deep);
+  --ifm-color-content: var(--rc-text);
+  --ifm-color-content-secondary: var(--rc-text-muted);
+  --ifm-heading-color: var(--rc-text);
+  --ifm-toc-border-color: var(--rc-border);
+  --ifm-hr-border-color: var(--rc-border);
+  --ifm-table-border-color: var(--rc-border);
+  --ifm-blockquote-color: var(--rc-text-secondary);
+  --docusaurus-highlighted-code-line-bg: rgba(167, 139, 250, 0.16);
+}
+
+/* Glassy sticky navbar over the near-black background. */
+.navbar {
+  backdrop-filter: saturate(140%) blur(10px);
+  border-bottom: 1px solid var(--rc-border);
+}
+
+[data-theme='dark'] .card,
+[data-theme='dark'] .menu {
+  background-color: var(--rc-surface);
+}
+
+/* GitHub icon in the navbar. */
+.navbar__item svg[class*='iconExternalLink'] {
+  opacity: 0.6;
+}
