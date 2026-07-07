@@ -16,7 +16,7 @@ from calibration_service.session.store import load_session
 
 
 def _client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(SessionManager(tmp_path)))
+    return TestClient(create_app(SessionManager(tmp_path, "default")))
 
 
 def test_get_session_returns_fresh_session(tmp_path: Path) -> None:
@@ -27,6 +27,52 @@ def test_get_session_returns_fresh_session(tmp_path: Path) -> None:
     assert body["step"] == "intrinsic_board"
     assert body["mode"] == "new-realtime"
     assert body["cameras"] == []
+
+
+def test_no_active_session_returns_404_and_locks_mutations(tmp_path: Path) -> None:
+    # Fresh service: no active session (ADR-0028). GET /session -> 404 (webapp maps
+    # it to a null session, rail locked); a session-scoped mutation -> uniform 409.
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    assert client.get("/session").status_code == 404
+    assert client.post("/cameras/config", json={"prefix": "cam", "cameras": []}).status_code == 409
+
+
+def test_create_session_activates_a_fresh_folder(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    response = client.post("/sessions", json={"session_id": "manip-01"})
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["session_id"] == "manip-01"
+    assert body["step"] == "intrinsic_board"  # from scratch
+    assert body["cameras"] == []
+    # Now active: GET /session returns it, and it is persisted on disk.
+    assert client.get("/session").json()["session_id"] == "manip-01"
+    assert load_session(tmp_path, "manip-01").session_id == "manip-01"
+
+
+def test_create_session_rejects_duplicate_and_invalid_names(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    assert client.post("/sessions", json={"session_id": "dup"}).status_code == 200
+    assert client.post("/sessions", json={"session_id": "dup"}).status_code == 409
+    for bad in ["", ".", "..", "a/b", "../evil", "space bad", ".hidden"]:
+        assert client.post("/sessions", json={"session_id": bad}).status_code == 422, bad
+
+
+def test_open_session_switches_the_active_one(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    client.post("/sessions", json={"session_id": "alpha"})
+    client.post("/sessions", json={"session_id": "beta"})  # active becomes beta
+    assert client.get("/session").json()["session_id"] == "beta"
+
+    assert client.post("/sessions/open", json={"session_id": "alpha"}).status_code == 200
+    assert client.get("/session").json()["session_id"] == "alpha"
+    assert client.post("/sessions/open", json={"session_id": "ghost"}).status_code == 404
+
+
+def test_sessions_location_returns_the_root(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    assert client.get("/sessions/location").json() == {"root": tmp_path.name}
 
 
 def test_detect_returns_cameras_with_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -127,7 +173,7 @@ def test_reorder_cameras_persists_and_keeps_calibrations(tmp_path: Path) -> None
     )
     # Give cam-a a calibration to prove it SURVIVES the reorder.
     matrix = [[800.0, 0.0, 640.0], [0.0, 800.0, 360.0], [0.0, 0.0, 1.0]]
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     manager.current().cameras[0].matrix = matrix
     reordered = manager.reorder_cameras(
         ["/dev/v4l/by-path/cam-b", "/dev/v4l/by-path/cam-a"]
@@ -160,7 +206,7 @@ def test_validate_intrinsic_guards_then_advances_to_extrinsic(tmp_path: Path) ->
     # the persisted wizard step to 'extrinsic_capture' (the webapp rail follows it).
     from calibration_service.models.session import CameraStatus
 
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     client.post(
         "/cameras/config",
@@ -203,7 +249,7 @@ def test_validate_intrinsic_guards_then_advances_to_extrinsic(tmp_path: Path) ->
 def test_validate_extrinsic_guards_then_advances_to_export(tmp_path: Path) -> None:
     # Operator sign-off: refused while any camera lacks a pose, then advances
     # the persisted wizard step to 'export' (the webapp rail follows it).
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     client.post(
         "/cameras/config",
@@ -309,7 +355,7 @@ def test_preview_routes_without_recording(tmp_path: Path) -> None:
 def test_preview_serves_the_transcoded_mp4(tmp_path: Path) -> None:
     # The mp4 next to the recording is served as video/mp4 (job mechanics are
     # covered in test_preview.py; here only the HTTP surface).
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     source = manager.intrinsic_video_path("cam_0")
     source.parent.mkdir(parents=True, exist_ok=True)
@@ -321,7 +367,7 @@ def test_preview_serves_the_transcoded_mp4(tmp_path: Path) -> None:
 
 
 def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
@@ -343,7 +389,7 @@ def test_compute_persists_metrics_for_reload(
     from calibration_service.calibration.intrinsic import IntrinsicResult
     from calibration_service.transport import api as api_module
 
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
@@ -392,7 +438,7 @@ def test_compute_persists_metrics_for_reload(
 
 
 def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     assert client.get("/intrinsic/cam_0/metrics").status_code == 404  # nothing computed
 
@@ -411,7 +457,7 @@ def _configured_client(
     tmp_path: Path, *, intrinsic_done: bool
 ) -> tuple[TestClient, SessionManager]:
     """App with 2 configured cameras (+ board), optionally intrinsically calibrated."""
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})

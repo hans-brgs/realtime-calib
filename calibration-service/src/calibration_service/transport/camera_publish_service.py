@@ -324,7 +324,9 @@ class CameraPublishService:
         return None
 
     def _build_detector(self, *, extrinsic: bool = False) -> BoardDetector | None:
-        session = self._sessions.current()
+        session = self._sessions.current_or_none()
+        if session is None:
+            return None
         board = session.effective_extrinsic_board() if extrinsic else session.intrinsic_board
         return BoardDetector(board) if board is not None else None
 
@@ -385,7 +387,9 @@ class CameraPublishService:
             await asyncio.sleep(_RECONNECT_BACKOFF_S)
 
     def _resolve_targets(self) -> list[_PublishTarget]:
-        session = self._sessions.current()
+        session = self._sessions.current_or_none()
+        if session is None:
+            return []  # no active session (dashboard): idle, don't touch V4L2 (ADR-0028)
         if session.cameras:
             return [
                 _PublishTarget(c.name, c.index, c.device_node, c.width, c.height, c.fps)

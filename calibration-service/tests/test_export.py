@@ -156,7 +156,7 @@ def test_units_scale_platform_world_lengths() -> None:
 
 
 def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
@@ -196,7 +196,7 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
 def test_export_preview_renders_without_writing(tmp_path: Path) -> None:
     # Dry-run (ADR-0026): the preview returns the exact bytes each target would
     # write, but touches no disk. Content must match what /export then writes.
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
@@ -218,19 +218,19 @@ def test_export_preview_renders_without_writing(tmp_path: Path) -> None:
 def test_export_config_persists_across_reload(tmp_path: Path) -> None:
     # The export config (units + targets) is session state (ADR-0026): restored
     # on reopen, exposed on the session payload.
-    manager = SessionManager(tmp_path)
+    manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     client.post("/export/config", json={"formats": ["caliscope", "blender"], "units": "m"})
     assert client.get("/session").json()["export_targets"] == ["caliscope", "blender"]
 
-    reopened = SessionManager(tmp_path)
+    reopened = SessionManager(tmp_path, "default")
     session = reopened.current()
     assert session.export_units == "m"
     assert session.export_targets == ["caliscope", "blender"]
 
 
 def test_export_conventions_catalog_route(tmp_path: Path) -> None:
-    client = TestClient(create_app(SessionManager(tmp_path)))
+    client = TestClient(create_app(SessionManager(tmp_path, "default")))
     catalog = client.get("/export/conventions").json()["targets"]
     ids = [t["id"] for t in catalog]
     assert ids == ["caliscope", "threejs", "blender", "unity", "unreal"]

@@ -12,14 +12,15 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 import cv2
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
 from calibration_service import __version__
 from calibration_service.config import Config, LiveKitConfig
 from calibration_service.logging_setup import setup_logging
 from calibration_service.recording import PreviewJobs
-from calibration_service.session.manager import SessionManager
+from calibration_service.session.manager import NoActiveSessionError, SessionManager
 from calibration_service.transport.api import router as api_router
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -71,6 +72,13 @@ def create_app(session_manager: SessionManager | None = None) -> FastAPI:
     # lifespan — always find it; jobs only spawn from within the event loop.
     app.state.preview_jobs = PreviewJobs()
     app.include_router(api_router)
+
+    # Session-scoped routes call manager.current(); with no active session that
+    # raises NoActiveSessionError -> a uniform 409 (ADR-0028) instead of a 500.
+    async def _no_active_session(_request: Request, _exc: Exception) -> JSONResponse:
+        return JSONResponse(status_code=409, content={"detail": "no active session"})
+
+    app.add_exception_handler(NoActiveSessionError, _no_active_session)
 
     @app.get("/health", response_model=HealthResponse)
     async def health() -> HealthResponse:

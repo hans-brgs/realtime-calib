@@ -15,7 +15,7 @@ from calibration_service.transport.camera_publish_service import (
 
 
 def _service(tmp_path: Path) -> CameraPublishService:
-    return CameraPublishService(LiveKitConfig(), SessionManager(tmp_path))
+    return CameraPublishService(LiveKitConfig(), SessionManager(tmp_path, "default"))
 
 
 class _FakePublisher:

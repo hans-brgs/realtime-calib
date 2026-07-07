@@ -273,8 +273,13 @@ def get_publish_service(request: Request) -> CameraPublishService | None:
 
 @router.get("/session", response_model=SessionOut)
 async def get_session(request: Request) -> SessionOut:
+    """The active session, or 404 when none is active (ADR-0028) — the webapp maps
+    that to a null session (dashboard, rail locked) rather than an error."""
     manager = get_manager(request)
-    return _session_out(manager.current(), manager)
+    session = manager.current_or_none()
+    if session is None:
+        raise HTTPException(status_code=404, detail="no active session")
+    return _session_out(session, manager)
 
 
 @router.get("/sessions", response_model=list[SessionSummaryOut])
@@ -289,6 +294,55 @@ async def list_sessions_route(request: Request) -> list[SessionSummaryOut]:
         )
         for s in get_manager(request).summaries()
     ]
+
+
+@router.get("/sessions/location")
+async def sessions_location(request: Request) -> dict[str, str]:
+    """Host-relative sessions root, so the create popup can show the target path."""
+    return {"root": get_manager(request).sessions_root_label()}
+
+
+class SessionRef(BaseModel):
+    """A session folder name (used as the session id)."""
+
+    session_id: str
+
+
+@router.post("/sessions", response_model=SessionOut)
+async def create_session_route(request: Request, body: SessionRef) -> SessionOut:
+    """Create a fresh session with a unique folder name and make it active (ADR-0028).
+
+    409 if the name already exists, 422 if it is not a valid folder name. The new
+    session is empty (step ``intrinsic_board``); ``refresh()`` re-syncs the live
+    cameras (the M4-hardened teardown) onto it.
+    """
+    manager = get_manager(request)
+    try:
+        session = manager.create(body.session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileExistsError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    service = get_publish_service(request)
+    if service is not None:
+        await service.refresh()
+    return _session_out(session, manager)
+
+
+@router.post("/sessions/open", response_model=SessionOut)
+async def open_session_route(request: Request, body: SessionRef) -> SessionOut:
+    """Make an existing session the active one (ADR-0028). 404 if it does not exist."""
+    manager = get_manager(request)
+    try:
+        session = manager.open(body.session_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    except FileNotFoundError as exc:
+        raise HTTPException(status_code=404, detail=str(exc)) from exc
+    service = get_publish_service(request)
+    if service is not None:
+        await service.refresh()
+    return _session_out(session, manager)
 
 
 @router.post("/cameras/detect", response_model=list[DetectedCameraOut])
