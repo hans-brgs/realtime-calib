@@ -405,6 +405,9 @@ async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
     service = get_publish_service(request)
     if service is None:
         raise HTTPException(status_code=503, detail="capture service unavailable")
+    # Surface "no active session" as the uniform 409 (ADR-0028) BEFORE the broad
+    # except below, which would otherwise mask NoActiveSessionError as a 422.
+    get_manager(request).current()
     try:
         await service.start_intrinsic_recording(camera)
     except (ValueError, RuntimeError) as exc:

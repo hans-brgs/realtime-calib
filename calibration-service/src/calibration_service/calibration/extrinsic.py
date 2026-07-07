@@ -529,7 +529,7 @@ def bundle_adjust(
         residuals, np.asarray(first.x, np.float64), loss="huber", f_scale=_BA_HUBER_SCALE, **common
     )
     solution = np.asarray(result.x, np.float64)
-    logger.info("bundle adjustment: cost %.6f -> %.6f", float(result.cost), float(result.cost))
+    logger.info("bundle adjustment: cost %.6f -> %.6f", float(first.cost), float(result.cost))
 
     solved: dict[str, NDArray[np.float64]] = {anchor: poses[anchor].copy()}
     for name, slot in free_slot.items():

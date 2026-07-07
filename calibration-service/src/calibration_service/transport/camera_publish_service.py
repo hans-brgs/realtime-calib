@@ -416,9 +416,17 @@ class CameraPublishService:
             return
         targets = await loop.run_in_executor(executor, self._resolve_targets)
         if not targets:
-            logger.warning("no camera to publish")
+            # No active session (dashboard) is the normal idle state, not a fault —
+            # don't spam a warning every reconnect tick (ADR-0028).
+            if self._sessions.current_or_none() is None:
+                logger.debug("no active session; publisher idle")
+            else:
+                logger.warning("no camera to publish")
             return
-        by_name = {t.name: t for t in targets}
+        # Built as cameras are actually published below: a camera skipped for missing
+        # dimensions must not enter the desired/open set (its track was never
+        # published, so opening + pushing it would crash-loop the session).
+        by_name: dict[str, _PublishTarget] = {}
 
         token = mint_publish_token(
             self._config, identity=_PARTICIPANT_IDENTITY, room=self._config.room_name

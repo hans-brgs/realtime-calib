@@ -244,7 +244,11 @@ def platform_variant(
                 "distortions": camera.distortions,
                 "fov_deg": round(fov_deg, 3),
             },
-            "error": camera.extrinsic_error or camera.calibration_error,
+            "error": (
+                camera.extrinsic_error
+                if camera.extrinsic_error is not None
+                else camera.calibration_error
+            ),
         }
         if convention.handedness == "right":
             entry["view"] = {
