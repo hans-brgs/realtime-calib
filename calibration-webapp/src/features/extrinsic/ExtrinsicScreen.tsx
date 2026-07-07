@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
   IconPlayerRecordFilled,
@@ -25,7 +26,11 @@ import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
-import { computeExtrinsicThunk, selectSession } from '@/features/session/sessionSlice';
+import {
+  computeExtrinsicThunk,
+  selectSession,
+  validateExtrinsicThunk,
+} from '@/features/session/sessionSlice';
 import {
   type CoverageMetrics,
   type Covisibility,
@@ -425,6 +430,17 @@ function ExtrinsicInner() {
     }
   };
 
+  // Sign-off: the server advances the step to 'export' and the wizard rail
+  // follows the persisted step, so no explicit navigation is needed here.
+  const validateAndExport = async () => {
+    setMessage(null);
+    try {
+      await dispatch(validateExtrinsicThunk()).unwrap();
+    } catch (err) {
+      setMessage(err instanceof Error ? err.message : 'validate failed');
+    }
+  };
+
   const confirmReRecord = () => {
     setOverwriteOpen(false);
     setRecording(false);
@@ -572,15 +588,27 @@ function ExtrinsicInner() {
 
           <Box mt="auto" pt="md">
             {step === 'result' ? (
-              <Button
-                fullWidth
-                variant="light"
-                color="gray"
-                leftSection={<IconPlayerRecordFilled size={15} />}
-                onClick={reRecord}
-              >
-                Re-record sweep
-              </Button>
+              <>
+                {/* Sign-off: the persisted step moves to 'export' and the wizard
+                    rail follows — this button IS the navigation to Export. */}
+                <Button
+                  fullWidth
+                  mb="sm"
+                  leftSection={<IconCheck size={15} />}
+                  onClick={() => void validateAndExport()}
+                >
+                  Validate → Export
+                </Button>
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="gray"
+                  leftSection={<IconPlayerRecordFilled size={15} />}
+                  onClick={reRecord}
+                >
+                  Re-record sweep
+                </Button>
+              </>
             ) : scrubbing ? (
               <Button
                 fullWidth

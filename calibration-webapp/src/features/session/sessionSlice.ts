@@ -11,6 +11,7 @@ import {
   fetchSession,
   fetchSessions,
   reorderCameras,
+  validateExtrinsic,
 } from '@/transport/httpClient';
 import type {
   BoardConfigRequest,
@@ -52,6 +53,11 @@ export const reorderCamerasThunk = createAsyncThunk(
   (devicePaths: string[]) => reorderCameras(devicePaths),
 );
 
+// Extrinsic sign-off: the persisted step moves to 'export' and the wizard follows.
+export const validateExtrinsicThunk = createAsyncThunk('session/validateExtrinsic', () =>
+  validateExtrinsic(),
+);
+
 export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request: BoardConfigRequest) =>
   defineBoard(request),
 );
@@ -88,6 +94,9 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(reorderCamerasThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(validateExtrinsicThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(applyBoardConfig.fulfilled, (state, action) => {

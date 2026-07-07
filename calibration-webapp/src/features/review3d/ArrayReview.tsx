@@ -149,6 +149,17 @@ function Frustum({ pose, size, color, m, anchor }: {
   );
 }
 
+// Tiny billboard letter at an axis tip — the RGB code alone was not readable.
+function AxisLabel({ position, text, color }: { position: Vec3; text: string; color: string }) {
+  return (
+    <Html position={position} center style={{ pointerEvents: 'none' }}>
+      <span style={{ color, fontSize: 11, fontWeight: 700, textShadow: '0 0 4px #000' }}>
+        {text}
+      </span>
+    </Html>
+  );
+}
+
 // Board outline + local xyz triad, derived from the quad's corner order (spec:
 // c0->c1 = board +x, c0->c3 = board +y, z = x cross y). A single-ArUco marker's
 // frame sits at its CENTER (cv2 convention) — anchor the triad on the centroid;
@@ -175,6 +186,9 @@ function BoardWithTriad({ quad, m, centered }: {
       <Line points={[origin, add(origin, scale(x, len))]} color="#ef4444" lineWidth={2.4} />
       <Line points={[origin, add(origin, scale(y, len))]} color="#4ade80" lineWidth={2.4} />
       <Line points={[origin, add(origin, scale(z, len))]} color="#60a5fa" lineWidth={2.4} />
+      <AxisLabel position={add(origin, scale(x, len * 1.35))} text="x" color="#ef4444" />
+      <AxisLabel position={add(origin, scale(y, len * 1.35))} text="y" color="#4ade80" />
+      <AxisLabel position={add(origin, scale(z, len * 1.35))} text="z" color="#60a5fa" />
     </>
   );
 }
@@ -186,6 +200,9 @@ function WorldAxes({ size }: { size: number }) {
       <Line points={[o, [size, 0, 0]]} color="#ef4444" lineWidth={1.2} />
       <Line points={[o, [0, size, 0]]} color="#4ade80" lineWidth={1.2} />
       <Line points={[o, [0, 0, size]]} color="#60a5fa" lineWidth={1.2} />
+      <AxisLabel position={[size * 1.14, 0, 0]} text="x" color="#ef4444" />
+      <AxisLabel position={[0, size * 1.14, 0]} text="y" color="#4ade80" />
+      <AxisLabel position={[0, 0, size * 1.14]} text="z" color="#60a5fa" />
     </>
   );
 }

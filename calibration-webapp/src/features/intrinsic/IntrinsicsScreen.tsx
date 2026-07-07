@@ -353,7 +353,9 @@ function IntrinsicsInner() {
   useEffect(() => {
     if (!active) return;
     setRecording(false);
-    setStep(camera?.status === 'intrinsic_done' ? 'results' : 'capture');
+    // Land on Results whenever intrinsics EXIST (matrix present) — the status
+    // moves on to 'extrinsic_done' later, but the calibration is not lost.
+    setStep(camera?.matrix != null ? 'results' : 'capture');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
@@ -624,6 +626,11 @@ function IntrinsicsInner() {
               <>
                 <Button fullWidth onClick={nextCamera} disabled={cameras.findIndex((c) => c.name === active) >= cameras.length - 1}>
                   Validate → next camera
+                </Button>
+                {/* Back to Prepare on the SAME recording: retune trim/stride/cap,
+                    then Compute again (the preview mp4 is already there). */}
+                <Button fullWidth variant="light" mt="sm" onClick={() => void waitForPreview()}>
+                  Recompute (tune again)
                 </Button>
                 <Button
                   fullWidth

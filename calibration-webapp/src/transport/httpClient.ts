@@ -245,6 +245,11 @@ export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPay
 export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/minimize');
 
+// Operator sign-off on the solved array: advances the wizard step to Export —
+// the rail follows the persisted step, so this transition IS the navigation.
+export const validateExtrinsic = (): Promise<Session> =>
+  postJson<Session>('/extrinsic/validate');
+
 // Calibration export (spec calibration-export, ADR-0026). Targets are all optional
 // ('caliscope' TOML + platform JSONs); the backend owns the catalog and preview.
 export interface ExportedFile {
