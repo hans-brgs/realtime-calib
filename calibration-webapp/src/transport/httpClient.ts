@@ -234,9 +234,6 @@ export const fetchExtrinsicGroups = (query?: {
   return getJson<{ total: number; groups: ExtrinsicGroup[] }>(`/extrinsic/groups${suffix}`);
 };
 
-export const extrinsicFrameUrl = (camera: string, index: number): string =>
-  `${API_URL}/extrinsic/${camera}/frame/${index}`;
-
 // Persisted array solve (poses + errors + 3D review scene data), for the Result
 // view + reload. Points carry their synchronized-group index (scrub); board_quads
 // give each group's board outline in world coords (corner order c0..c3 lets the

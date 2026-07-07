@@ -1,5 +1,5 @@
 import { LiveKitRoom } from '@livekit/components-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch } from '@/app/hooks';
 import {
@@ -28,6 +28,11 @@ export function RoomProvider({ children }: { children: ReactNode }) {
   const dispatch = useAppDispatch();
   const [connection, setConnection] = useState<RoomConnection | null>(null);
   const [attempt, setAttempt] = useState(0);
+  // Tracked so a flapping connection can't stack retry timers and a pending one
+  // is cleared on unmount (it would otherwise setState on a dead component).
+  const reconnectTimer = useRef<number | undefined>(undefined);
+
+  useEffect(() => () => window.clearTimeout(reconnectTimer.current), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -65,7 +70,11 @@ export function RoomProvider({ children }: { children: ReactNode }) {
         // Unexpected drop: rejoin with a FRESH token (the old one may be expired).
         dispatch(connectionLost());
         setConnection(null);
-        window.setTimeout(() => setAttempt((current) => current + 1), RETRY_DELAY_MS);
+        window.clearTimeout(reconnectTimer.current);
+        reconnectTimer.current = window.setTimeout(
+          () => setAttempt((current) => current + 1),
+          RETRY_DELAY_MS,
+        );
       }}
     >
       {children}

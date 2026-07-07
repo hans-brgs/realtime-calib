@@ -33,6 +33,7 @@ import { detectCamerasThunk, selectDetectedCameras, selectDetectStatus } from '@
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
 import {
   applyCameraConfig,
+  rehydrateSession,
   reorderCamerasThunk,
   selectSession,
 } from '@/features/session/sessionSlice';
@@ -249,7 +250,11 @@ export function CameraSetupScreen() {
       window.clearTimeout(reorderTimer.current);
       reorderTimer.current = window.setTimeout(() => {
         pendingReorder.current = null;
-        void dispatch(reorderCamerasThunk(next));
+        // On rejection (e.g. the device set changed under us) resync local order
+        // from the server rather than leaving the UI diverged.
+        void dispatch(reorderCamerasThunk(next))
+          .unwrap()
+          .catch(() => dispatch(rehydrateSession()));
       }, 400);
     }
   };

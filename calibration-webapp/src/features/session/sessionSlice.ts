@@ -21,7 +21,6 @@ import type {
   ConfigRequest,
   Session,
   SessionSummary,
-  WizardStep,
 } from '@/transport/types';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
@@ -146,5 +145,4 @@ export default sessionSlice.reducer;
 
 export const selectSession = (state: RootState): Session | null => state.session.session;
 export const selectSessionStatus = (state: RootState): Status => state.session.status;
-export const selectStep = (state: RootState): WizardStep => state.session.session?.step ?? 'entry';
 export const selectRecentSessions = (state: RootState): SessionSummary[] => state.session.recent;

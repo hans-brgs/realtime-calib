@@ -17,10 +17,9 @@ import {
 
 // Extrinsic Result 3D review (spec 3d-extrinsic-review): labeled camera frustums at
 // their solved poses + the triangulated corner cloud of the scrubbed group + the
-// board outline with its local xyz triad. The convention selector RE-EXPRESSES the
-// scene in the target platform's axes (display-only basis change — the solved data
-// stays canonical OpenCV per ADR-0002). The selection is SHARED with the Export
-// screen (one source of truth) where it preselects the platform variant.
+// board outline with its local xyz triad. The scene is shown in a fixed physical
+// frame (Y-up right-handed, ADR-0026); the solved data stays canonical OpenCV. The
+// export convention is an output codec chosen later at the Export step, not here.
 type Vec3 = [number, number, number];
 
 const CAMERA_COLOR = '#a78bfa'; // one hue for the whole rig: cameras read by label

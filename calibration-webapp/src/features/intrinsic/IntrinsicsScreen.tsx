@@ -394,9 +394,16 @@ function IntrinsicsInner() {
 
   const startRecording = async () => {
     if (!active) return;
-    await startIntrinsic(active).catch(() => { });
-    setRecording(true);
-    setStep('capture');
+    setComputeError(null);
+    try {
+      await startIntrinsic(active);
+      setRecording(true);
+      setStep('capture');
+    } catch (err) {
+      // Surface the failure instead of showing a REC badge over a recording that
+      // never started (which would later transcode an empty file).
+      setComputeError(err instanceof Error ? err.message : 'could not start recording');
+    }
   };
 
   const enterPrepare = (total: number) => {

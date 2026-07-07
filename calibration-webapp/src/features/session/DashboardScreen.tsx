@@ -6,7 +6,7 @@ import {
   IconVideo,
   type IconProps,
 } from '@tabler/icons-react';
-import { type ComponentType, useEffect } from 'react';
+import { type ComponentType, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { NewSessionModal } from '@/features/session/NewSessionModal';
@@ -160,14 +160,24 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const dispatch = useAppDispatch();
   const recent = useAppSelector(selectRecentSessions);
   const [newOpened, { open: openNew, close: closeNew }] = useDisclosure(false);
+  const [openError, setOpenError] = useState<string | null>(null);
 
   useEffect(() => {
     dispatch(fetchRecentSessions());
   }, [dispatch]);
 
   // Switch the active session server-side (ADR-0028); the wizard rail then follows
-  // the persisted step and navigates to where this session was left off.
-  const openSession = (session: SessionSummary) => void dispatch(openSessionThunk(session.session_id));
+  // the persisted step and navigates to where this session was left off. On failure
+  // (e.g. the folder was deleted on disk) surface it and refresh the list.
+  const openSession = (session: SessionSummary) => {
+    setOpenError(null);
+    dispatch(openSessionThunk(session.session_id))
+      .unwrap()
+      .catch((err: unknown) => {
+        setOpenError(err instanceof Error ? err.message : 'could not open the session');
+        void dispatch(fetchRecentSessions());
+      });
+  };
 
   const cards: EntryCard[] = [
     {
@@ -207,6 +217,11 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
       <Group justify="space-between" align="baseline" mt={34}>
         <Title order={3}>Recent sessions</Title>
+        {openError && (
+          <Text fz="0.78rem" c="var(--rc-error)">
+            {openError}
+          </Text>
+        )}
       </Group>
       <Box
         mt="sm"

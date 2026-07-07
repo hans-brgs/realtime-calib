@@ -96,7 +96,7 @@ export type ViewId = StageId | 'session';
 // derived from a persisted step — it is a volatile sub-flow of the session entry.
 export type NavTarget = ViewId | 'load';
 
-export function stepToView(step: WizardStep): ViewId {
+function stepToView(step: WizardStep): ViewId {
   if (step === 'entry') {
     return 'session';
   }
