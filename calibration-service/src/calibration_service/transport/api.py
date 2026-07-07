@@ -17,6 +17,7 @@ from typing import Literal
 import numpy as np
 import rtoml
 from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
@@ -47,7 +48,12 @@ from calibration_service.models.session import (
     CameraConfig,
     CameraStatus,
 )
-from calibration_service.recording import frame_count, read_frame_jpeg
+from calibration_service.recording import (
+    PreviewJobs,
+    PreviewState,
+    PreviewStatus,
+    preview_path,
+)
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -360,26 +366,39 @@ async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
     return {"camera": camera, "frames": frames}
 
 
-@router.get("/intrinsic/{camera}/frames")
-async def intrinsic_frame_count(request: Request, camera: str) -> dict[str, int]:
-    """Total frame count of the recorded sweep, for the Prepare scrubber (ADR-0022)."""
-    path = get_manager(request).intrinsic_video_path(camera)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
-    total = await asyncio.get_running_loop().run_in_executor(None, frame_count, path)
-    return {"total": total}
+def get_preview_jobs(request: Request) -> PreviewJobs:
+    jobs = request.app.state.preview_jobs
+    assert isinstance(jobs, PreviewJobs)
+    return jobs
 
 
-@router.get("/intrinsic/{camera}/frame/{index}")
-async def intrinsic_frame(request: Request, camera: str, index: int) -> Response:
-    """Serve frame ``index`` of the recorded sweep as JPEG (ADR-0022, frame-server)."""
-    path = get_manager(request).intrinsic_video_path(camera)
+def _preview_status_out(status: PreviewStatus) -> dict[str, object]:
+    return {"state": status.state.value, "frames": status.frames, "error": status.error}
+
+
+@router.get("/intrinsic/{camera}/preview")
+async def intrinsic_preview(request: Request, camera: str) -> FileResponse:
+    """The CFR-retimed H.264 preview of the recorded sweep (ADR-0027)."""
+    path = preview_path(get_manager(request).intrinsic_video_path(camera))
     if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
-    jpeg = await asyncio.get_running_loop().run_in_executor(None, read_frame_jpeg, path, index)
-    if jpeg is None:
-        raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
-    return Response(content=jpeg, media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail=f"no preview for {camera}")
+    return FileResponse(path, media_type="video/mp4")
+
+
+@router.get("/intrinsic/{camera}/preview/status")
+async def intrinsic_preview_status(request: Request, camera: str) -> dict[str, object]:
+    """Transcode state (auto-enqueues a missing preview when the source exists)."""
+    source = get_manager(request).intrinsic_video_path(camera)
+    return _preview_status_out(get_preview_jobs(request).status(source))
+
+
+@router.post("/intrinsic/{camera}/preview/transcode")
+async def intrinsic_preview_retry(request: Request, camera: str) -> dict[str, object]:
+    """Explicitly relaunch a failed transcode (webapp Retry button)."""
+    source = get_manager(request).intrinsic_video_path(camera)
+    jobs = get_preview_jobs(request)
+    jobs.retry(source)
+    return _preview_status_out(jobs.status(source))
 
 
 class ComputeRequest(BaseModel):
@@ -737,16 +756,54 @@ async def extrinsic_groups(
     }
 
 
-@router.get("/extrinsic/{camera}/frame/{index}")
-async def extrinsic_frame(request: Request, camera: str, index: int) -> Response:
-    """Serve frame ``index`` of a camera's extrinsic recording as JPEG (scrubber)."""
-    path = get_manager(request).extrinsic_dir() / f"{camera}.mkv"
+@router.get("/extrinsic/preview/status")
+async def extrinsic_preview_status(request: Request) -> dict[str, object]:
+    """Aggregate transcode state over the sweep's cameras (ADR-0027).
+
+    Auto-enqueues missing previews. Aggregate: failed > running > done; missing
+    when no camera has a recording at all.
+    """
+    manager = get_manager(request)
+    jobs = get_preview_jobs(request)
+    directory = manager.extrinsic_dir()
+    cameras: dict[str, dict[str, object]] = {}
+    states: list[PreviewState] = []
+    for camera in manager.current().cameras:
+        status = jobs.status(directory / f"{camera.name}.mkv")
+        cameras[camera.name] = _preview_status_out(status)
+        if status.state is not PreviewState.MISSING:
+            states.append(status.state)
+    if not states:
+        aggregate = PreviewState.MISSING
+    elif PreviewState.FAILED in states:
+        aggregate = PreviewState.FAILED
+    elif PreviewState.RUNNING in states:
+        aggregate = PreviewState.RUNNING
+    else:
+        aggregate = PreviewState.DONE
+    return {"state": aggregate.value, "cameras": cameras}
+
+
+@router.post("/extrinsic/preview/transcode")
+async def extrinsic_preview_retry(request: Request) -> dict[str, object]:
+    """Explicitly relaunch failed sweep transcodes (webapp Retry button)."""
+    manager = get_manager(request)
+    jobs = get_preview_jobs(request)
+    directory = manager.extrinsic_dir()
+    for camera in manager.current().cameras:
+        source = directory / f"{camera.name}.mkv"
+        if jobs.status(source).state is PreviewState.FAILED:
+            jobs.retry(source)
+    return await extrinsic_preview_status(request)
+
+
+@router.get("/extrinsic/{camera}/preview")
+async def extrinsic_preview(request: Request, camera: str) -> FileResponse:
+    """One camera's CFR-retimed H.264 preview of the sweep (ADR-0027)."""
+    path = preview_path(get_manager(request).extrinsic_dir() / f"{camera}.mkv")
     if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"no extrinsic recording for {camera}")
-    jpeg = await asyncio.get_running_loop().run_in_executor(None, read_frame_jpeg, path, index)
-    if jpeg is None:
-        raise HTTPException(status_code=404, detail=f"no frame {index} for {camera}")
-    return Response(content=jpeg, media_type="image/jpeg")
+        raise HTTPException(status_code=404, detail=f"no preview for {camera}")
+    return FileResponse(path, media_type="video/mp4")
 
 
 _EXPORT_TARGET_IDS = {"caliscope", *PLATFORM_FORMATS}

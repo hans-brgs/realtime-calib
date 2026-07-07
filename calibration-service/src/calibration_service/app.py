@@ -18,6 +18,7 @@ from pydantic import BaseModel
 from calibration_service import __version__
 from calibration_service.config import Config, LiveKitConfig
 from calibration_service.logging_setup import setup_logging
+from calibration_service.recording import PreviewJobs
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.api import router as api_router
 from calibration_service.transport.camera_publish_service import CameraPublishService
@@ -49,7 +50,11 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
 
     session_manager = app.state.session_manager
     assert isinstance(session_manager, SessionManager)
-    publish_service = CameraPublishService(LiveKitConfig(), session_manager)
+    preview_jobs = app.state.preview_jobs
+    assert isinstance(preview_jobs, PreviewJobs)
+    publish_service = CameraPublishService(
+        LiveKitConfig(), session_manager, preview_jobs=preview_jobs
+    )
     app.state.publish_service = publish_service
     await publish_service.start()
     try:
@@ -62,6 +67,9 @@ def create_app(session_manager: SessionManager | None = None) -> FastAPI:
     """Build the FastAPI application (factory, so tests get a fresh instance)."""
     app = FastAPI(title=SERVICE_NAME, version=__version__, lifespan=lifespan)
     app.state.session_manager = session_manager or SessionManager(Config().sessions_dir)
+    # Built here (not in lifespan) so route handlers — and tests without a
+    # lifespan — always find it; jobs only spawn from within the event loop.
+    app.state.preview_jobs = PreviewJobs()
     app.include_router(api_router)
 
     @app.get("/health", response_model=HealthResponse)

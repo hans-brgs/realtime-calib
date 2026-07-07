@@ -10,7 +10,7 @@ from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
-from calibration_service.recording import VideoRecorder
+from calibration_service.recording import VideoRecorder, preview_path
 from calibration_service.session.manager import SessionManager
 from calibration_service.session.store import load_session
 
@@ -207,27 +207,28 @@ def test_capture_view_accepts_null(tmp_path: Path) -> None:
     assert response.json() == {"view": None}
 
 
-def test_intrinsic_frame_server_serves_recorded_frames(tmp_path: Path) -> None:
+def test_preview_routes_without_recording(tmp_path: Path) -> None:
+    # ADR-0027: no source recording -> preview 404, status 'missing' (no job).
+    client = _client(tmp_path)
+    assert client.get("/intrinsic/nope/preview").status_code == 404
+    status = client.get("/intrinsic/nope/preview/status")
+    assert status.status_code == 200
+    assert status.json()["state"] == "missing"
+    assert client.get("/extrinsic/cam_0/preview").status_code == 404
+
+
+def test_preview_serves_the_transcoded_mp4(tmp_path: Path) -> None:
+    # The mp4 next to the recording is served as video/mp4 (job mechanics are
+    # covered in test_preview.py; here only the HTTP surface).
     manager = SessionManager(tmp_path)
     client = TestClient(create_app(manager))
-    path = manager.intrinsic_video_path("cam_0")
-    with VideoRecorder(path, 64, 48, fps=30) as rec:
-        for _ in range(3):
-            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
-
-    count = client.get("/intrinsic/cam_0/frames")
-    assert count.status_code == 200
-    assert count.json()["total"] == 3
-
-    frame = client.get("/intrinsic/cam_0/frame/0")
-    assert frame.status_code == 200
-    assert frame.headers["content-type"] == "image/jpeg"
-    assert len(frame.content) > 0
-
-
-def test_intrinsic_frame_server_404_without_recording(tmp_path: Path) -> None:
-    assert _client(tmp_path).get("/intrinsic/nope/frames").status_code == 404
-    assert _client(tmp_path).get("/intrinsic/nope/frame/0").status_code == 404
+    source = manager.intrinsic_video_path("cam_0")
+    source.parent.mkdir(parents=True, exist_ok=True)
+    preview_path(source).write_bytes(b"not-a-real-mp4")
+    served = client.get("/intrinsic/cam_0/preview")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "video/mp4"
+    assert served.content == b"not-a-real-mp4"
 
 
 def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
@@ -470,7 +471,5 @@ def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
     filtered = client.get("/extrinsic/groups", params={"max_spread_ms": 1.0}).json()
     assert filtered["groups"] == []
 
-    served = client.get("/extrinsic/cam_0/frame/1")
-    assert served.status_code == 200
-    assert served.headers["content-type"] == "image/jpeg"
-    assert client.get("/extrinsic/cam_0/frame/99").status_code == 404
+    # The scrubber's frame sources are now the per-camera previews (ADR-0027);
+    # their transcode lifecycle is covered in test_preview.py.

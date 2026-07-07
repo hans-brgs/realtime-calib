@@ -1,4 +1,4 @@
-"""Recording the raw capture video for replay/recalibration (ADR-0019)."""
+"""Recording the raw capture video for replay/recalibration (ADR-0019, ADR-0027)."""
 
 from __future__ import annotations
 
@@ -8,7 +8,14 @@ from calibration_service.recording.extrinsic_recorder import (
     extrinsic_dir,
     read_timestamps,
 )
-from calibration_service.recording.replay import frame_count, read_frame_jpeg
+from calibration_service.recording.preview import (
+    PREVIEW_FPS,
+    PreviewJobs,
+    PreviewState,
+    PreviewStatus,
+    preview_path,
+)
+from calibration_service.recording.replay import frame_count
 from calibration_service.recording.video_writer import (
     RecordingError,
     VideoRecorder,
@@ -16,13 +23,17 @@ from calibration_service.recording.video_writer import (
 )
 
 __all__ = [
+    "PREVIEW_FPS",
     "CameraSpec",
     "ExtrinsicRecorder",
+    "PreviewJobs",
+    "PreviewState",
+    "PreviewStatus",
     "RecordingError",
     "VideoRecorder",
     "extrinsic_dir",
     "frame_count",
     "intrinsic_capture_path",
-    "read_frame_jpeg",
+    "preview_path",
     "read_timestamps",
 ]

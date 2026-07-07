@@ -28,7 +28,12 @@ from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
 from calibration_service.overlays import draw_overlay
-from calibration_service.recording import CameraSpec, ExtrinsicRecorder, VideoRecorder
+from calibration_service.recording import (
+    CameraSpec,
+    ExtrinsicRecorder,
+    PreviewJobs,
+    VideoRecorder,
+)
 from calibration_service.session.manager import SessionManager
 from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer
 from calibration_service.telemetry import (
@@ -149,9 +154,15 @@ class _PublishTarget:
 class CameraPublishService:
     """Publishes all cameras as one participant with N tracks; re-launchable on config change."""
 
-    def __init__(self, config: LiveKitConfig, session_manager: SessionManager) -> None:
+    def __init__(
+        self,
+        config: LiveKitConfig,
+        session_manager: SessionManager,
+        preview_jobs: PreviewJobs | None = None,
+    ) -> None:
         self._config = config
         self._sessions = session_manager
+        self._previews = preview_jobs  # background H.264 preview transcodes (ADR-0027)
         self._task: asyncio.Task[None] | None = None
         self._capture_executor: ThreadPoolExecutor | None = None
         # Serializes start/stop/refresh: concurrent refreshes (two quick drag
@@ -212,6 +223,8 @@ class CameraPublishService:
         if camera is None:
             raise ValueError(f"unknown camera {camera_name!r}")
         path = self._sessions.intrinsic_video_path(camera_name)
+        if self._previews is not None:
+            self._previews.invalidate(path)  # overwrite in progress: stale mp4 out
         # Written frames are throttled to _RECORD_FPS; declare the true cadence so the
         # replayed mkv plays at real time (not Nx fast) whatever the capture fps.
         record_fps = min(camera.fps, _RECORD_FPS) if camera.fps else _RECORD_FPS
@@ -224,13 +237,18 @@ class CameraPublishService:
         """Finalise the current recording (if any) and return the frame count."""
         async with self._recorder_lock:
             recorder = self._recorder
+            camera = self._recording_camera
             self._recorder = None
             self._recording_camera = None
             if recorder is None:
                 return 0
             recorder.close()
             logger.info("stopped recording (%d frames)", recorder.frames)
-            return recorder.frames
+        if self._previews is not None and camera is not None and recorder.frames > 0:
+            # Kick the preview transcode NOW (ADR-0027): usually done before the
+            # operator reaches Prepare; the webapp shows a progress popup meanwhile.
+            self._previews.ensure(self._sessions.intrinsic_video_path(camera))
+        return recorder.frames
 
     async def start_extrinsic_recording(self) -> None:
         """Begin the synchronized multi-camera sweep (ADR-0007, [[calibration-recording]]).
@@ -249,6 +267,9 @@ class CameraPublishService:
             for c in cameras
         ]
         names = [c.name for c in cameras]
+        if self._previews is not None:
+            for name in names:  # overwrite in progress: stale previews out
+                self._previews.invalidate(self._sessions.extrinsic_dir() / f"{name}.mkv")
         # Sync window: detections fire on a shared wall-clock grid, so members of one
         # instant differ by at most ~one camera frame interval (ADR-0007: < 1/fps).
         window = 1.2 * max(1.0 / c.fps if c.fps else 1.0 / _DEFAULT_FPS for c in cameras)
@@ -278,6 +299,10 @@ class CameraPublishService:
             loop = asyncio.get_running_loop()
             counts = await loop.run_in_executor(None, recorder.close)
         self._reconcile.set()
+        if self._previews is not None:
+            for name, frames in counts.items():
+                if frames > 0:  # kick the preview transcodes NOW (ADR-0027)
+                    self._previews.ensure(self._sessions.extrinsic_dir() / f"{name}.mkv")
         return counts
 
     def _feed_extrinsic(
