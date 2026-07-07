@@ -6,10 +6,12 @@ import {
   computeExtrinsic,
   computeIntrinsic,
   configureCameras,
+  createSession,
   defineBoard,
   type ExtrinsicComputeParams,
   fetchSession,
   fetchSessions,
+  openSession,
   reorderCameras,
   validateExtrinsic,
   validateIntrinsic,
@@ -38,10 +40,21 @@ const initialState: SessionState = {
   recent: [],
 };
 
-// Rehydrate from disk-owned state at mount (ADR-0011): no localStorage.
+// Rehydrate from disk-owned state at mount (ADR-0011): no localStorage. Resolves to
+// null when no session is active (ADR-0028) — the shell shows the dashboard.
 export const rehydrateSession = createAsyncThunk('session/rehydrate', () => fetchSession());
 
 export const fetchRecentSessions = createAsyncThunk('session/recent', () => fetchSessions());
+
+// Create a new session (unique folder name) and make it active (ADR-0028).
+export const createSessionThunk = createAsyncThunk('session/create', (sessionId: string) =>
+  createSession(sessionId),
+);
+
+// Switch the active session to an existing one (Recent sessions / resume).
+export const openSessionThunk = createAsyncThunk('session/open', (sessionId: string) =>
+  openSession(sessionId),
+);
 
 export const applyCameraConfig = createAsyncThunk('session/applyConfig', (request: ConfigRequest) =>
   configureCameras(request),
@@ -95,6 +108,12 @@ const sessionSlice = createSlice({
       .addCase(rehydrateSession.rejected, (state, action) => {
         state.status = 'error';
         state.error = action.error.message ?? 'failed';
+      })
+      .addCase(createSessionThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(openSessionThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
       })
       .addCase(applyCameraConfig.fulfilled, (state, action) => {
         state.session = action.payload;

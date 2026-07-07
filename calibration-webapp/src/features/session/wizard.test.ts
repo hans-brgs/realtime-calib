@@ -62,11 +62,9 @@ describe('sessionSlice', () => {
 });
 
 describe('selectStages (completion-driven)', () => {
-  it('no session: boards is todo first, the rest locked (board-first)', () => {
+  it('no active session: every stage locked (ADR-0028, rail disabled)', () => {
     const stages = selectStages(stateWith(null));
-    expect(stages[0]).toMatchObject({ id: 'boards', status: 'todo' });
-    expect(stages[1]).toMatchObject({ id: 'cameras', status: 'locked' });
-    expect(stages[2].status).toBe('locked');
+    expect(stages.every((s) => s.status === 'locked')).toBe(true);
   });
 
   it('intrinsic board defined at camera_setup: boards complete, cameras active, intrinsic todo', () => {

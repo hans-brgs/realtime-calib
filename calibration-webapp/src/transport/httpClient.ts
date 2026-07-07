@@ -54,10 +54,34 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
-export const fetchSession = (): Promise<Session> => getJson<Session>('/session');
+// null = no active session (ADR-0028): the service returns 404, the webapp lands
+// on the dashboard with the wizard rail locked rather than treating it as an error.
+export const fetchSession = async (): Promise<Session | null> => {
+  const response = await fetch(`${API_URL}/session`);
+  if (response.status === 404) {
+    return null;
+  }
+  if (!response.ok) {
+    throw await errorFrom(response, `GET /session failed: ${response.status}`);
+  }
+  return (await response.json()) as Session;
+};
 
 export const fetchSessions = (): Promise<SessionSummary[]> =>
   getJson<SessionSummary[]>('/sessions');
+
+// Create a fresh session (unique folder name = id) and make it active. Its wizard
+// step is intrinsic_board, so the rail auto-navigates to Target Config.
+export const createSession = (sessionId: string): Promise<Session> =>
+  postJson<Session>('/sessions', { session_id: sessionId });
+
+// Switch the active session to an existing one (Recent sessions / resume).
+export const openSession = (sessionId: string): Promise<Session> =>
+  postJson<Session>('/sessions/open', { session_id: sessionId });
+
+// Host-relative sessions root (e.g. "sessions"), shown live in the create popup.
+export const fetchSessionsLocation = (): Promise<string> =>
+  getJson<{ root: string }>('/sessions/location').then((r) => r.root);
 
 export const detectCameras = (): Promise<DetectedCamera[]> =>
   postJson<DetectedCamera[]>('/cameras/detect');

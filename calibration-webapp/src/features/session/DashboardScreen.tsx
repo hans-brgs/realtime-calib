@@ -1,4 +1,5 @@
 import { Box, Group, SimpleGrid, Text, Title, UnstyledButton } from '@mantine/core';
+import { useDisclosure } from '@mantine/hooks';
 import {
   IconChevronRight,
   IconFolder,
@@ -8,8 +9,13 @@ import {
 import { type ComponentType, useEffect } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
-import { fetchRecentSessions, selectRecentSessions } from '@/features/session/sessionSlice';
-import { stepToView, type NavTarget } from '@/features/session/selectors';
+import { NewSessionModal } from '@/features/session/NewSessionModal';
+import {
+  fetchRecentSessions,
+  openSessionThunk,
+  selectRecentSessions,
+} from '@/features/session/sessionSlice';
+import type { NavTarget } from '@/features/session/selectors';
 import type { SessionSummary } from '@/transport/types';
 
 interface EntryCard {
@@ -171,12 +177,15 @@ interface DashboardScreenProps {
 export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
   const dispatch = useAppDispatch();
   const recent = useAppSelector(selectRecentSessions);
+  const [newOpened, { open: openNew, close: closeNew }] = useDisclosure(false);
 
   useEffect(() => {
     dispatch(fetchRecentSessions());
   }, [dispatch]);
 
-  const openSession = (session: SessionSummary) => onNavigate(stepToView(session.step));
+  // Switch the active session server-side (ADR-0028); the wizard rail then follows
+  // the persisted step and navigates to where this session was left off.
+  const openSession = (session: SessionSummary) => void dispatch(openSessionThunk(session.session_id));
 
   const cards: EntryCard[] = [
     {
@@ -186,7 +195,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       desc: 'Run the full wizard from scratch. Each intrinsic sweep is recorded to the session folder, so it can be replayed and recomputed later.',
       cta: 'START WIZARD',
       accent: true,
-      onClick: () => onNavigate('boards'),
+      onClick: openNew,
     },
     {
       icon: IconFolder,
@@ -201,6 +210,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
 
   return (
     <Box p={{ base: 'md', sm: 'xl' }} maw={1180}>
+      <NewSessionModal opened={newOpened} onClose={closeNew} />
       <Title order={1}>Welcome to the calibration bench</Title>
       <Text c="dark.2" mt={9} maw={600} fz="0.9rem">
         Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow

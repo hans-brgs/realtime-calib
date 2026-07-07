@@ -59,7 +59,9 @@ export function selectStages(state: RootState): Stage[] {
   const session = state.session.session;
   const step = session?.step ?? 'entry';
   const stages: Stage[] = [];
-  let prerequisitesMet = true;
+  // No active session (ADR-0028): prerequisites start unmet so EVERY stage locks —
+  // the operator must first create or open a session from the dashboard.
+  let prerequisitesMet = session !== null;
 
   for (const def of STAGES) {
     const active = def.steps.includes(step);
