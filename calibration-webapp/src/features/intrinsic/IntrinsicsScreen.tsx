@@ -13,6 +13,7 @@ import {
 } from '@mantine/core';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
@@ -25,7 +26,11 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
 import { CameraTile } from '@/features/preview/CameraTile';
-import { computeIntrinsicThunk, selectSession } from '@/features/session/sessionSlice';
+import {
+  computeIntrinsicThunk,
+  selectSession,
+  validateIntrinsicThunk,
+} from '@/features/session/sessionSlice';
 import {
   type CoverageMetrics,
   coverageReceived,
@@ -480,6 +485,23 @@ function IntrinsicsInner() {
     if (next) setActive(next.name);
   };
 
+  const isLastCamera = cameras.findIndex((c) => c.name === active) >= cameras.length - 1;
+  const allCalibrated =
+    cameras.length > 0 &&
+    cameras.every((c) => c.status === 'intrinsic_done' || c.status === 'extrinsic_done');
+
+  // On the last camera, "Validate" signs off the whole intrinsic step: advance the
+  // persisted step to extrinsic capture and let the wizard rail follow (no explicit
+  // navigation needed, spec wizard-navigation).
+  const validateAndAdvance = async () => {
+    setComputeError(null);
+    try {
+      await dispatch(validateIntrinsicThunk()).unwrap();
+    } catch (err) {
+      setComputeError(err instanceof Error ? err.message : 'validate failed');
+    }
+  };
+
   const scrubbing = step === 'prepare' || step === 'computing';
 
   return (
@@ -624,9 +646,20 @@ function IntrinsicsInner() {
           <Box mt="auto" pt="md">
             {step === 'results' ? (
               <>
-                <Button fullWidth onClick={nextCamera} disabled={cameras.findIndex((c) => c.name === active) >= cameras.length - 1}>
-                  Validate → next camera
-                </Button>
+                {isLastCamera ? (
+                  <Button
+                    fullWidth
+                    leftSection={<IconCheck size={15} />}
+                    onClick={() => void validateAndAdvance()}
+                    disabled={!allCalibrated}
+                  >
+                    Validate → Extrinsics
+                  </Button>
+                ) : (
+                  <Button fullWidth onClick={nextCamera}>
+                    Validate → next camera
+                  </Button>
+                )}
                 {/* Back to Prepare on the SAME recording: retune trim/stride/cap,
                     then Compute again (the preview mp4 is already there). */}
                 <Button fullWidth variant="light" mt="sm" onClick={() => void waitForPreview()}>

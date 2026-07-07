@@ -7,7 +7,7 @@ import {
   IconCircleFilled,
   IconDownload,
   IconFocusCentered,
-  IconLayoutDashboard,
+  IconHome,
   IconLayoutGrid,
   IconLock,
   IconTopologyStar3,
@@ -26,7 +26,7 @@ export interface RailItem {
 }
 
 const ICONS: Record<ViewId, ComponentType<IconProps>> = {
-  session: IconLayoutDashboard,
+  session: IconHome,
   cameras: IconCamera,
   boards: IconLayoutGrid,
   intrinsic: IconFocusCentered,

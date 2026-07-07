@@ -93,6 +93,11 @@ export interface ComputeParams {
 export const computeIntrinsic = (camera: string, params?: ComputeParams): Promise<Session> =>
   postJson<Session>(`/intrinsic/${camera}/compute`, params);
 
+// Operator sign-off once every camera has intrinsics: advances the wizard step to
+// extrinsic capture — the rail follows the persisted step, so this IS the navigation.
+export const validateIntrinsic = (): Promise<Session> =>
+  postJson<Session>('/intrinsic/validate');
+
 // Preview transcodes (ADR-0027): each recording is transcoded ONCE in the
 // background to an H.264 mp4 re-timed CFR BY INDEX at PREVIEW_FPS — so
 // index = round(video.currentTime * PREVIEW_FPS) is exact by construction.

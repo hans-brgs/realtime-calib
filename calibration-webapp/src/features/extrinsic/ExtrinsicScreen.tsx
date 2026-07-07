@@ -599,6 +599,16 @@ function ExtrinsicInner() {
                 >
                   Validate → Export
                 </Button>
+                {/* Back to Prepare on the SAME sweep: retune stride/spread/min-shared,
+                    then Compute again (the preview mp4s are already there). */}
+                <Button
+                  fullWidth
+                  variant="light"
+                  mb="sm"
+                  onClick={() => void waitForPreviews()}
+                >
+                  Recompute (tune again)
+                </Button>
                 <Button
                   fullWidth
                   variant="light"
