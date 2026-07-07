@@ -155,6 +155,50 @@ def test_reorder_cameras_persists_and_keeps_calibrations(tmp_path: Path) -> None
     assert response.status_code == 422
 
 
+def test_validate_extrinsic_guards_then_advances_to_export(tmp_path: Path) -> None:
+    # Operator sign-off: refused while any camera lacks a pose, then advances
+    # the persisted wizard step to 'export' (the webapp rail follows it).
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/cam-a",
+                    "device_node": "/dev/video0",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+                {
+                    "index": 1,
+                    "device_path": "/dev/v4l/by-path/cam-b",
+                    "device_node": "/dev/video2",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+            ],
+        },
+    )
+
+    assert client.post("/extrinsic/validate").status_code == 422
+
+    for camera in manager.current().cameras:
+        camera.rotation = [0.0, 0.0, 0.0]
+        camera.translation = [0.0, 0.0, 0.0]
+
+    response = client.post("/extrinsic/validate")
+    assert response.status_code == 200
+    assert response.json()["step"] == "export"
+    assert load_session(tmp_path, "default").step.value == "export"
+
+
 def test_list_sessions_summaries(tmp_path: Path) -> None:
     client = _client(tmp_path)
 

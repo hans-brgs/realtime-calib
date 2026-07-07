@@ -756,6 +756,20 @@ async def extrinsic_groups(
     }
 
 
+@router.post("/extrinsic/validate", response_model=SessionOut)
+async def validate_extrinsic(request: Request) -> SessionOut:
+    """Operator sign-off on the solved array: advance the wizard to Export.
+
+    The webapp's rail follows the persisted step, so this single transition IS
+    the navigation (spec wizard-navigation).
+    """
+    manager = get_manager(request)
+    session = manager.current()
+    if not session.cameras or any(c.rotation is None for c in session.cameras):
+        raise HTTPException(status_code=422, detail="extrinsic calibration incomplete")
+    return _session_out(manager.mark_exported(), manager)
+
+
 @router.get("/extrinsic/preview/status")
 async def extrinsic_preview_status(request: Request) -> dict[str, object]:
     """Aggregate transcode state over the sweep's cameras (ADR-0027).
