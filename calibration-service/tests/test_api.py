@@ -155,6 +155,51 @@ def test_reorder_cameras_persists_and_keeps_calibrations(tmp_path: Path) -> None
     assert response.status_code == 422
 
 
+def test_validate_intrinsic_guards_then_advances_to_extrinsic(tmp_path: Path) -> None:
+    # Operator sign-off: refused while any camera lacks intrinsics, then advances
+    # the persisted wizard step to 'extrinsic_capture' (the webapp rail follows it).
+    from calibration_service.models.session import CameraStatus
+
+    manager = SessionManager(tmp_path)
+    client = TestClient(create_app(manager))
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/cam-a",
+                    "device_node": "/dev/video0",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+                {
+                    "index": 1,
+                    "device_path": "/dev/v4l/by-path/cam-b",
+                    "device_node": "/dev/video2",
+                    "width": 1280,
+                    "height": 720,
+                    "resize_factor": 1.0,
+                    "fps": 30,
+                },
+            ],
+        },
+    )
+
+    assert client.post("/intrinsic/validate").status_code == 422
+
+    for camera in manager.current().cameras:
+        camera.status = CameraStatus.INTRINSIC_DONE
+
+    response = client.post("/intrinsic/validate")
+    assert response.status_code == 200
+    assert response.json()["step"] == "extrinsic_capture"
+    assert load_session(tmp_path, "default").step.value == "extrinsic_capture"
+
+
 def test_validate_extrinsic_guards_then_advances_to_export(tmp_path: Path) -> None:
     # Operator sign-off: refused while any camera lacks a pose, then advances
     # the persisted wizard step to 'export' (the webapp rail follows it).

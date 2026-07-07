@@ -465,6 +465,21 @@ async def compute_intrinsic(
     return _session_out(session, manager)
 
 
+@router.post("/intrinsic/validate", response_model=SessionOut)
+async def validate_intrinsic(request: Request) -> SessionOut:
+    """Operator sign-off on every camera's intrinsics: advance the wizard to the
+    extrinsic capture step. The webapp rail follows the persisted step, so this
+    single transition IS the navigation (spec wizard-navigation)."""
+    manager = get_manager(request)
+    session = manager.current()
+    if not session.cameras or any(
+        c.status not in (CameraStatus.INTRINSIC_DONE, CameraStatus.EXTRINSIC_DONE)
+        for c in session.cameras
+    ):
+        raise HTTPException(status_code=422, detail="intrinsic calibration incomplete")
+    return _session_out(manager.begin_extrinsic_capture(), manager)
+
+
 @router.get("/intrinsic/{camera}/metrics")
 async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
     """Serve the persisted review metrics for the Results view (ADR-0022).
