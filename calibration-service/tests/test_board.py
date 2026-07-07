@@ -30,7 +30,7 @@ def _charuco(**overrides: object) -> CalibrationBoard:
 
 
 def _client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(SessionManager(tmp_path)))
+    return TestClient(create_app(SessionManager(tmp_path, "default")))
 
 
 def test_render_charuco_png_dimensions() -> None:
@@ -104,7 +104,7 @@ def test_define_board_advances_and_persists(tmp_path: Path) -> None:
     assert session["intrinsic_board"]["columns"] == 8
 
     # Persisted: a fresh manager reloads the board from config.toml.
-    reloaded = SessionManager(tmp_path).current()
+    reloaded = SessionManager(tmp_path, "default").current()
     assert reloaded.intrinsic_board is not None
     assert reloaded.intrinsic_board.dictionary == "DICT_5X5_100"
 

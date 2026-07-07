@@ -25,8 +25,9 @@ class WizardStep(StrEnum):
     EXTRINSIC_BOARD_CHOICE = "extrinsic_board_choice"
     CAMERA_SETUP = "camera_setup"
     INTRINSIC_CAPTURE = "intrinsic_capture"
+    # No REVIEW_3D step: the 3D review is the Result sub-step of the extrinsic
+    # capture (spec 3d-extrinsic-review), not a wizard stage of its own.
     EXTRINSIC_CAPTURE = "extrinsic_capture"
-    REVIEW_3D = "review_3d"
     EXPORT = "export"
 
 
@@ -70,6 +71,11 @@ class CameraConfig:
     distortions: list[float] | None = None  # rational-model coefficients
     calibration_error: float | None = None  # RMS reprojection error (px)
     grid_count: int | None = None  # corners used across keyframes
+    # Extrinsic calibration result (ADR-0023; camera-array-config fields). The pose
+    # maps world (anchor camera) coords -> this camera's coords; anchor = identity.
+    rotation: list[float] | None = None  # Rodrigues 3-vector
+    translation: list[float] | None = None  # board-square units until export scaling
+    extrinsic_error: float | None = None  # RMS reprojection error after BA (px)
 
 
 @dataclass
@@ -88,6 +94,10 @@ class CalibrationSession:
     optimization_strategy: str = "coverage-aware"
     intrinsic_board: CalibrationBoard | None = None
     extrinsic_board: CalibrationBoard | None = None
+    # Persisted export config (ADR-0026): restored on reopen. The truth (poses)
+    # lives in result.json; this is a lightweight "how I export" preference.
+    export_units: str = "mm"
+    export_targets: list[str] = field(default_factory=list)
 
     def effective_extrinsic_board(self) -> CalibrationBoard | None:
         """Extrinsic board, inheriting the intrinsic one when not set explicitly."""

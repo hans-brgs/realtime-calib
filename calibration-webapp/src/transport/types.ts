@@ -7,7 +7,6 @@ export type WizardStep =
   | 'extrinsic_board_choice'
   | 'intrinsic_capture'
   | 'extrinsic_capture'
-  | 'review_3d'
   | 'export';
 
 // ADR-0019: two entry modes replace new/resume/load_intrinsic/load_full.
@@ -31,6 +30,10 @@ export interface CameraConfig {
   distortions?: number[] | null;
   calibration_error?: number | null;
   grid_count?: number | null;
+  // Extrinsic calibration result (ADR-0023): world (anchor) -> camera pose.
+  rotation?: number[] | null;
+  translation?: number[] | null;
+  extrinsic_error?: number | null;
 }
 
 export type BoardType = 'charuco' | 'aruco';
@@ -56,10 +59,13 @@ export interface BoardConfigRequest {
 
 export interface Session {
   session_id: string;
+  session_dir?: string; // host-relative session folder (e.g. "sessions/default")
   step: WizardStep;
   mode: SessionMode;
   intrinsic_fps: number;
   optimization_strategy: string;
+  export_units?: 'mm' | 'm'; // persisted export config (ADR-0026), restored on reopen
+  export_targets?: string[];
   cameras: CameraConfig[];
   intrinsic_board: Board | null;
   extrinsic_board: Board | null;

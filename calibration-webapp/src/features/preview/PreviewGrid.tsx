@@ -1,22 +1,10 @@
-import {
-  isTrackReference,
-  LiveKitRoom,
-  type TrackReference,
-  useTracks,
-} from '@livekit/components-react';
-import { Center, Loader, Text } from '@mantine/core';
+import { isTrackReference, type TrackReference, useTracks } from '@livekit/components-react';
+import { Center, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
 import { Track } from 'livekit-client';
-import { type CSSProperties, useEffect, useState } from 'react';
+import type { CSSProperties } from 'react';
 
-import { useAppDispatch } from '@/app/hooks';
-import {
-  connecting,
-  connectionEstablished,
-  connectionLost,
-} from '@/features/connection/connectionSlice';
 import { CameraTile } from '@/features/preview/CameraTile';
-import { fetchToken } from '@/transport/httpClient';
 
 // Resolves a track's display position + label from the operator's pending index order
 // (so the preview reflects a drag-reorder before it is applied). Returns null to leave
@@ -32,8 +20,10 @@ const trackName = (ref: TrackReference): string => ref.publication.trackName;
 // (4 cameras -> 2x2); each tile letterboxes its frame (objectFit: contain) so the
 // camera ratio is respected with black bars rather than scrolling or cropping. Phone
 // / portrait: a single scrolling column of aspect-ratio tiles. See
-// multi-camera-preview / wizard-navigation.
-function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
+// multi-camera-preview / wizard-navigation. Consumes the app-level room context
+// (RoomProvider in App.tsx): screens never mount their own LiveKitRoom, so
+// navigating between steps never tears down the WebRTC session.
+export function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
   const compact = useMediaQuery('(max-width: 47.99em), (orientation: portrait)') ?? false;
   const trackRefs = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const cameras = trackRefs.filter(isTrackReference);
@@ -90,61 +80,8 @@ function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
   );
 }
 
-interface RoomConnection {
-  serverUrl: string;
-  token: string;
-}
-
+// Kept as the historical name used by the screens; the room now lives in
+// RoomProvider (App level), so this is just the grid.
 export function PreviewGrid({ arrange }: { arrange?: TrackArrangement } = {}) {
-  const dispatch = useAppDispatch();
-  const [connection, setConnection] = useState<RoomConnection | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    dispatch(connecting());
-    fetchToken()
-      .then((response) => {
-        if (cancelled) return;
-        setConnection({ serverUrl: import.meta.env.VITE_LIVEKIT_URL, token: response.token });
-      })
-      .catch((cause: unknown) => {
-        if (cancelled) return;
-        setError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [dispatch]);
-
-  if (error) {
-    return (
-      <Center h="100%">
-        <Text c="red">{error}</Text>
-      </Center>
-    );
-  }
-
-  if (!connection) {
-    return (
-      <Center h="100%">
-        <Loader />
-      </Center>
-    );
-  }
-
-  return (
-    <LiveKitRoom
-      serverUrl={connection.serverUrl}
-      token={connection.token}
-      connect
-      audio={false}
-      video={false}
-      style={{ height: '100%' }}
-      onConnected={() => dispatch(connectionEstablished())}
-      onDisconnected={() => dispatch(connectionLost())}
-    >
-      <CameraGrid arrange={arrange} />
-    </LiveKitRoom>
-  );
+  return <CameraGrid arrange={arrange} />;
 }

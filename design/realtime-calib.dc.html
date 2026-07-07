@@ -48,7 +48,7 @@
           <div style="font-family:'Sora',sans-serif;font-weight:600;font-size:13.5px;white-space:nowrap;">Calibration Wizard</div>
           <div style="font-size:11px;color:#6a6a74;white-space:nowrap;">Precision Workflow</div>
         </div>
-        <button onClick="{{ toggleCollapse }}" title="Collapse" style="flex:none;width:30px;height:30px;border-radius:8px;border:1px solid #26262e;background:#15151a;color:#9a9aa5;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .18s;transform:rotate({{ chevronRot }});">‹</button>
+        <button onClick="{{ toggleCollapse }}" title="Collapse" style="flex:none;width:30px;height:30px;border-radius:8px;border:1px solid #26262e;background:#1b1d24;color:#9a9aa5;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:15px;transition:transform .18s;transform:rotate({{ chevronRot }});">‹</button>
       </div>
 
       <!-- nav -->
@@ -108,7 +108,7 @@
     </div>
 
     <!-- MAIN -->
-    <div style="flex:1;min-width:0;overflow-y:auto;background:#09090b;">
+    <div style="flex:1;min-width:0;overflow-y:auto;background:#0b0d12;">
 
       <!-- ===== DASHBOARD ===== -->
       <sc-if value="{{ isDashboard }}" hint-placeholder-val="{{ true }}">
@@ -174,7 +174,7 @@
               <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Detect USB cameras, set the shared capture format, and order the indices. <span style="color:#c4b5fd;">Index 0 is the extrinsic anchor.</span></p>
             </div>
             <div style="display:flex;gap:9px;align-items:center;">
-              <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">prefix <span style="font-family:'Manrope';color:#ececf0;font-weight:600;">cam</span></div>
+              <div style="display:flex;align-items:center;gap:8px;height:38px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#1b1d24;font-size:12.5px;color:#9a9aa5;">prefix <span style="font-family:'Manrope';color:#ececf0;font-weight:600;">cam</span></div>
               <button style="display:flex;align-items:center;gap:8px;height:38px;padding:0 15px;border-radius:9px;border:1px solid #2c2640;background:linear-gradient(180deg,rgba(167,139,250,.18),rgba(139,92,246,.1));color:#c4b5fd;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"></path><path d="M21 3v5h-5"></path></svg> Re-detect</button>
             </div>
           </div>
@@ -191,7 +191,7 @@
                   </div>
                 </sc-for>
               </div>
-              <button style="width:100%;margin-top:12px;height:44px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12z"></path></svg> Flash to identify</button>
+              <button style="width:100%;margin-top:12px;height:44px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M13 2L4.5 13H11l-1 9 8.5-11H12z"></path></svg> Flash to identify</button>
             </div>
 
             <!-- RIGHT: settings column -->
@@ -203,15 +203,15 @@
                 <div style="display:flex;flex-direction:column;gap:13px;">
                   <div>
                     <div style="font-size:11px;color:#8a8a95;margin-bottom:6px;">Resolution <span style="color:#5a5a64;">· V4L2 native modes</span></div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">1920×1080 <span style="color:#5a5a64;">▾</span></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#1b1d24;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">1920×1080 <span style="color:#5a5a64;">▾</span></div>
                   </div>
                   <div>
                     <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:6px;"><span style="font-size:11px;color:#8a8a95;">Resize factor <span style="color:#5a5a64;">· s</span></span><span style="font-family:'Manrope';font-size:11px;color:#a78bfa;font-variant-numeric:tabular-nums;">output → 960×540</span></div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">s = 0.5 <span style="color:#5a5a64;">▾</span></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#1b1d24;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">s = 0.5 <span style="color:#5a5a64;">▾</span></div>
                   </div>
                   <div>
                     <div style="font-size:11px;color:#8a8a95;margin-bottom:6px;">Capture FPS</div>
-                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#16161b;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">30 fps <span style="color:#5a5a64;">▾</span></div>
+                    <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:40px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#1b1d24;font-family:'Manrope';font-size:13px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">30 fps <span style="color:#5a5a64;">▾</span></div>
                     <div style="font-size:10.5px;color:#6a6a74;margin-top:6px;line-height:1.5;">Top value = slowest sensor (<span style="color:#fbbf24;">cam_2 @ 30 fps</span>), stepping down by 5.</div>
                   </div>
                 </div>
@@ -248,7 +248,7 @@
               <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Intrinsics · {{ activeCamName }}</h1>
               <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Record a sweep of board views, compute, then review the annotated replay before validating. One camera at a time.</p>
             </div>
-            <div style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#15151a;font-size:12.5px;color:#9a9aa5;">strategy <span style="color:#c4b5fd;font-weight:600;">coverage-aware</span> <span style="color:#5a5a64;">▾</span></div>
+            <div style="display:flex;align-items:center;gap:8px;min-height:44px;padding:0 13px;border:1px solid #2a2a32;border-radius:9px;background:#1b1d24;font-size:12.5px;color:#9a9aa5;">strategy <span style="color:#c4b5fd;font-weight:600;">coverage-aware</span> <span style="color:#5a5a64;">▾</span></div>
           </div>
 
           <!-- camera tabs -->
@@ -363,9 +363,9 @@
                 </div>
                 <!-- transport / scrub -->
                 <div style="display:flex;align-items:center;gap:11px;margin-top:13px;">
-                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;cursor:pointer;font-size:13px;">⏮</button>
+                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;cursor:pointer;font-size:13px;">⏮</button>
                   <button style="width:48px;height:48px;flex:none;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;"><svg width="17" height="17" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg></button>
-                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;cursor:pointer;font-size:13px;">⏭</button>
+                  <button style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;cursor:pointer;font-size:13px;">⏭</button>
                   <div style="flex:1;height:6px;border-radius:4px;background:#1c1c22;position:relative;"><div style="position:absolute;left:0;width:{{ scrubPct }};height:100%;background:#8b5cf6;border-radius:4px;"></div><div style="position:absolute;left:{{ scrubPct }};top:-5px;width:16px;height:16px;border-radius:50%;background:#c4b5fd;border:2px solid #0b0b0e;transform:translateX(-8px);"></div></div>
                   <span style="font-family:'Manrope';font-size:11px;color:#7a7a85;font-variant-numeric:tabular-nums;white-space:nowrap;">frame {{ frameNo }} / {{ frameTotal }}</span>
                 </div>
@@ -393,17 +393,17 @@
                     <div>
                       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;"><span style="font-size:12.5px;color:#bcbcc6;">Sampling stride</span><span style="font-family:'Manrope';font-size:11px;color:#8a8a95;">1 frame / {{ stride }}</span></div>
                       <div style="display:flex;align-items:center;gap:10px;">
-                        <button onClick="{{ decStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
+                        <button onClick="{{ decStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
                         <div style="flex:1;text-align:center;font-family:'Sora';font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;color:#ececf0;">{{ stride }}</div>
-                        <button onClick="{{ incStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
+                        <button onClick="{{ incStride }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
                       </div>
                     </div>
                     <div>
                       <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:7px;"><span style="font-size:12.5px;color:#bcbcc6;">Keyframe cap</span><span style="font-family:'Manrope';font-size:11px;color:#8a8a95;">max kept</span></div>
                       <div style="display:flex;align-items:center;gap:10px;">
-                        <button onClick="{{ decCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
+                        <button onClick="{{ decCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-size:19px;cursor:pointer;">−</button>
                         <div style="flex:1;text-align:center;font-family:'Sora';font-size:16px;font-weight:600;font-variant-numeric:tabular-nums;color:#ececf0;">{{ keyframeCap }}</div>
-                        <button onClick="{{ incCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#16161b;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
+                        <button onClick="{{ incCap }}" style="width:44px;height:44px;flex:none;border-radius:9px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-size:19px;cursor:pointer;">+</button>
                       </div>
                     </div>
                     <div style="font-size:10.5px;color:#6a6a74;line-height:1.5;">Fewer keyframes → faster compute, potentially lower coverage. Recompute overwrites the current result.</div>
@@ -414,7 +414,7 @@
                 <!-- verdict actions -->
                 <div style="display:flex;flex-direction:column;gap:9px;margin-top:16px;">
                   <button onClick="{{ onValidate }}" style="min-height:48px;border-radius:11px;border:1px solid #1f4a35;background:linear-gradient(180deg,#2fbf82,#1f9c68);color:#04120c;font-family:'Sora';font-size:13.5px;font-weight:700;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"></path></svg> Validate &amp; next camera →</button>
-                  <button onClick="{{ onReRecord }}" style="min-height:44px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">↺ Re-record this camera</button>
+                  <button onClick="{{ onReRecord }}" style="min-height:44px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">↺ Re-record this camera</button>
                 </div>
               </div>
             </div>
@@ -438,10 +438,10 @@
               <div style="display:flex;justify-content:space-between;margin-bottom:10px;">
                 <div style="display:flex;gap:6px;">
                   <div style="padding:7px 13px;border-radius:8px;border:1px solid rgba(167,139,250,.3);background:rgba(167,139,250,.12);font-size:12px;color:#c4b5fd;cursor:pointer;">Top</div>
-                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">Side</div>
-                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">Front</div>
+                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#1b1d24;font-size:12px;color:#9a9aa5;cursor:pointer;">Side</div>
+                  <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#1b1d24;font-size:12px;color:#9a9aa5;cursor:pointer;">Front</div>
                 </div>
-                <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;font-size:12px;color:#9a9aa5;cursor:pointer;">↺ Reset view</div>
+                <div style="padding:7px 13px;border-radius:8px;border:1px solid #2a2a32;background:#1b1d24;font-size:12px;color:#9a9aa5;cursor:pointer;">↺ Reset view</div>
               </div>
               <div style="flex:1;border-radius:13px;border:1px solid #1f1f25;position:relative;overflow:hidden;min-height:340px;background-color:#0b0b0e;background-image:linear-gradient(rgba(255,255,255,.035) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.035) 1px,transparent 1px);background-size:36px 36px;">
                 <div style="position:absolute;top:12px;left:12px;right:12px;background:rgba(248,113,113,.08);border:1px solid rgba(248,113,113,.3);border-radius:9px;padding:9px 12px;font-size:11.5px;color:#f0a0a0;display:flex;gap:9px;"><span>⚠</span><span><strong style="color:#f87171;">Optimization limit</strong> — cam_2 deviation exceeds 0.25px. Re-run Extrinsics with more shared views, or minimize below.</span></div>
@@ -499,15 +499,15 @@
                 <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Coordinate frame</div>
                 <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:6px;">
                   <sc-for list="{{ axisBtns }}" as="a" hint-placeholder-count="6">
-                    <div style="padding:9px;border:1px solid #2a2a32;border-radius:8px;text-align:center;font-family:'Manrope';font-size:12.5px;color:#bcbcc6;background:#15151a;cursor:pointer;min-height:40px;display:flex;align-items:center;justify-content:center;">{{ a }}</div>
+                    <div style="padding:9px;border:1px solid #2a2a32;border-radius:8px;text-align:center;font-family:'Manrope';font-size:12.5px;color:#bcbcc6;background:#1b1d24;cursor:pointer;min-height:40px;display:flex;align-items:center;justify-content:center;">{{ a }}</div>
                   </sc-for>
                 </div>
-                <button style="width:100%;margin-top:7px;min-height:40px;border:1px solid #2a2a32;border-radius:8px;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">◎ Set origin on board</button>
+                <button style="width:100%;margin-top:7px;min-height:40px;border:1px solid #2a2a32;border-radius:8px;background:#1b1d24;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">◎ Set origin on board</button>
               </div>
 
               <div style="margin-top:auto;display:flex;flex-direction:column;gap:9px;padding-top:6px;">
                 <button style="min-height:44px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> Download calibration</button>
-                <button style="min-height:40px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">⟲ Minimize error (re-run BA)</button>
+                <button style="min-height:40px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">⟲ Minimize error (re-run BA)</button>
               </div>
             </div>
           </div>
@@ -546,13 +546,13 @@
                 <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:13px;">Board type</div>
                 <div style="display:flex;gap:8px;margin-bottom:15px;">
                   <div style="flex:1;text-align:center;padding:9px;border-radius:8px;border:1px solid rgba(167,139,250,.35);background:rgba(167,139,250,.14);color:#c4b5fd;font-size:12.5px;font-weight:600;cursor:pointer;">ChArUco</div>
-                  <div style="flex:1;text-align:center;padding:9px;border-radius:8px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-size:12.5px;cursor:pointer;">ArUco</div>
+                  <div style="flex:1;text-align:center;padding:9px;border-radius:8px;border:1px solid #2a2a32;background:#1b1d24;color:#9a9aa5;font-size:12.5px;cursor:pointer;">ArUco</div>
                 </div>
                 <div style="display:flex;flex-direction:column;gap:11px;">
                   <sc-for list="{{ boardFields }}" as="f" hint-placeholder-count="5">
                     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;">
                       <span style="font-size:12.5px;color:#9a9aa5;">{{ f.label }}</span>
-                      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:34px;min-width:148px;padding:0 12px;border:1px solid #2a2a32;border-radius:8px;background:#16161b;font-family:'Manrope';font-size:12px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">{{ f.value }} <span style="color:#5a5a64;">▾</span></div>
+                      <div style="display:flex;align-items:center;justify-content:space-between;gap:10px;height:34px;min-width:148px;padding:0 12px;border:1px solid #2a2a32;border-radius:8px;background:#1b1d24;font-family:'Manrope';font-size:12px;color:#ececf0;font-variant-numeric:tabular-nums;cursor:pointer;">{{ f.value }} <span style="color:#5a5a64;">▾</span></div>
                     </div>
                   </sc-for>
                   <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;padding-top:3px;">
@@ -591,7 +591,7 @@
               </div>
               <div style="display:flex;gap:10px;margin-top:13px;">
                 <button style="flex:1;min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13.5px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor"><path d="M8 5v14l11-7z"></path></svg> Start synchronized capture</button>
-                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">Compute · init + BA</button>
+                <button style="min-height:46px;padding:0 18px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#9a9aa5;font-family:inherit;font-size:13px;cursor:pointer;">Compute · init + BA</button>
               </div>
             </div>
 
@@ -625,53 +625,114 @@
 
       <!-- ===== EXPORT ===== -->
       <sc-if value="{{ isExport }}" hint-placeholder-val="{{ false }}">
-        <div style="padding:22px 26px;">
-          <div style="margin-bottom:16px;">
-            <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Export</h1>
-            <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Calibration written to the session folder — Caliscope-compatible, reloadable to resume later.</p>
+        <div style="padding:22px 26px;max-width:1220px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:16px;flex-wrap:wrap;margin-bottom:18px;">
+            <div>
+              <h1 style="font-family:'Sora',sans-serif;font-size:21px;font-weight:600;margin:0;letter-spacing:-.01em;">Export</h1>
+              <p style="color:#9a9aa5;margin:6px 0 0;font-size:13.5px;">Camera calibration files for Caliscope and 3D engines.</p>
+            </div>
+            <div onClick="{{ togglePosed }}" title="Toggle to preview the locked state" style="display:flex;align-items:center;gap:8px;min-height:34px;padding:0 12px;border:1px solid {{ posedBorder }};border-radius:9px;background:#131318;font-size:11.5px;color:{{ posedColor }};cursor:pointer;"><span style="width:7px;height:7px;border-radius:50%;background:{{ posedColor }};"></span>{{ posedLabel }}</div>
           </div>
 
-          <div style="display:grid;grid-template-columns:minmax(0,1fr) 320px;gap:24px;align-items:start;">
-            <!-- LEFT: files + toml -->
-            <div style="min-width:0;">
-              <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:11px;">Session folder</div>
-              <div style="border:1px solid #232329;border-radius:13px;overflow:hidden;background:#0f0f12;">
-                <sc-for list="{{ exportFiles }}" as="f" hint-placeholder-count="4">
-                  <div style="display:flex;align-items:center;justify-content:space-between;padding:13px 15px;border-bottom:1px solid #18181d;">
-                    <span style="display:flex;align-items:center;gap:10px;font-family:'Manrope';font-size:13px;color:#ececf0;"><span style="color:#7a7a85;">▤</span>{{ f.name }}</span>
-                    <span style="font-family:'Manrope';font-size:10.5px;color:{{ f.tagColor }};background:{{ f.tagBg }};padding:2px 9px;border-radius:6px;">{{ f.tag }}</span>
+          <!-- LOCKED STATE -->
+          <sc-if value="{{ exportLocked }}" hint-placeholder-val="{{ false }}">
+            <div style="border:1px solid #232329;border-radius:16px;background:linear-gradient(180deg,#101014,#0c0c0f);padding:52px 32px;display:flex;flex-direction:column;align-items:center;text-align:center;">
+              <div style="width:56px;height:56px;border-radius:14px;background:#16161b;border:1px solid #2a2a32;display:flex;align-items:center;justify-content:center;color:#7a7a85;"><svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7"><rect x="4.5" y="10.5" width="15" height="10" rx="2"></rect><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"></path></svg></div>
+              <div style="font-family:'Sora';font-size:16px;font-weight:600;margin-top:18px;">Export locked</div>
+              <div style="font-size:13px;color:#9a9aa5;margin-top:8px;max-width:420px;line-height:1.6;">Complete the extrinsic calibration first — the export needs every camera's pose.</div>
+              <button onClick="{{ goExtrinsic }}" style="margin-top:22px;min-height:44px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-family:'Sora';font-size:12.5px;font-weight:600;cursor:pointer;">Go to extrinsics →</button>
+            </div>
+          </sc-if>
+
+          <!-- UNLOCKED -->
+          <sc-if value="{{ exportUnlocked }}" hint-placeholder-val="{{ true }}">
+            <div style="display:grid;grid-template-columns:minmax(0,1fr) 300px;gap:22px;align-items:start;">
+
+              <!-- LEFT: config + preview -->
+              <div style="min-width:0;display:flex;flex-direction:column;gap:20px;">
+
+                <!-- world units -->
+                <div>
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">World units</div>
+                  <div style="display:inline-flex;padding:3px;border:1px solid #2a2a32;border-radius:11px;background:#1b1d24;gap:3px;">
+                    <div onClick="{{ setUnitMm }}" style="min-height:38px;padding:0 22px;display:flex;align-items:center;border-radius:8px;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;background:{{ unitMm.bg }};color:{{ unitMm.color }};box-shadow:{{ unitMm.shadow }};">mm</div>
+                    <div onClick="{{ setUnitM }}" style="min-height:38px;padding:0 22px;display:flex;align-items:center;border-radius:8px;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;background:{{ unitM.bg }};color:{{ unitM.color }};box-shadow:{{ unitM.shadow }};">m</div>
                   </div>
-                </sc-for>
-              </div>
-              <div style="margin-top:14px;background:#0c0c0f;border:1px solid #1f1f25;border-radius:13px;padding:16px;font-family:'Manrope';font-size:11.5px;line-height:1.8;color:#9fb3cc;font-variant-numeric:tabular-nums;overflow-x:auto;">
-                <div style="color:#5a6b7c;"># camera_array.toml</div>
-                <div><span style="color:#7a8a9c;">camera_count</span> = 4</div>
-                <div><span style="color:#7a8a9c;">camera_prefix</span> = "cam"</div>
-                <div style="color:#c4b5fd;margin-top:6px;">[cam_0]</div>
-                <div><span style="color:#7a8a9c;">size</span> = [1920, 1080]</div>
-                <div><span style="color:#7a8a9c;">matrix</span> = [[fx,0,cx],[0,fy,cy],[0,0,1]]</div>
-                <div><span style="color:#7a8a9c;">distortions</span> = [k1,k2,p1,p2,k3]</div>
-                <div><span style="color:#7a8a9c;">rotation</span> = [rx, ry, rz]</div>
-                <div><span style="color:#7a8a9c;">translation</span> = [tx, ty, tz]</div>
-                <div style="color:#7fe8b4;"><span style="color:#7a8a9c;">error</span> = 0.21 · <span style="color:#7a8a9c;">grid_count</span> = 24</div>
-              </div>
-            </div>
+                  <div style="font-size:11.5px;color:#6a6a74;margin-top:8px;line-height:1.5;">Applies to the platform JSON files — the Caliscope TOML is always in mm.</div>
+                </div>
 
-            <!-- RIGHT: format + downloads -->
-            <div style="display:flex;flex-direction:column;gap:14px;min-width:0;">
-              <div style="border:1px solid #232329;border-radius:13px;padding:14px;background:#101014;">
-                <div style="font-size:11px;color:#7a7a85;">Format</div>
-                <div style="font-family:'Sora';font-size:14px;font-weight:600;margin-top:3px;">Caliscope-compatible</div>
-                <div style="font-size:12px;color:#8a8a95;margin-top:6px;line-height:1.55;">Native fields unchanged; extensions are purely additive (ignored without breaking).</div>
+                <!-- artifacts -->
+                <div>
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Artifacts <span style="color:#4a4a54;text-transform:none;letter-spacing:0;">· one file per checked target</span></div>
+                  <div style="border:1px solid #232329;border-radius:13px;overflow:hidden;background:#0f0f12;">
+                    <sc-for list="{{ artifactRows }}" as="a" hint-placeholder-count="5">
+                      <div onClick="{{ a.onToggle }}" style="display:flex;align-items:center;gap:13px;min-height:56px;padding:11px 15px;border-bottom:1px solid #18181d;cursor:pointer;background:{{ a.rowBg }};">
+                        <span style="width:22px;height:22px;flex:none;border-radius:6px;border:1.5px solid {{ a.boxBorder }};background:{{ a.boxBg }};display:flex;align-items:center;justify-content:center;color:#fff;font-size:13px;">{{ a.check }}</span>
+                        <div style="flex:1;min-width:0;">
+                          <div style="font-family:'Manrope';font-size:13px;font-weight:600;color:{{ a.nameColor }};font-variant-numeric:tabular-nums;">{{ a.file }}</div>
+                          <div style="font-family:'Manrope';font-size:11px;color:#7a7a85;margin-top:2px;">{{ a.sub }}</div>
+                        </div>
+                        <span style="font-family:'Manrope';font-size:10px;color:#6a6a74;background:#16161b;border:1px solid #24242c;padding:2px 8px;border-radius:5px;flex:none;">{{ a.langTag }}</span>
+                      </div>
+                    </sc-for>
+                  </div>
+                </div>
+
+                <!-- code preview (CodeHighlightTabs style) -->
+                <div>
+                  <div style="font-size:10.5px;color:#6a6a74;text-transform:uppercase;letter-spacing:.07em;font-weight:600;margin-bottom:9px;">Preview</div>
+                  <div style="border:1px solid #1f1f25;border-radius:13px;overflow:hidden;background:#0c0c0f;">
+                    <sc-if value="{{ hasPreview }}" hint-placeholder-val="{{ true }}">
+                      <!-- tab bar -->
+                      <div style="display:flex;align-items:center;justify-content:space-between;background:#121216;border-bottom:1px solid #1f1f25;padding-right:8px;">
+                        <div style="display:flex;overflow-x:auto;">
+                          <sc-for list="{{ previewTabs }}" as="t" hint-placeholder-count="2">
+                            <div onClick="{{ t.onClick }}" style="display:flex;align-items:center;gap:7px;min-height:42px;padding:0 15px;white-space:nowrap;cursor:pointer;font-family:'Manrope';font-size:12px;font-weight:600;color:{{ t.color }};border-bottom:2px solid {{ t.bar }};background:{{ t.bg }};">{{ t.file }}</div>
+                          </sc-for>
+                        </div>
+                        <button onClick="{{ copyPreview }}" style="display:flex;align-items:center;gap:6px;min-height:32px;padding:0 12px;flex:none;border-radius:8px;border:1px solid #24242c;background:#16161b;color:{{ copyColor }};font-family:'Manrope';font-size:11.5px;font-weight:600;cursor:pointer;"><span style="font-size:12px;">{{ copyIcon }}</span>{{ copyLabel }}</button>
+                      </div>
+                      <!-- code area -->
+                      <div style="max-height:min(46vh,460px);overflow:auto;padding:12px 0;">
+                        <div style="display:table;min-width:100%;font-family:'Manrope';font-size:12px;line-height:1.65;font-variant-numeric:tabular-nums;">
+                          <sc-for list="{{ previewLines }}" as="l" hint-placeholder-count="14">
+                            <div style="display:table-row;">
+                              <div style="display:table-cell;user-select:none;text-align:right;padding:0 14px 0 16px;color:#3f3f48;white-space:nowrap;width:1px;">{{ l.n }}</div>
+                              <div style="display:table-cell;padding-right:20px;white-space:pre;color:#9fb3cc;">{{ l.spans }}</div>
+                            </div>
+                          </sc-for>
+                        </div>
+                      </div>
+                    </sc-if>
+                    <sc-if value="{{ noPreview }}" hint-placeholder-val="{{ false }}">
+                      <div style="min-height:180px;display:flex;align-items:center;justify-content:center;text-align:center;padding:24px;color:#6a6a74;font-size:13px;">Select at least one artifact to preview</div>
+                    </sc-if>
+                  </div>
+                </div>
               </div>
-              <div style="border:1px solid #232329;border-radius:13px;padding:14px;background:#101014;">
-                <div style="font-size:11px;color:#7a7a85;">Location</div>
-                <div style="font-family:'Manrope';font-size:12px;color:#c4b5fd;margin-top:4px;word-break:break-all;">~/calib/CAL-2026-4589/</div>
+
+              <!-- RIGHT: destination + action -->
+              <div style="display:flex;flex-direction:column;gap:14px;min-width:0;position:sticky;top:0;">
+                <div style="border:1px solid #232329;border-radius:13px;padding:15px;background:#101014;">
+                  <div style="font-size:11px;color:#7a7a85;">Destination</div>
+                  <div style="font-family:'Sora';font-size:13px;font-weight:600;margin-top:4px;">Session folder → export/</div>
+                  <div style="margin-top:9px;display:flex;align-items:center;gap:9px;min-height:40px;padding:0 12px;border:1px solid #24242c;border-radius:9px;background:#0c0c0f;">
+                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#7a7a85" stroke-width="1.8" style="flex:none;"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.2h9A1.5 1.5 0 0 1 21 9.7v8.3A1.5 1.5 0 0 1 19.5 19.5h-15A1.5 1.5 0 0 1 3 18z"></path></svg>
+                    <span style="font-family:'Manrope';font-size:12px;color:#c4b5fd;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">{{ destPath }}</span>
+                  </div>
+                </div>
+
+                <div style="border:1px solid #232329;border-radius:13px;padding:15px;background:#101014;">
+                  <div style="display:flex;justify-content:space-between;align-items:baseline;">
+                    <span style="font-size:11px;color:#7a7a85;">Selected</span>
+                    <span style="font-family:'Manrope';font-size:12px;color:#ececf0;font-weight:600;font-variant-numeric:tabular-nums;">{{ selCount }} file(s)</span>
+                  </div>
+                  <button onClick="{{ downloadZip }}" style="margin-top:12px;width:100%;min-height:48px;border-radius:11px;border:1px solid {{ dlBorder }};background:{{ dlBg }};color:{{ dlColor }};font-family:'Sora';font-size:13.5px;font-weight:600;cursor:{{ dlCursor }};display:flex;align-items:center;justify-content:center;gap:9px;"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> Download all (zip)</button>
+                  <div style="font-size:11px;color:#6a6a74;margin-top:9px;line-height:1.5;">{{ dlHint }}</div>
+                </div>
               </div>
-              <button style="min-height:46px;border-radius:10px;border:1px solid #2c2640;background:linear-gradient(180deg,#8b5cf6,#7c3aed);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;display:flex;align-items:center;justify-content:center;gap:8px;"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 3v12M7 10l5 5 5-5"></path><path d="M4 21h16"></path></svg> camera_array.toml</button>
-              <button style="min-height:42px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#9a9aa5;font-family:inherit;font-size:12.5px;cursor:pointer;">⤓ aniposelib.toml</button>
             </div>
-          </div>
+          </sc-if>
         </div>
       </sc-if>
 
@@ -687,11 +748,11 @@
 
           <!-- folder picker -->
           <div style="margin-top:18px;display:flex;gap:11px;align-items:center;flex-wrap:wrap;">
-            <div style="flex:1;min-width:260px;display:flex;align-items:center;gap:11px;min-height:50px;padding:0 15px;border:1px solid #2a2a32;border-radius:11px;background:#16161b;">
+            <div style="flex:1;min-width:260px;display:flex;align-items:center;gap:11px;min-height:50px;padding:0 15px;border:1px solid #2a2a32;border-radius:11px;background:#1b1d24;">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#7a7a85" stroke-width="1.8" style="flex:none;"><path d="M3 7.5A1.5 1.5 0 0 1 4.5 6h4l2 2.2h9A1.5 1.5 0 0 1 21 9.7v8.3A1.5 1.5 0 0 1 19.5 19.5h-15A1.5 1.5 0 0 1 3 18z"></path></svg>
               <span style="font-family:'Manrope';font-size:13px;color:#c4b5fd;word-break:break-all;">{{ folderPath }}</span>
             </div>
-            <button style="min-height:50px;padding:0 20px;border-radius:11px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Choose folder…</button>
+            <button style="min-height:50px;padding:0 20px;border-radius:11px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Choose folder…</button>
           </div>
 
           <!-- session artifacts × derived wizard state -->
@@ -754,7 +815,7 @@
         <div style="margin-top:20px;height:9px;border-radius:6px;background:#1c1c22;overflow:hidden;"><div style="height:100%;width:{{ computePct }};background:linear-gradient(90deg,#8b5cf6,#a78bfa);border-radius:6px;transition:width .3s ease;"></div></div>
         <div style="display:flex;justify-content:space-between;margin-top:9px;font-family:'Manrope';font-size:11.5px;color:#9a9aa5;font-variant-numeric:tabular-nums;"><span>Selecting keyframes · bundle solve</span><span style="color:#c4b5fd;font-weight:600;">{{ computePctLabel }}</span></div>
         <div style="margin-top:20px;padding-top:18px;border-top:1px solid #1c1c22;display:flex;justify-content:flex-end;">
-          <button onClick="{{ cancelCompute }}" style="min-height:44px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+          <button onClick="{{ cancelCompute }}" style="min-height:44px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
         </div>
       </div>
     </div>
@@ -770,7 +831,7 @@
         </div>
         <div style="margin-top:15px;font-size:13px;color:#9a9aa5;line-height:1.6;">Recomputing with <span style="color:#c4b5fd;">stride 1/{{ stride }}</span> and a <span style="color:#c4b5fd;">{{ keyframeCap }}-keyframe cap</span> will replace the current intrinsics for {{ activeCamName }}. The existing result (error {{ reprojErr }} px) is <strong style="color:#ececf0;">discarded and cannot be recovered</strong>. The recorded video is kept.</div>
         <div style="margin-top:22px;display:flex;justify-content:flex-end;gap:10px;">
-          <button onClick="{{ cancelOverwrite }}" style="min-height:46px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#15151a;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
+          <button onClick="{{ cancelOverwrite }}" style="min-height:46px;padding:0 20px;border-radius:10px;border:1px solid #2a2a32;background:#1b1d24;color:#cfcfd6;font-family:inherit;font-size:13px;font-weight:600;cursor:pointer;">Cancel</button>
           <button onClick="{{ confirmOverwrite }}" style="min-height:46px;padding:0 20px;border-radius:10px;border:1px solid #4a2530;background:linear-gradient(180deg,#f0576b,#d63a52);color:#fff;font-family:'Sora';font-size:13px;font-weight:600;cursor:pointer;">Overwrite &amp; recompute</button>
         </div>
       </div>
@@ -790,6 +851,12 @@ class Component extends DCLogic {
     loadVariant: 'A',
     // modals
     showOverwrite: false,
+    // export
+    exportUnits: 'mm',
+    exportSel: { toml: true, threejs: false, blender: false, unity: false, unreal: false },
+    exportTab: 'toml',
+    exportCopied: false,
+    allPosed: true,
   };
 
   componentDidMount() {
@@ -805,6 +872,130 @@ class Component extends DCLogic {
     }
   }
   componentWillUnmount() { clearInterval(this._rec); clearInterval(this._cmp); }
+
+  // ---------- EXPORT: data + generators ----------
+  exportCams() {
+    return [
+      { name: 'cam_0', port: 0, K: [1623.42, 1623.87, 962.11, 541.34], dist: [-0.1421, 0.1183, 0.00012, -0.00007, -0.0456], rot: [0.0, 0.0, 0.0], t: [0.0, 0.0, 0.0], quat: [0.0, 0.0, 0.0, 1.0], fov: [61.4, 37.2], err: 0.19, grid: 42 },
+      { name: 'cam_1', port: 1, K: [1620.08, 1620.55, 958.72, 545.90], dist: [-0.1398, 0.1102, -0.00004, 0.00009, -0.0421], rot: [-0.0421, 0.7620, -0.0113], t: [412.7, -3.1, 88.4], quat: [-0.0208, 0.3717, -0.0054, 0.9281], fov: [61.5, 37.3], err: 0.23, grid: 39 },
+      { name: 'cam_2', port: 2, K: [1626.71, 1627.03, 965.88, 538.02], dist: [-0.1455, 0.1241, 0.00021, -0.00015, -0.0498], rot: [0.0137, 1.5382, -0.0264], t: [598.2, -1.9, 601.7], quat: [-0.0067, 0.6947, -0.0129, 0.7191], fov: [61.2, 37.0], err: 0.21, grid: 44 },
+      { name: 'cam_3', port: 3, K: [1618.94, 1619.20, 954.36, 549.11], dist: [-0.1372, 0.1067, -0.00011, 0.00006, -0.0404], rot: [0.0289, 2.3106, -0.0192], t: [211.4, -4.2, 918.3], quat: [-0.0102, 0.9143, -0.0079, 0.4048], fov: [61.6, 37.4], err: 0.26, grid: 37 },
+    ];
+  }
+
+  genToml() {
+    const cams = this.exportCams();
+    let L = ['# camera_array.toml — Caliscope (OpenCV axes)', 'camera_count = 4', 'camera_prefix = "cam"', ''];
+    cams.forEach(c => {
+      L.push('[' + c.name + ']');
+      L.push('port = ' + c.port);
+      L.push('size = [1920, 1080]');
+      L.push('matrix = [');
+      L.push('  [' + c.K[0].toFixed(2) + ', 0.0, ' + c.K[2].toFixed(2) + '],');
+      L.push('  [0.0, ' + c.K[1].toFixed(2) + ', ' + c.K[3].toFixed(2) + '],');
+      L.push('  [0.0, 0.0, 1.0],');
+      L.push(']');
+      L.push('distortions = [' + c.dist.join(', ') + ']');
+      L.push('rotation = [' + c.rot.map(v => v.toFixed(4)).join(', ') + ']');
+      L.push('translation = [' + c.t.map(v => v.toFixed(1)).join(', ') + ']');
+      L.push('error = ' + c.err.toFixed(2));
+      L.push('grid_count = ' + c.grid);
+      L.push('');
+    });
+    return L.join('\n').replace(/\n$/, '');
+  }
+
+  genJson(key) {
+    const meta = {
+      threejs: { name: 'threejs', up: 'Y', hand: 'right', plats: ['three.js', 'OpenGL', 'WebGL'], map: 'x_r=x, y_r=-y, z_r=-z', fwd: '-Z', camUp: '+Y' },
+      blender: { name: 'blender', up: 'Z', hand: 'right', plats: ['Blender', 'ROS'], map: 'x_r=x, y_r=-z, z_r=y', fwd: '-Z', camUp: '+Y' },
+      unity: { name: 'unity', up: 'Y', hand: 'left', plats: ['Unity'], map: 'x_l=x, y_l=-y, z_l=z', fwd: '+Z', camUp: '+Y' },
+      unreal: { name: 'unreal', up: 'Z', hand: 'left', plats: ['Unreal'], map: 'x_l=x, y_l=z, z_l=y', fwd: '+X', camUp: '+Z' },
+    }[key];
+    const m = this.state.exportUnits;
+    const s = m === 'm' ? 0.001 : 1;
+    const u = (v) => m === 'm' ? +(v * s).toFixed(5) : +v.toFixed(1);
+    const cams = this.exportCams();
+    const rh = meta.hand === 'right';
+    const ind = (n) => '  '.repeat(n);
+    let L = ['{'];
+    L.push(ind(1) + '"convention": {');
+    L.push(ind(2) + '"name": "' + meta.name + '",');
+    L.push(ind(2) + '"up": "' + meta.up + '",');
+    L.push(ind(2) + '"handedness": "' + meta.hand + '",');
+    L.push(ind(2) + '"platforms": [' + meta.plats.map(p => '"' + p + '"').join(', ') + '],');
+    L.push(ind(2) + '"mapping": "' + meta.map + '",');
+    L.push(ind(2) + '"camera_forward": "' + meta.fwd + '",');
+    L.push(ind(2) + '"camera_up": "' + meta.camUp + '"');
+    L.push(ind(1) + '},');
+    L.push(ind(1) + '"world_units": "' + m + '",');
+    L.push(ind(1) + '"anchor": { "camera": "cam_0", "position": [0.0, 0.0, 0.0] },');
+    L.push(ind(1) + '"cameras": [');
+    cams.forEach((c, i) => {
+      const last = i === cams.length - 1;
+      L.push(ind(2) + '{');
+      L.push(ind(3) + '"name": "' + c.name + '",');
+      L.push(ind(3) + '"position": [' + c.t.map(u).join(', ') + '],');
+      L.push(ind(3) + '"quaternion": [' + c.quat.join(', ') + '],');
+      L.push(ind(3) + '"matrix": [');
+      L.push(ind(4) + '[1.0, 0.0, 0.0, ' + u(c.t[0]) + '],');
+      L.push(ind(4) + '[0.0, 1.0, 0.0, ' + u(c.t[1]) + '],');
+      L.push(ind(4) + '[0.0, 0.0, 1.0, ' + u(c.t[2]) + '],');
+      L.push(ind(4) + '[0.0, 0.0, 0.0, 1.0]');
+      L.push(ind(3) + '],');
+      if (rh) {
+        L.push(ind(3) + '"view": {');
+        L.push(ind(4) + '"R": [' + c.rot.map(v => v.toFixed(4)).join(', ') + '],');
+        L.push(ind(4) + '"t": [' + c.t.map(u).join(', ') + ']');
+        L.push(ind(3) + '},');
+      }
+      L.push(ind(3) + '"intrinsics": {');
+      L.push(ind(4) + '"resolution": [1920, 1080],');
+      L.push(ind(4) + '"matrix": [[' + c.K[0].toFixed(2) + ', 0.0, ' + c.K[2].toFixed(2) + '], [0.0, ' + c.K[1].toFixed(2) + ', ' + c.K[3].toFixed(2) + '], [0.0, 0.0, 1.0]],');
+      L.push(ind(4) + '"distortions": [' + c.dist.join(', ') + '],');
+      L.push(ind(4) + '"fov_deg": { "x": ' + c.fov[0].toFixed(1) + ', "y": ' + c.fov[1].toFixed(1) + ' }');
+      L.push(ind(3) + '},');
+      L.push(ind(3) + '"error": ' + c.err.toFixed(2));
+      L.push(ind(2) + '}' + (last ? '' : ','));
+    });
+    L.push(ind(1) + ']');
+    L.push('}');
+    return L.join('\n');
+  }
+
+  exportContent(key) { return key === 'toml' ? this.genToml() : this.genJson(key); }
+
+  // lightweight syntax highlighter → array of React spans per line
+  hlLine(line, lang, keyPrefix) {
+    const R = React.createElement;
+    const out = []; let k = 0;
+    const push = (txt, color) => out.push(R('span', { key: keyPrefix + '-' + (k++), style: color ? { color } : undefined }, txt));
+    if (lang === 'toml') {
+      if (/^\s*#/.test(line)) { push(line, '#5a6b7c'); return out; }
+      const sec = line.match(/^(\s*)(\[[^\]]+\])(\s*)$/);
+      if (sec) { push(sec[1]); push(sec[2], '#c4b5fd'); return out; }
+      const kv = line.match(/^(\s*)([A-Za-z0-9_]+)(\s*=\s*)(.*)$/);
+      if (kv) { push(kv[1]); push(kv[2], '#8fb6e8'); push(kv[3], '#6a7684'); this.hlInline(kv[4], out, push); return out; }
+    }
+    this.hlInline(line, out, push, lang);
+    return out;
+  }
+
+  hlInline(str, out, push, lang) {
+    const re = /("(?:[^"\\]|\\.)*")(\s*:)?|(-?\d+\.?\d*(?:e[+-]?\d+)?)|\b(true|false|null)\b|([{}\[\],:=])/g;
+    let m, last = 0;
+    while ((m = re.exec(str))) {
+      if (m.index > last) push(str.slice(last, m.index));
+      if (m[1]) {
+        if (m[2]) { push(m[1], '#8fb6e8'); push(m[2], '#6a7684'); }
+        else push(m[1], '#9ece9a');
+      } else if (m[3]) push(m[3], '#e0b070');
+      else if (m[4]) push(m[4], '#c4b5fd');
+      else if (m[5]) push(m[5], '#6a7684');
+      last = re.lastIndex;
+    }
+    if (last < str.length) push(str.slice(last));
+  }
 
   startCompute() {
     clearInterval(this._cmp);
@@ -1105,6 +1296,97 @@ class Component extends DCLogic {
         { name: 'config.toml', tag: 'board', tagColor: '#9a9aa5', tagBg: '#1a1a20' },
         { name: 'session.toml', tag: 'FSM state', tagColor: '#9a9aa5', tagBg: '#1a1a20' },
       ],
+
+      ...this.exportVals(),
+    };
+  }
+
+  exportVals() {
+    const ARTS = [
+      { key: 'toml', file: 'camera_array.toml', sub: 'Caliscope · OpenCV axes', lang: 'toml', langTag: 'TOML' },
+      { key: 'threejs', file: 'camera_array_threejs.json', sub: 'three.js / OpenGL · Y-up · right-handed', lang: 'json', langTag: 'JSON' },
+      { key: 'blender', file: 'camera_array_blender.json', sub: 'Blender / ROS · Z-up · right-handed', lang: 'json', langTag: 'JSON' },
+      { key: 'unity', file: 'camera_array_unity.json', sub: 'Unity · Y-up · left-handed', lang: 'json', langTag: 'JSON' },
+      { key: 'unreal', file: 'camera_array_unreal.json', sub: 'Unreal · Z-up · left-handed', lang: 'json', langTag: 'JSON' },
+    ];
+    const sel = this.state.exportSel;
+    const units = this.state.exportUnits;
+    const locked = !this.state.allPosed;
+    const checkedKeys = ARTS.filter(a => sel[a.key]).map(a => a.key);
+    const selCount = checkedKeys.length;
+
+    // keep active tab valid
+    let tab = this.state.exportTab;
+    if (!sel[tab]) tab = checkedKeys[0] || null;
+
+    const unitSeg = (on) => ({ bg: on ? 'rgba(139,92,246,.9)' : 'transparent', color: on ? '#fff' : '#9a9aa5', shadow: on ? '0 1px 2px rgba(0,0,0,.4)' : 'none' });
+
+    const artifactRows = ARTS.map(a => {
+      const on = !!sel[a.key];
+      return {
+        file: a.file, sub: a.sub, langTag: a.langTag,
+        onToggle: () => this.setState(s => ({ exportSel: { ...s.exportSel, [a.key]: !s.exportSel[a.key] }, exportTab: !s.exportSel[a.key] ? a.key : s.exportTab })),
+        check: on ? '✓' : '',
+        boxBorder: on ? '#8b5cf6' : '#3a3a44',
+        boxBg: on ? '#8b5cf6' : 'transparent',
+        rowBg: on ? 'rgba(139,92,246,.06)' : 'transparent',
+        nameColor: on ? '#ececf0' : '#bcbcc6',
+      };
+    });
+
+    const previewTabs = ARTS.filter(a => sel[a.key]).map(a => ({
+      file: a.file, onClick: () => this.setState({ exportTab: a.key }),
+      color: tab === a.key ? '#ececf0' : '#7a7a85',
+      bar: tab === a.key ? '#8b5cf6' : 'transparent',
+      bg: tab === a.key ? '#0c0c0f' : 'transparent',
+    }));
+
+    let previewLines = [];
+    if (tab) {
+      const art = ARTS.find(a => a.key === tab);
+      const content = this.exportContent(tab);
+      previewLines = content.split('\n').map((ln, i) => ({ n: i + 1, spans: this.hlLine(ln, art.lang, 'l' + i) }));
+    }
+
+    return {
+      exportLocked: locked,
+      exportUnlocked: !locked,
+      togglePosed: () => this.setState(s => ({ allPosed: !s.allPosed })),
+      posedLabel: locked ? '2 / 4 cameras posed' : '4 / 4 cameras posed',
+      posedColor: locked ? '#f0a05a' : '#34d399',
+      posedBorder: locked ? 'rgba(240,160,90,.3)' : 'rgba(52,211,153,.25)',
+      goExtrinsic: () => this.setState({ screen: 'extrinsic' }),
+
+      setUnitMm: () => this.setState({ exportUnits: 'mm' }),
+      setUnitM: () => this.setState({ exportUnits: 'm' }),
+      unitMm: unitSeg(units === 'mm'),
+      unitM: unitSeg(units === 'm'),
+
+      artifactRows,
+      previewTabs,
+      previewLines,
+      hasPreview: !!tab,
+      noPreview: !tab,
+
+      copyPreview: () => {
+        if (!tab) return;
+        try { navigator.clipboard && navigator.clipboard.writeText(this.exportContent(tab)); } catch (e) {}
+        this.setState({ exportCopied: true });
+        clearTimeout(this._copyT);
+        this._copyT = setTimeout(() => this.setState({ exportCopied: false }), 1600);
+      },
+      copyLabel: this.state.exportCopied ? 'Copied' : 'Copy',
+      copyIcon: this.state.exportCopied ? '✓' : '⧉',
+      copyColor: this.state.exportCopied ? '#34d399' : '#9a9aa5',
+
+      destPath: 'sessions/default/export/',
+      selCount,
+      downloadZip: () => { if (selCount > 0) this.setState({ exportCopied: false }); },
+      dlBg: selCount > 0 ? 'linear-gradient(180deg,#8b5cf6,#7c3aed)' : '#141418',
+      dlColor: selCount > 0 ? '#fff' : '#5a5a64',
+      dlBorder: selCount > 0 ? '#2c2640' : '#232329',
+      dlCursor: selCount > 0 ? 'pointer' : 'not-allowed',
+      dlHint: selCount > 0 ? selCount + ' file(s) written to the session export folder.' : 'Check at least one artifact to enable download.',
     };
   }
 }

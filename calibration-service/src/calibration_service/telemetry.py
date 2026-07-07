@@ -9,6 +9,7 @@ with the metrics slice.
 from __future__ import annotations
 
 from calibration_service.detection import BoardDetection
+from calibration_service.synchronization import CovisibilityGraph
 
 TELEMETRY_TOPIC = "telemetry"
 
@@ -31,4 +32,24 @@ def coverage_metrics_payload(
         "sharpness": round(detection.sharpness, 1),
         "sharpness_ok": bool(detection.sharpness >= SHARPNESS_MIN),
         "grid_count": detection.count,
+    }
+
+
+def covisibility_payload(graph: CovisibilityGraph) -> dict[str, object]:
+    """Build the ``covisibility`` data-channel payload for the extrinsic gauges.
+
+    Pair counts drive the webapp's co-visibility matrix ([[extrinsic-calibration-flow]]);
+    ``board_frames`` gives each camera's own detection tally, ``synced_groups`` the
+    denominator (groups meeting the quorum, board seen or not).
+    """
+    return {
+        "type": "covisibility",
+        "phase": "extrinsic",
+        "cameras": list(graph.cameras),
+        "pairs": [
+            {"a": a, "b": b, "count": count}
+            for (a, b), count in sorted(graph.pair_counts.items())
+        ],
+        "board_frames": dict(graph.board_frames),
+        "synced_groups": graph.synced_groups,
     }

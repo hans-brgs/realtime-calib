@@ -1,13 +1,12 @@
 import { ActionIcon, Box, Center, Group, Slider, Text } from '@mantine/core';
 import { IconPlayerPauseFilled, IconPlayerPlayFilled } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
-import { intrinsicFrameUrl } from '@/transport/httpClient';
+import { intrinsicPreviewUrl, PREVIEW_FPS } from '@/transport/httpClient';
 
-// Prepare-step replay (ADR-0022, Option C): scrub the recorded MJPG sweep by asking the
-// frame-server for one JPEG frame at a time — used directly as an <img> src, no transcode.
-const PLAY_FPS = 15;
-
+// Prepare-step replay (ADR-0027): a native <video> over the CFR-retimed preview
+// mp4 — frame i sits exactly at (i + 0.5) / PREVIEW_FPS, so the slider and trim
+// bounds map 1:1 onto the mkv indices the compute reads. Play loops in the trim.
 interface PrepareScrubberProps {
   camera: string;
   total: number;
@@ -16,17 +15,44 @@ interface PrepareScrubberProps {
   trim: [number, number]; // inclusive [start, end], drawn as slider marks
 }
 
+const frameTime = (index: number): number => (index + 0.5) / PREVIEW_FPS;
+
 export function PrepareScrubber({ camera, total, frame, onFrame, trim }: PrepareScrubberProps) {
+  const video = useRef<HTMLVideoElement>(null);
+  const reported = useRef(-1);
   const [playing, setPlaying] = useState(false);
   const [start, end] = trim;
   const max = Math.max(0, total - 1);
 
-  // Play = advance the playhead within the trim range at a fixed rate, then loop.
+  // Paused: the playhead follows the parent's frame (slider, trim clicks).
   useEffect(() => {
-    if (!playing || total === 0) return;
-    const id = setInterval(() => onFrame(frame >= end ? start : frame + 1), 1000 / PLAY_FPS);
-    return () => clearInterval(id);
-  }, [playing, frame, start, end, total, onFrame]);
+    const element = video.current;
+    if (element && !playing) {
+      element.currentTime = frameTime(Math.min(frame, max));
+    }
+  }, [frame, max, playing]);
+
+  // Playing: the video clock leads; report indices up, loop inside the trim.
+  useEffect(() => {
+    const element = video.current;
+    if (!element || !playing || total === 0) return;
+    void element.play();
+    const id = window.setInterval(() => {
+      const index = Math.min(Math.floor(element.currentTime * PREVIEW_FPS), max);
+      if (index >= end) {
+        element.currentTime = frameTime(start); // loop back to the trim start
+        reported.current = start;
+        onFrame(start);
+      } else if (index !== reported.current) {
+        reported.current = index;
+        onFrame(index);
+      }
+    }, 1000 / PREVIEW_FPS);
+    return () => {
+      window.clearInterval(id);
+      element.pause();
+    };
+  }, [playing, start, end, max, total, onFrame]);
 
   if (total === 0) {
     return (
@@ -55,9 +81,15 @@ export function PrepareScrubber({ camera, total, frame, onFrame, trim }: Prepare
           overflow: 'hidden',
         }}
       >
-        <img
-          src={intrinsicFrameUrl(camera, frame)}
-          alt={`frame ${frame}`}
+        <video
+          ref={video}
+          src={intrinsicPreviewUrl(camera)}
+          muted
+          playsInline
+          preload="auto"
+          onLoadedMetadata={(event) => {
+            event.currentTarget.currentTime = frameTime(Math.min(frame, max));
+          }}
           style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
         />
       </Box>

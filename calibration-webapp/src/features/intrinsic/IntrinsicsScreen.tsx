@@ -1,9 +1,4 @@
-import {
-  isTrackReference,
-  LiveKitRoom,
-  useDataChannel,
-  useTracks,
-} from '@livekit/components-react';
+import { isTrackReference, useDataChannel, useTracks } from '@livekit/components-react';
 import {
   Box,
   Button,
@@ -18,6 +13,7 @@ import {
 } from '@mantine/core';
 import {
   IconAlertTriangle,
+  IconCheck,
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
@@ -25,20 +21,25 @@ import { Track } from 'livekit-client';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
 import { CameraTile } from '@/features/preview/CameraTile';
-import { computeIntrinsicThunk, selectSession } from '@/features/session/sessionSlice';
+import {
+  computeIntrinsicThunk,
+  selectSession,
+  validateIntrinsicThunk,
+} from '@/features/session/sessionSlice';
 import {
   type CoverageMetrics,
   coverageReceived,
   selectCoverage,
 } from '@/features/telemetry/telemetrySlice';
 import {
-  fetchIntrinsicFrameCount,
+  fetchIntrinsicPreviewStatus,
+  retryIntrinsicPreview,
   fetchIntrinsicMetrics,
-  fetchToken,
   type IntrinsicMetrics,
   setActiveIntrinsic,
   startIntrinsic,
@@ -295,49 +296,12 @@ function PreparePanel({
   );
 }
 
-const STEPS: { key: Step; label: string }[] = [
-  { key: 'capture', label: 'Capture' },
-  { key: 'prepare', label: 'Prepare' },
-  { key: 'computing', label: 'Computing' },
-  { key: 'results', label: 'Results' },
+const PHASES = [
+  { key: 'capture', label: 'Capture', sub: 'live capture + video' },
+  { key: 'prepare', label: 'Prepare', sub: 'replay + trim + stride' },
+  { key: 'computing', label: 'Computing', sub: 'keyframes + solve' },
+  { key: 'results', label: 'Results', sub: 'params + coverage' },
 ];
-
-function StepIndicator({ step }: { step: Step }) {
-  const idx = STEPS.findIndex((s) => s.key === step);
-  return (
-    <Group gap={8} mb="md">
-      {STEPS.map((s, i) => {
-        const active = i === idx;
-        const done = i < idx;
-        return (
-          <Group
-            key={s.key}
-            gap={7}
-            px={12}
-            py={6}
-            style={{
-              borderRadius: 'var(--mantine-radius-sm)',
-              background: active ? 'rgba(167,139,250,0.14)' : 'var(--rc-panel)',
-              border: `1px solid ${active ? 'var(--rc-accent)' : 'var(--rc-border)'}`,
-            }}
-          >
-            <Text
-              fz="0.7rem"
-              fw={700}
-              className="rc-tnum"
-              c={active ? 'var(--rc-accent-bright)' : done ? 'var(--rc-success)' : 'dark.3'}
-            >
-              {done ? '✓' : i + 1}
-            </Text>
-            <Text fz="0.78rem" c={active ? undefined : 'dark.2'}>
-              {s.label}
-            </Text>
-          </Group>
-        );
-      })}
-    </Group>
-  );
-}
 
 function TelemetryListener() {
   const dispatch = useAppDispatch();
@@ -365,6 +329,8 @@ function IntrinsicsInner() {
   const [step, setStep] = useState<Step>('capture');
   const [recording, setRecording] = useState(false);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
+  // Preview transcode popup (ADR-0027): null = idle, 'running' = spinner, else error.
+  const [transcoding, setTranscoding] = useState<string | null>(null);
   const [computeError, setComputeError] = useState<string | null>(null);
 
   // Prepare-step state (ADR-0022): the recorded sweep + the operator knobs.
@@ -392,7 +358,9 @@ function IntrinsicsInner() {
   useEffect(() => {
     if (!active) return;
     setRecording(false);
-    setStep(camera?.status === 'intrinsic_done' ? 'results' : 'capture');
+    // Land on Results whenever intrinsics EXIST (matrix present) — the status
+    // moves on to 'extrinsic_done' later, but the calibration is not lost.
+    setStep(camera?.matrix != null ? 'results' : 'capture');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
@@ -426,22 +394,19 @@ function IntrinsicsInner() {
 
   const startRecording = async () => {
     if (!active) return;
-    await startIntrinsic(active).catch(() => { });
-    setRecording(true);
-    setStep('capture');
+    setComputeError(null);
+    try {
+      await startIntrinsic(active);
+      setRecording(true);
+      setStep('capture');
+    } catch (err) {
+      // Surface the failure instead of showing a REC badge over a recording that
+      // never started (which would later transcode an empty file).
+      setComputeError(err instanceof Error ? err.message : 'could not start recording');
+    }
   };
 
-  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
-  const stopRecording = async () => {
-    if (!active) return;
-    await stopIntrinsic(active).catch(() => { });
-    setRecording(false);
-    let total = 0;
-    try {
-      total = (await fetchIntrinsicFrameCount(active)).total;
-    } catch {
-      /* leave total at 0; the scrubber shows an empty-recording state */
-    }
+  const enterPrepare = (total: number) => {
     setFrameTotal(total);
     setFrame(0);
     setTrimStart(0);
@@ -449,6 +414,42 @@ function IntrinsicsInner() {
     setStride(5);
     setKeyframeCap(25);
     setStep('prepare');
+  };
+
+  // Wait for the background preview transcode (ADR-0027) behind a blocking popup,
+  // then enter Prepare. 'transcoding' is 'running' or an error message.
+  const waitForPreview = async () => {
+    if (!active) return;
+    setTranscoding('running');
+    try {
+      let status = await fetchIntrinsicPreviewStatus(active);
+      for (let i = 0; status.state === 'running' && i < 150; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        status = await fetchIntrinsicPreviewStatus(active);
+      }
+      if (status.state === 'failed' || status.state === 'running') {
+        setTranscoding(status.error ?? 'preview transcode timed out');
+        return;
+      }
+      setTranscoding(null);
+      enterPrepare(status.state === 'done' ? status.frames : 0);
+    } catch (cause) {
+      setTranscoding(cause instanceof Error ? cause.message : 'preview transcode failed');
+    }
+  };
+
+  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
+  const stopRecording = async () => {
+    if (!active) return;
+    await stopIntrinsic(active).catch(() => { });
+    setRecording(false);
+    await waitForPreview();
+  };
+
+  const retryTranscode = async () => {
+    if (!active) return;
+    await retryIntrinsicPreview(active).catch(() => {});
+    await waitForPreview();
   };
 
   const runCompute = async () => {
@@ -491,6 +492,23 @@ function IntrinsicsInner() {
     if (next) setActive(next.name);
   };
 
+  const isLastCamera = cameras.findIndex((c) => c.name === active) >= cameras.length - 1;
+  const allCalibrated =
+    cameras.length > 0 &&
+    cameras.every((c) => c.status === 'intrinsic_done' || c.status === 'extrinsic_done');
+
+  // On the last camera, "Validate" signs off the whole intrinsic step: advance the
+  // persisted step to extrinsic capture and let the wizard rail follow (no explicit
+  // navigation needed, spec wizard-navigation).
+  const validateAndAdvance = async () => {
+    setComputeError(null);
+    try {
+      await dispatch(validateIntrinsicThunk()).unwrap();
+    } catch (err) {
+      setComputeError(err instanceof Error ? err.message : 'validate failed');
+    }
+  };
+
   const scrubbing = step === 'prepare' || step === 'computing';
 
   return (
@@ -506,7 +524,7 @@ function IntrinsicsInner() {
         }))}
         mb="md"
       />
-      <StepIndicator step={step} />
+      <PhaseStepper phases={PHASES} current={step} />
 
       <Box
         className="rc-camsetup-grid"
@@ -635,8 +653,24 @@ function IntrinsicsInner() {
           <Box mt="auto" pt="md">
             {step === 'results' ? (
               <>
-                <Button fullWidth onClick={nextCamera} disabled={cameras.findIndex((c) => c.name === active) >= cameras.length - 1}>
-                  Validate → next camera
+                {isLastCamera ? (
+                  <Button
+                    fullWidth
+                    leftSection={<IconCheck size={15} />}
+                    onClick={() => void validateAndAdvance()}
+                    disabled={!allCalibrated}
+                  >
+                    Validate → Extrinsics
+                  </Button>
+                ) : (
+                  <Button fullWidth onClick={nextCamera}>
+                    Validate → next camera
+                  </Button>
+                )}
+                {/* Back to Prepare on the SAME recording: retune trim/stride/cap,
+                    then Compute again (the preview mp4 is already there). */}
+                <Button fullWidth variant="light" mt="sm" onClick={() => void waitForPreview()}>
+                  Recompute (tune again)
                 </Button>
                 <Button
                   fullWidth
@@ -694,6 +728,35 @@ function IntrinsicsInner() {
         </Group>
       </Modal>
 
+      {/* Preview transcode (ADR-0027): blocks the Stop -> Prepare transition. */}
+      <Modal
+        opened={transcoding !== null}
+        onClose={() => setTranscoding(null)}
+        withCloseButton={transcoding !== 'running'}
+        closeOnClickOutside={false}
+        closeOnEscape={false}
+        centered
+        title="Preparing replay"
+      >
+        {transcoding === 'running' ? (
+          <Group gap="sm">
+            <Loader size="sm" />
+            <Text fz="0.84rem" c="dark.1">
+              Transcoding preview…
+            </Text>
+          </Group>
+        ) : (
+          <>
+            <Text fz="0.8rem" c="var(--rc-error)" mb="md">
+              {transcoding}
+            </Text>
+            <Group justify="flex-end">
+              <Button onClick={() => void retryTranscode()}>Retry transcode</Button>
+            </Group>
+          </>
+        )}
+      </Modal>
+
       {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}
       <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title={`Overwrite ${active} calibration?`}>
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
@@ -719,53 +782,18 @@ function IntrinsicsInner() {
 
 // Intrinsic calibration per camera (ADR-0022 sub-FSM capture → prepare → computing →
 // results): sweep the board (live burn-in + gauges), replay + tune the sampling in
-// Prepare, compute from the recording, then review the result + coverage.
+// Prepare, compute from the recording, then review the result + coverage. The
+// LiveKit room lives at the App level (RoomProvider) — this screen only consumes it.
 export function IntrinsicsScreen() {
-  const [connection, setConnection] = useState<{ serverUrl: string; token: string } | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    fetchToken()
-      .then((response) => {
-        if (!cancelled) {
-          setConnection({ serverUrl: import.meta.env.VITE_LIVEKIT_URL, token: response.token });
-        }
-      })
-      .catch((cause: unknown) => {
-        if (!cancelled) setError(cause instanceof Error ? cause.message : String(cause));
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
   return (
     <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
       <ScreenHeader
         title="Intrinsics"
         subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
       />
-      {error ? (
-        <Center style={{ flex: 1 }}>
-          <Text c="red">{error}</Text>
-        </Center>
-      ) : !connection ? (
-        <Center style={{ flex: 1 }}>
-          <Loader />
-        </Center>
-      ) : (
-        <LiveKitRoom
-          serverUrl={connection.serverUrl}
-          token={connection.token}
-          connect
-          audio={false}
-          video={false}
-          style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-        >
-          <IntrinsicsInner />
-        </LiveKitRoom>
-      )}
+      <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+        <IntrinsicsInner />
+      </Box>
     </Box>
   );
 }

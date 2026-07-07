@@ -30,10 +30,12 @@ FROM python:3.14-slim-trixie
 WORKDIR /app
 
 # libgl1 + libglib2.0-0: required by opencv-python. v4l-utils: USB camera support.
+# ffmpeg: background H.264 preview transcodes for the Prepare replay (ADR-0027).
 RUN apt-get update && apt-get install -y --no-install-recommends \
     libgl1 \
     libglib2.0-0 \
     v4l-utils \
+    ffmpeg \
  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=builder /app/.venv /app/.venv

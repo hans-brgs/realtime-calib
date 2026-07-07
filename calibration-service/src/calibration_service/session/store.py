@@ -110,7 +110,7 @@ def _camera_to_dict(c: CameraConfig) -> dict[str, object]:
         "fps": c.fps,
         "status": c.status.value,
     }
-    # Intrinsic results are optional; omit when absent (rtoml has no null).
+    # Calibration results are optional; omit when absent (rtoml has no null).
     if c.matrix is not None:
         data["matrix"] = c.matrix
     if c.distortions is not None:
@@ -119,6 +119,12 @@ def _camera_to_dict(c: CameraConfig) -> dict[str, object]:
         data["calibration_error"] = c.calibration_error
     if c.grid_count is not None:
         data["grid_count"] = c.grid_count
+    if c.rotation is not None:
+        data["rotation"] = c.rotation
+    if c.translation is not None:
+        data["translation"] = c.translation
+    if c.extrinsic_error is not None:
+        data["extrinsic_error"] = c.extrinsic_error
     return data
 
 
@@ -127,6 +133,9 @@ def _camera_from_dict(c: Mapping[str, Any]) -> CameraConfig:
     distortions = c.get("distortions")
     error = c.get("calibration_error")
     grid_count = c.get("grid_count")
+    rotation = c.get("rotation")
+    translation = c.get("translation")
+    extrinsic_error = c.get("extrinsic_error")
     return CameraConfig(
         index=int(c["index"]),
         name=str(c["name"]),
@@ -142,6 +151,9 @@ def _camera_from_dict(c: Mapping[str, Any]) -> CameraConfig:
         distortions=[float(v) for v in distortions] if distortions is not None else None,
         calibration_error=float(error) if error is not None else None,
         grid_count=int(grid_count) if grid_count is not None else None,
+        rotation=[float(v) for v in rotation] if rotation is not None else None,
+        translation=[float(v) for v in translation] if translation is not None else None,
+        extrinsic_error=float(extrinsic_error) if extrinsic_error is not None else None,
     )
 
 
@@ -152,6 +164,8 @@ def _to_dict(session: CalibrationSession) -> dict[str, object]:
         "mode": session.mode.value,
         "intrinsic_fps": session.intrinsic_fps,
         "optimization_strategy": session.optimization_strategy,
+        "export_units": session.export_units,
+        "export_targets": list(session.export_targets),
         "cameras": [_camera_to_dict(c) for c in session.cameras],
     }
 
@@ -165,4 +179,6 @@ def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
         cameras=cameras,
         intrinsic_fps=int(data["intrinsic_fps"]),
         optimization_strategy=str(data["optimization_strategy"]),
+        export_units=str(data.get("export_units", "mm")),
+        export_targets=[str(t) for t in data.get("export_targets", [])],
     )

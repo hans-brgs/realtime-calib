@@ -1,0 +1,109 @@
+"""Background H.264 preview transcodes (ADR-0027): job states + CFR contract."""
+
+from __future__ import annotations
+
+import asyncio
+import shutil
+from pathlib import Path
+
+import cv2
+import numpy as np
+import pytest
+
+from calibration_service.recording import (
+    PREVIEW_FPS,
+    PreviewJobs,
+    PreviewState,
+    VideoRecorder,
+    preview_path,
+)
+from calibration_service.recording import preview as preview_module
+
+
+def _record(path: Path, frames: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with VideoRecorder(path, 64, 48, fps=30) as recorder:
+        for _ in range(frames):
+            recorder.write(np.zeros((48, 64, 3), dtype=np.uint8))
+
+
+async def _drain(jobs: PreviewJobs) -> None:
+    while any(not task.done() for task in jobs._tasks.values()):
+        await asyncio.gather(*jobs._tasks.values(), return_exceptions=True)
+
+
+def test_status_missing_without_source(tmp_path: Path) -> None:
+    async def scenario() -> None:
+        jobs = PreviewJobs()
+        assert jobs.status(tmp_path / "none.mkv").state is PreviewState.MISSING
+
+    asyncio.run(scenario())
+
+
+def test_failed_then_explicit_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # A failed transcode NEVER re-enqueues silently: status stays FAILED with the
+    # error; retry() is the explicit path (webapp Retry button). Hermetic: fake
+    # commands replace ffmpeg.
+    source = tmp_path / "cam_0.mkv"
+    _record(source, 2)
+
+    async def scenario() -> None:
+        jobs = PreviewJobs()
+        monkeypatch.setattr(preview_module, "transcode_args", lambda s, d: ["/bin/false"])
+        jobs.ensure(source)
+        await _drain(jobs)
+        status = jobs.status(source)
+        assert status.state is PreviewState.FAILED
+        assert status.error
+
+        # status() must not have re-enqueued anything while failed.
+        assert all(task.done() for task in jobs._tasks.values())
+
+        monkeypatch.setattr(
+            preview_module, "transcode_args", lambda s, d: ["/bin/cp", str(s), str(d)]
+        )
+        jobs.retry(source)
+        await _drain(jobs)
+        assert jobs.status(source).state is PreviewState.DONE
+        assert preview_path(source).is_file()
+
+    asyncio.run(scenario())
+
+
+def test_invalidate_drops_job_and_stale_mp4(tmp_path: Path) -> None:
+    source = tmp_path / "cam_0.mkv"
+    _record(source, 1)
+    stale = preview_path(source)
+    stale.write_bytes(b"stale")
+
+    async def scenario() -> None:
+        jobs = PreviewJobs()
+        jobs.invalidate(source)
+        assert not stale.exists()
+
+    asyncio.run(scenario())
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_real_transcode_preserves_frames_and_cfr(tmp_path: Path) -> None:
+    # The ADR-0027 contract: frame count preserved 1:1 and CFR at PREVIEW_FPS,
+    # so the webapp's index = round(currentTime * PREVIEW_FPS) is exact.
+    source = tmp_path / "cam_0.mkv"
+    _record(source, 5)
+
+    async def scenario() -> None:
+        jobs = PreviewJobs()
+        assert jobs.status(source).state is PreviewState.RUNNING  # auto-enqueued
+        await _drain(jobs)
+        status = jobs.status(source)
+        assert status.state is PreviewState.DONE
+        assert status.frames == 5
+
+    asyncio.run(scenario())
+
+    capture = cv2.VideoCapture(str(preview_path(source)))
+    try:
+        assert int(capture.get(cv2.CAP_PROP_FRAME_COUNT)) == 5
+        assert capture.get(cv2.CAP_PROP_FPS) == pytest.approx(PREVIEW_FPS)
+    finally:
+        capture.release()

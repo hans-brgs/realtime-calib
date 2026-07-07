@@ -93,6 +93,24 @@ def test_round_trip_preserves_intrinsic_result(tmp_path: Path) -> None:
     assert loaded.cameras[0].calibration_error == 0.21
     assert loaded.cameras[0].grid_count == 480
     assert loaded.cameras[0].status is CameraStatus.INTRINSIC_DONE
+    assert loaded.cameras[0].rotation is None  # extrinsics untouched
+
+
+def test_round_trip_preserves_extrinsic_result(tmp_path: Path) -> None:
+    camera = _sample_camera()
+    camera.rotation = [0.01, -0.02, 1.57]
+    camera.translation = [12.5, 0.0, -3.25]
+    camera.extrinsic_error = 0.34
+    camera.status = CameraStatus.EXTRINSIC_DONE
+    session = CalibrationSession(session_id="demo", cameras=[camera])
+
+    save_session(tmp_path, session)
+    loaded = load_session(tmp_path, "demo")
+
+    assert loaded.cameras[0].rotation == camera.rotation
+    assert loaded.cameras[0].translation == camera.translation
+    assert loaded.cameras[0].extrinsic_error == 0.34
+    assert loaded.cameras[0].status is CameraStatus.EXTRINSIC_DONE
 
 
 def test_reload_maps_legacy_modes(tmp_path: Path) -> None:

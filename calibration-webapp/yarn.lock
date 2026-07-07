@@ -608,6 +608,20 @@ __metadata:
   languageName: node
   linkType: hard
 
+"@mantine/code-highlight@npm:9.4.1":
+  version: 9.4.1
+  resolution: "@mantine/code-highlight@npm:9.4.1"
+  dependencies:
+    clsx: "npm:^2.1.1"
+  peerDependencies:
+    "@mantine/core": 9.4.1
+    "@mantine/hooks": 9.4.1
+    react: ^19.2.0
+    react-dom: ^19.2.0
+  checksum: 10c0/c1f17e8c9db592d85d0d6b240fa6890f320da306571414260d961e7add14dad48f52cf125ddb4368046fb1e7f2ebf5995db9cde321200023d68b719dedd563ad
+  languageName: node
+  linkType: hard
+
 "@mantine/core@npm:9.4.1":
   version: 9.4.1
   resolution: "@mantine/core@npm:9.4.1"
@@ -1554,6 +1568,7 @@ __metadata:
     "@fontsource-variable/sora": "npm:^5.2.8"
     "@livekit/components-react": "npm:^2.9.14"
     "@livekit/components-styles": "npm:^1.1.6"
+    "@mantine/code-highlight": "npm:9.4.1"
     "@mantine/core": "npm:9.4.1"
     "@mantine/hooks": "npm:9.4.1"
     "@react-three/drei": "npm:^10.6.1"
