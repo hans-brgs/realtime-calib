@@ -32,7 +32,8 @@ import {
   selectCoverage,
 } from '@/features/telemetry/telemetrySlice';
 import {
-  fetchIntrinsicFrameCount,
+  fetchIntrinsicPreviewStatus,
+  retryIntrinsicPreview,
   fetchIntrinsicMetrics,
   type IntrinsicMetrics,
   setActiveIntrinsic,
@@ -323,6 +324,8 @@ function IntrinsicsInner() {
   const [step, setStep] = useState<Step>('capture');
   const [recording, setRecording] = useState(false);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
+  // Preview transcode popup (ADR-0027): null = idle, 'running' = spinner, else error.
+  const [transcoding, setTranscoding] = useState<string | null>(null);
   const [computeError, setComputeError] = useState<string | null>(null);
 
   // Prepare-step state (ADR-0022): the recorded sweep + the operator knobs.
@@ -389,17 +392,7 @@ function IntrinsicsInner() {
     setStep('capture');
   };
 
-  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
-  const stopRecording = async () => {
-    if (!active) return;
-    await stopIntrinsic(active).catch(() => { });
-    setRecording(false);
-    let total = 0;
-    try {
-      total = (await fetchIntrinsicFrameCount(active)).total;
-    } catch {
-      /* leave total at 0; the scrubber shows an empty-recording state */
-    }
+  const enterPrepare = (total: number) => {
     setFrameTotal(total);
     setFrame(0);
     setTrimStart(0);
@@ -407,6 +400,42 @@ function IntrinsicsInner() {
     setStride(5);
     setKeyframeCap(25);
     setStep('prepare');
+  };
+
+  // Wait for the background preview transcode (ADR-0027) behind a blocking popup,
+  // then enter Prepare. 'transcoding' is 'running' or an error message.
+  const waitForPreview = async () => {
+    if (!active) return;
+    setTranscoding('running');
+    try {
+      let status = await fetchIntrinsicPreviewStatus(active);
+      for (let i = 0; status.state === 'running' && i < 150; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        status = await fetchIntrinsicPreviewStatus(active);
+      }
+      if (status.state === 'failed' || status.state === 'running') {
+        setTranscoding(status.error ?? 'preview transcode timed out');
+        return;
+      }
+      setTranscoding(null);
+      enterPrepare(status.state === 'done' ? status.frames : 0);
+    } catch (cause) {
+      setTranscoding(cause instanceof Error ? cause.message : 'preview transcode failed');
+    }
+  };
+
+  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
+  const stopRecording = async () => {
+    if (!active) return;
+    await stopIntrinsic(active).catch(() => { });
+    setRecording(false);
+    await waitForPreview();
+  };
+
+  const retryTranscode = async () => {
+    if (!active) return;
+    await retryIntrinsicPreview(active).catch(() => {});
+    await waitForPreview();
   };
 
   const runCompute = async () => {
@@ -650,6 +679,35 @@ function IntrinsicsInner() {
         <Group justify="center">
           <Loader size="sm" />
         </Group>
+      </Modal>
+
+      {/* Preview transcode (ADR-0027): blocks the Stop -> Prepare transition. */}
+      <Modal
+        opened={transcoding !== null}
+        onClose={() => setTranscoding(null)}
+        withCloseButton={transcoding !== 'running'}
+        closeOnClickOutside={false}
+        closeOnEscape={false}
+        centered
+        title="Preparing replay"
+      >
+        {transcoding === 'running' ? (
+          <Group gap="sm">
+            <Loader size="sm" />
+            <Text fz="0.84rem" c="dark.1">
+              Transcoding preview…
+            </Text>
+          </Group>
+        ) : (
+          <>
+            <Text fz="0.8rem" c="var(--rc-error)" mb="md">
+              {transcoding}
+            </Text>
+            <Group justify="flex-end">
+              <Button onClick={() => void retryTranscode()}>Retry transcode</Button>
+            </Group>
+          </>
+        )}
       </Modal>
 
       {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}

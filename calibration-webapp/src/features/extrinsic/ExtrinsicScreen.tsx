@@ -18,7 +18,7 @@ import {
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { PhaseStepper } from '@/components/PhaseStepper';
@@ -37,9 +37,12 @@ import {
 import {
   type ExtrinsicGroup,
   type ExtrinsicResultPayload,
-  extrinsicFrameUrl,
+  extrinsicPreviewUrl,
   fetchExtrinsicGroups,
+  fetchExtrinsicPreviewStatus,
   fetchExtrinsicResult,
+  PREVIEW_FPS,
+  retryExtrinsicPreview,
   setCaptureView,
   startExtrinsic,
   stopExtrinsic,
@@ -83,6 +86,35 @@ function TelemetryListener() {
 
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
+// One camera's frame of a synchronized group, shown by seeking its CFR-retimed
+// preview mp4 (ADR-0027): frame i sits exactly at (i + 0.5) / PREVIEW_FPS. The
+// lockstep across cameras comes from the DATA (per-camera indices of the group,
+// ADR-0007) — free-running cameras never share a clock.
+function PreviewFrame({ camera, index }: { camera: string; index: number }) {
+  const video = useRef<HTMLVideoElement>(null);
+
+  useEffect(() => {
+    const element = video.current;
+    if (element && element.readyState > 0) {
+      element.currentTime = (index + 0.5) / PREVIEW_FPS;
+    }
+  }, [index]);
+
+  return (
+    <video
+      ref={video}
+      src={extrinsicPreviewUrl(camera)}
+      muted
+      playsInline
+      preload="auto"
+      onLoadedMetadata={(event) => {
+        event.currentTarget.currentTime = (index + 0.5) / PREVIEW_FPS;
+      }}
+      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+    />
+  );
+}
+
 function GroupScrubber({
   cameras,
   groups,
@@ -146,11 +178,7 @@ function GroupScrubber({
               }}
             >
               {frame !== undefined ? (
-                <img
-                  src={extrinsicFrameUrl(camera, frame)}
-                  alt={`${camera} frame ${frame}`}
-                  style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
-                />
+                <PreviewFrame camera={camera} index={frame} />
               ) : (
                 <Text fz="0.7rem" c="dark.3">
                   not in this group
@@ -281,6 +309,8 @@ function ExtrinsicInner() {
   const [recording, setRecording] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
+  // Preview transcode popup (ADR-0027): null = idle, 'running' = spinner, else error.
+  const [transcoding, setTranscoding] = useState<string | null>(null);
 
   // Prepare state: synchronized groups + the compute knobs (ADR-0023).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
@@ -336,10 +366,37 @@ function ExtrinsicInner() {
     }
   };
 
+  // Wait for the background preview transcodes of the sweep (ADR-0027) behind a
+  // blocking popup, then enter Prepare. 'transcoding' is 'running' or an error.
+  const waitForPreviews = async () => {
+    setTranscoding('running');
+    try {
+      let status = await fetchExtrinsicPreviewStatus();
+      for (let i = 0; status.state === 'running' && i < 150; i += 1) {
+        await new Promise((resolve) => setTimeout(resolve, 700));
+        status = await fetchExtrinsicPreviewStatus();
+      }
+      if (status.state === 'failed' || status.state === 'running') {
+        const failed = Object.values(status.cameras).find((c) => c.error);
+        setTranscoding(failed?.error ?? 'preview transcode timed out');
+        return;
+      }
+      setTranscoding(null);
+      setStep('prepare');
+    } catch (cause) {
+      setTranscoding(cause instanceof Error ? cause.message : 'preview transcode failed');
+    }
+  };
+
   const stopSweep = async () => {
     await stopExtrinsic().catch(() => {});
     setRecording(false);
-    setStep('prepare');
+    await waitForPreviews();
+  };
+
+  const retryTranscode = async () => {
+    await retryExtrinsicPreview().catch(() => {});
+    await waitForPreviews();
   };
 
   const runCompute = async () => {
@@ -574,6 +631,35 @@ function ExtrinsicInner() {
       </Modal>
 
       {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
+      {/* Preview transcodes (ADR-0027): block the Stop -> Prepare transition. */}
+      <Modal
+        opened={transcoding !== null}
+        onClose={() => setTranscoding(null)}
+        withCloseButton={transcoding !== 'running'}
+        closeOnClickOutside={false}
+        closeOnEscape={false}
+        centered
+        title="Preparing replay"
+      >
+        {transcoding === 'running' ? (
+          <Group gap="sm">
+            <Loader size="sm" />
+            <Text fz="0.84rem" c="dark.1">
+              Transcoding previews…
+            </Text>
+          </Group>
+        ) : (
+          <>
+            <Text fz="0.8rem" c="var(--rc-error)" mb="md">
+              {transcoding}
+            </Text>
+            <Group justify="flex-end">
+              <Button onClick={() => void retryTranscode()}>Retry transcode</Button>
+            </Group>
+          </>
+        )}
+      </Modal>
+
       <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title="Overwrite array calibration?">
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
           <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />

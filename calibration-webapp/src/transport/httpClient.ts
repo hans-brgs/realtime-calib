@@ -93,13 +93,40 @@ export interface ComputeParams {
 export const computeIntrinsic = (camera: string, params?: ComputeParams): Promise<Session> =>
   postJson<Session>(`/intrinsic/${camera}/compute`, params);
 
-// Frame-server (ADR-0022): total frames of the recorded sweep, and the URL to one
-// frame as JPEG (used directly as an <img> src for the Prepare scrubber).
-export const fetchIntrinsicFrameCount = (camera: string): Promise<{ total: number }> =>
-  getJson<{ total: number }>(`/intrinsic/${camera}/frames`);
+// Preview transcodes (ADR-0027): each recording is transcoded ONCE in the
+// background to an H.264 mp4 re-timed CFR BY INDEX at PREVIEW_FPS — so
+// index = round(video.currentTime * PREVIEW_FPS) is exact by construction.
+// MUST match the backend constant (recording/preview.py).
+export const PREVIEW_FPS = 30;
 
-export const intrinsicFrameUrl = (camera: string, index: number): string =>
-  `${API_URL}/intrinsic/${camera}/frame/${index}`;
+export interface PreviewStatus {
+  state: 'missing' | 'running' | 'done' | 'failed';
+  frames: number;
+  error: string | null;
+}
+
+export const intrinsicPreviewUrl = (camera: string): string =>
+  `${API_URL}/intrinsic/${camera}/preview`;
+
+export const fetchIntrinsicPreviewStatus = (camera: string): Promise<PreviewStatus> =>
+  getJson<PreviewStatus>(`/intrinsic/${camera}/preview/status`);
+
+export const retryIntrinsicPreview = (camera: string): Promise<PreviewStatus> =>
+  postJson<PreviewStatus>(`/intrinsic/${camera}/preview/transcode`);
+
+export interface ExtrinsicPreviewStatus {
+  state: 'missing' | 'running' | 'done' | 'failed';
+  cameras: Record<string, PreviewStatus>;
+}
+
+export const extrinsicPreviewUrl = (camera: string): string =>
+  `${API_URL}/extrinsic/${camera}/preview`;
+
+export const fetchExtrinsicPreviewStatus = (): Promise<ExtrinsicPreviewStatus> =>
+  getJson<ExtrinsicPreviewStatus>('/extrinsic/preview/status');
+
+export const retryExtrinsicPreview = (): Promise<ExtrinsicPreviewStatus> =>
+  postJson<ExtrinsicPreviewStatus>('/extrinsic/preview/transcode');
 
 // Review metrics persisted at compute (ADR-0022, Results): coverage heatmap grid,
 // Caliscope 5x5 image-coverage fraction, occupied tilt-azimuth sectors (/8), and each
