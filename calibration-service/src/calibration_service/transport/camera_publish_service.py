@@ -154,6 +154,11 @@ class CameraPublishService:
         self._sessions = session_manager
         self._task: asyncio.Task[None] | None = None
         self._capture_executor: ThreadPoolExecutor | None = None
+        # Serializes start/stop/refresh: concurrent refreshes (two quick drag
+        # reorders) must queue, not interleave — an interleaved stop re-cancelled
+        # the previous session DURING its cleanup finally, truncating it (cameras
+        # never released -> V4L2 wedge) and leaving an orphan session behind.
+        self._lifecycle = asyncio.Lock()
         # On-demand capture (ADR-0021): only the cameras the current view needs are
         # opened + published (unmuted). `_active_view` is the operator's wizard view
         # (reported by the webapp); None = not reported yet -> publish all (safe
@@ -299,18 +304,34 @@ class CameraPublishService:
         return BoardDetector(board) if board is not None else None
 
     async def start(self) -> None:
+        async with self._lifecycle:
+            self._start_locked()
+
+    async def refresh(self) -> None:
+        """Stop the current publisher and re-launch from the current session/config.
+
+        Serialized under the lifecycle lock (see __init__): overlapping refreshes
+        queue up, so a session is always fully torn down — cameras released,
+        room closed — before the next one starts.
+        """
+        logger.info("refreshing camera publishers")
+        async with self._lifecycle:
+            await self._stop_locked()
+            self._start_locked()
+
+    async def stop(self) -> None:
+        async with self._lifecycle:
+            await self._stop_locked()
+
+    def _start_locked(self) -> None:
+        if self._task is not None:
+            return  # already running — refresh() is the resync path
         self._capture_executor = ThreadPoolExecutor(
             max_workers=_CAPTURE_THREADS, thread_name_prefix="capture"
         )
         self._task = asyncio.create_task(self._run(), name="camera-publish")
 
-    async def refresh(self) -> None:
-        """Stop the current publisher and re-launch from the current session/config."""
-        logger.info("refreshing camera publishers")
-        await self.stop()
-        await self.start()
-
-    async def stop(self) -> None:
+    async def _stop_locked(self) -> None:
         if self._task is None:
             return
         self._task.cancel()
@@ -318,8 +339,14 @@ class CameraPublishService:
             await self._task
         self._task = None
         if self._capture_executor is not None:
-            self._capture_executor.shutdown(wait=False, cancel_futures=True)
+            executor = self._capture_executor
             self._capture_executor = None
+            # wait=True: no capture thread may still touch a V4L2 handle when the
+            # next session reopens the devices (bounded by one in-flight grab).
+            # Run OFF the event loop — a synchronous wait would freeze it.
+            await asyncio.get_running_loop().run_in_executor(
+                None, lambda: executor.shutdown(wait=True, cancel_futures=True)
+            )
 
     async def _run(self) -> None:
         """Reconnect loop: (re)publish all cameras whenever a session ends."""
@@ -389,8 +416,8 @@ class CameraPublishService:
             # A room drop mid-sweep must not leave N dangling video files open.
             await self.stop_extrinsic_recording()
             for name in list(open_cams):
-                camera, task = open_cams.pop(name)
-                await self._stop_capture(publisher, name, camera, task)
+                _camera, task = open_cams.pop(name)
+                await self._stop_capture(publisher, name, task)
             await publisher.aclose()
 
     def _desired_cameras(self, by_name: dict[str, _PublishTarget]) -> set[str]:
@@ -418,8 +445,8 @@ class CameraPublishService:
         desired = self._desired_cameras(by_name)
         for name in list(open_cams):
             if name not in desired:
-                camera, task = open_cams.pop(name)
-                await self._stop_capture(publisher, name, camera, task)
+                _camera, task = open_cams.pop(name)
+                await self._stop_capture(publisher, name, task)
         joiners = [name for name in desired if name not in open_cams]
         for i, name in enumerate(joiners):
             opened = await self._start_capture(loop, executor, publisher, by_name[name])
@@ -466,10 +493,13 @@ class CameraPublishService:
         self,
         publisher: LiveKitPublisher,
         name: str,
-        camera: CameraCapture,
         task: asyncio.Task[None],
     ) -> None:
-        """Cancel a camera's loop, mute its track and close the device (ADR-0021)."""
+        """Cancel a camera's loop and mute its track (ADR-0021).
+
+        The loop OWNS the device and releases it in its own finally — awaiting the
+        cancelled task here therefore returns only once the camera is closed.
+        """
         task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await task
@@ -478,10 +508,29 @@ class CameraPublishService:
         if name == self._recording_camera:
             await self.stop_intrinsic_recording()
         publisher.mute(name)  # keep the track (unpublish leaks, #449); just stop media
-        camera.release()
-        logger.info("camera %s released (muted + closed)", name)
+        logger.info("camera %s muted", name)
 
     async def _capture_loop(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        publisher: LiveKitPublisher,
+        target: _PublishTarget,
+        camera: CameraCapture,
+    ) -> None:
+        """Run one camera's frame loop; the LOOP owns the device.
+
+        Releasing in our finally runs strictly after the in-flight executor call
+        returned (a running executor future cannot be cancelled), so release never
+        races a live V4L2 grab — a concurrent release wedged /dev/videoX on the
+        real rig (endless select() timeouts until service restart).
+        """
+        try:
+            await self._capture_frames(loop, publisher, target, camera)
+        finally:
+            camera.release()
+            logger.info("camera %s released", target.name)
+
+    async def _capture_frames(
         self,
         loop: asyncio.AbstractEventLoop,
         publisher: LiveKitPublisher,

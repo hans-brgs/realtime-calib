@@ -16,7 +16,7 @@ import {
 import { CSS } from '@dnd-kit/utilities';
 import { Box, Button, Group, Select, Text } from '@mantine/core';
 import { IconGripVertical, IconInfoCircle, IconRefresh } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -171,6 +171,22 @@ export function CameraSetupScreen() {
   const [fps, setFps] = useState<number | null>(null);
   const [order, setOrder] = useState<string[]>([]);
   const [applying, setApplying] = useState(false);
+  // Debounced reorder persistence: a multi-move sort must trigger ONE server
+  // refresh (each one republishes the whole publisher session). Flushed on
+  // unmount so a quick drag-then-navigate is never lost.
+  const reorderTimer = useRef<number | undefined>(undefined);
+  const pendingReorder = useRef<string[] | null>(null);
+
+  useEffect(
+    () => () => {
+      window.clearTimeout(reorderTimer.current);
+      if (pendingReorder.current) {
+        void dispatch(reorderCamerasThunk(pendingReorder.current));
+        pendingReorder.current = null;
+      }
+    },
+    [dispatch],
+  );
 
   // A small drag distance avoids hijacking taps/clicks (touch + mouse).
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -219,16 +235,22 @@ export function CameraSetupScreen() {
     }
     const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
     setOrder(next);
-    // Persist the reorder immediately when these devices are already configured
-    // (index = position, calibrations kept server-side — /cameras/order). Before
-    // the first Apply there is nothing to persist: the order ships with Apply.
+    // Persist the reorder when these devices are already configured (index =
+    // position, calibrations kept server-side — /cameras/order), DEBOUNCED so a
+    // sort in several moves fires one refresh. Before the first Apply there is
+    // nothing to persist: the order ships with Apply.
     const configured = session?.cameras ?? [];
     if (
       configured.length > 0 &&
       configured.length === next.length &&
       configured.every((camera) => next.includes(camera.device_path))
     ) {
-      void dispatch(reorderCamerasThunk(next));
+      pendingReorder.current = next;
+      window.clearTimeout(reorderTimer.current);
+      reorderTimer.current = window.setTimeout(() => {
+        pendingReorder.current = null;
+        void dispatch(reorderCamerasThunk(next));
+      }, 400);
     }
   };
 
@@ -378,6 +400,34 @@ export function CameraSetupScreen() {
             overflowY: 'auto',
           }}
         >
+          <Box>
+            <SectionLabel>
+              Reorder cameras{' '}
+              <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
+                · drag · index 0 = anchor
+              </Text>
+            </SectionLabel>
+            {rows.length > 0 ? (
+              <DndContext
+                sensors={sensors}
+                collisionDetection={closestCenter}
+                modifiers={[restrictToVerticalAxis, restrictToParentElement]}
+                onDragEnd={onDragEnd}
+              >
+                <SortableContext items={order} strategy={verticalListSortingStrategy}>
+                  <Box style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                    {rows.map((row) => (
+                      <CameraRow key={row.devicePath} row={row} />
+                    ))}
+                  </Box>
+                </SortableContext>
+              </DndContext>
+            ) : (
+              <Text c="dark.3" fz="0.81rem">
+                {detecting ? 'Detecting cameras…' : 'No cameras detected.'}
+              </Text>
+            )}
+          </Box>
           <Box
             p={16}
             style={{
@@ -496,34 +546,6 @@ export function CameraSetupScreen() {
             </Group>
           </Box>
 
-          <Box>
-            <SectionLabel>
-              Reorder cameras{' '}
-              <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
-                · drag · index 0 = anchor
-              </Text>
-            </SectionLabel>
-            {rows.length > 0 ? (
-              <DndContext
-                sensors={sensors}
-                collisionDetection={closestCenter}
-                modifiers={[restrictToVerticalAxis, restrictToParentElement]}
-                onDragEnd={onDragEnd}
-              >
-                <SortableContext items={order} strategy={verticalListSortingStrategy}>
-                  <Box style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {rows.map((row) => (
-                      <CameraRow key={row.devicePath} row={row} />
-                    ))}
-                  </Box>
-                </SortableContext>
-              </DndContext>
-            ) : (
-              <Text c="dark.3" fz="0.81rem">
-                {detecting ? 'Detecting cameras…' : 'No cameras detected.'}
-              </Text>
-            )}
-          </Box>
         </Box>
       </Box>
     </Box>
