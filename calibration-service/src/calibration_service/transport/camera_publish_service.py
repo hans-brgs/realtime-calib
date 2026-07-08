@@ -443,6 +443,7 @@ class CameraPublishService:
                     logger.warning("camera %s has no dimensions; not published", target.name)
                     continue
                 await publisher.publish_camera_track(target.name, size[0], size[1], _PREVIEW_FPS)
+                by_name[target.name] = target
 
             while not publisher.is_disconnected():
                 self._reconcile.clear()
