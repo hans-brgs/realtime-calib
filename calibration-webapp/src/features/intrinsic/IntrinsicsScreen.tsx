@@ -1,4 +1,4 @@
-import { isTrackReference, useDataChannel, useTracks } from '@livekit/components-react';
+import { isTrackReference, useTracks } from '@livekit/components-react';
 import {
   Box,
   Button,
@@ -31,11 +31,7 @@ import {
   selectSession,
   validateIntrinsicThunk,
 } from '@/features/session/sessionSlice';
-import {
-  type CoverageMetrics,
-  coverageReceived,
-  selectCoverage,
-} from '@/features/telemetry/telemetrySlice';
+import { type CoverageMetrics, selectCoverage } from '@/features/telemetry/telemetrySlice';
 import {
   fetchIntrinsicPreviewStatus,
   retryIntrinsicPreview,
@@ -303,21 +299,6 @@ const PHASES = [
   { key: 'results', label: 'Results', sub: 'params + coverage' },
 ];
 
-function TelemetryListener() {
-  const dispatch = useAppDispatch();
-  useDataChannel('telemetry', (msg) => {
-    try {
-      const data = JSON.parse(new TextDecoder().decode(msg.payload)) as CoverageMetrics;
-      if (data?.type === 'coverage_metrics') {
-        dispatch(coverageReceived(data));
-      }
-    } catch {
-      /* ignore malformed telemetry */
-    }
-  });
-  return null;
-}
-
 function IntrinsicsInner() {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
@@ -513,7 +494,6 @@ function IntrinsicsInner() {
 
   return (
     <>
-      <TelemetryListener />
       <SegmentedControl
         color="violet"
         value={active ?? ''}

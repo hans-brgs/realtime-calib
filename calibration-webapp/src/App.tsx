@@ -8,6 +8,7 @@ import { Provider } from 'react-redux';
 
 import { useAppDispatch } from '@/app/hooks';
 import { store } from '@/app/store';
+import { DataChannelListener } from '@/features/connection/DataChannelListener';
 import { RoomProvider } from '@/features/connection/RoomProvider';
 import { rehydrateSession } from '@/features/session/sessionSlice';
 import { WizardShell } from '@/features/session/WizardShell';
@@ -15,7 +16,9 @@ import { theme } from '@/theme';
 
 // Rehydrate the wizard from the disk-owned session at mount (ADR-0011). The
 // LiveKit room lives HERE, above the wizard, so navigating between steps never
-// tears down the WebRTC session (see RoomProvider).
+// tears down the WebRTC session (see RoomProvider); the single data-channel
+// subscription (DataChannelListener) is mounted here too so telemetry routing
+// survives navigation (spec realtime-telemetry).
 function AppContent() {
   const dispatch = useAppDispatch();
   useEffect(() => {
@@ -23,6 +26,7 @@ function AppContent() {
   }, [dispatch]);
   return (
     <RoomProvider>
+      <DataChannelListener />
       <WizardShell />
     </RoomProvider>
   );

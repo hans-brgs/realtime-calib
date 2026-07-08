@@ -1,4 +1,3 @@
-import { useDataChannel } from '@livekit/components-react';
 import {
   ActionIcon,
   Box,
@@ -31,14 +30,7 @@ import {
   selectSession,
   validateExtrinsicThunk,
 } from '@/features/session/sessionSlice';
-import {
-  type CoverageMetrics,
-  type Covisibility,
-  coverageReceived,
-  covisibilityCleared,
-  covisibilityReceived,
-  selectCovisibility,
-} from '@/features/telemetry/telemetrySlice';
+import { covisibilityCleared, selectCovisibility } from '@/features/telemetry/telemetrySlice';
 import {
   type ExtrinsicGroup,
   type ExtrinsicResultPayload,
@@ -68,26 +60,6 @@ const PHASES = [
 ];
 
 const PLAY_FPS = 8;
-
-// Routes both telemetry payload types from the shared data channel to the store.
-function TelemetryListener() {
-  const dispatch = useAppDispatch();
-  useDataChannel('telemetry', (msg) => {
-    try {
-      const data = JSON.parse(new TextDecoder().decode(msg.payload)) as
-        | CoverageMetrics
-        | Covisibility;
-      if (data?.type === 'coverage_metrics') {
-        dispatch(coverageReceived(data));
-      } else if (data?.type === 'covisibility') {
-        dispatch(covisibilityReceived(data));
-      }
-    } catch {
-      /* ignore malformed telemetry */
-    }
-  });
-  return null;
-}
 
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
@@ -451,7 +423,6 @@ function ExtrinsicInner() {
 
   return (
     <>
-      <TelemetryListener />
       <PhaseStepper phases={PHASES} current={step} />
 
       <Box

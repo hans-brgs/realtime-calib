@@ -1,5 +1,6 @@
 import { configureStore } from '@reduxjs/toolkit';
 
+import { listenerMiddleware } from '@/app/listenerMiddleware';
 import camerasReducer from '@/features/cameras/camerasSlice';
 import connectionReducer from '@/features/connection/connectionSlice';
 import sessionReducer from '@/features/session/sessionSlice';
@@ -12,6 +13,10 @@ export const store = configureStore({
     cameras: camerasReducer,
     telemetry: telemetryReducer,
   },
+  // Data-channel telemetry is routed by the listener middleware (spec realtime-telemetry);
+  // prepend it so it sees inbound actions before the default middleware.
+  middleware: (getDefaultMiddleware) =>
+    getDefaultMiddleware().prepend(listenerMiddleware.middleware),
 });
 
 export type RootState = ReturnType<typeof store.getState>;
