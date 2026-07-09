@@ -126,7 +126,8 @@ class BoardIn(BaseModel):
 
 class BoardConfigRequest(BaseModel):
     target: Literal["intrinsic", "extrinsic"]
-    board: BoardIn
+    # None = inherit the intrinsic board (extrinsic only); required for intrinsic.
+    board: BoardIn | None = None
 
 
 class BoardOut(BoardIn):
@@ -1053,8 +1054,9 @@ async def reorder_cameras(request: Request, body: CameraOrderRequest) -> Session
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
     manager = get_manager(request)
     try:
-        board = _to_board(body.board)
-        validate_board(board)
+        board = _to_board(body.board) if body.board is not None else None
+        if board is not None:
+            validate_board(board)
         session = manager.define_board(body.target, board)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

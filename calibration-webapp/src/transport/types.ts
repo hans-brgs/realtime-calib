@@ -54,7 +54,7 @@ export type BoardTarget = 'intrinsic' | 'extrinsic';
 
 export interface BoardConfigRequest {
   target: BoardTarget;
-  board: Board;
+  board: Board | null; // null = inherit the intrinsic board (extrinsic only)
 }
 
 export interface Session {
