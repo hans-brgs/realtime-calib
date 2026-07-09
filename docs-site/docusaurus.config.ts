@@ -73,6 +73,13 @@ const config: Config = {
 
   themeConfig: {
     image: 'img/social-card.png',
+    // Algolia DocSearch. The apiKey is the public "search-only" key (safe to commit).
+    algolia: {
+      appId: 'HIS77Z2B0I',
+      apiKey: 'cdbe99e22be2a3fbb2cbd0a70cd4c6bf',
+      indexName: 'realtime-calib-documentation-crawler',
+      contextualSearch: true,
+    },
     colorMode: {
       defaultMode: 'dark',
       disableSwitch: true,
