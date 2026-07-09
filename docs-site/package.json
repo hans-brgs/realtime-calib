@@ -20,6 +20,7 @@
   "dependencies": {
     "@docusaurus/core": "^3.7.0",
     "@docusaurus/preset-classic": "^3.7.0",
+    "@docusaurus/theme-mermaid": "^3.10.1",
     "@fontsource/manrope": "^5.1.0",
     "@fontsource/sora": "^5.1.0",
     "@mdx-js/react": "^3.0.0",

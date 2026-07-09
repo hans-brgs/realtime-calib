@@ -1,0 +1,11 @@
+{
+  "label": "Open source",
+  "position": 7,
+  "collapsible": true,
+  "collapsed": true,
+  "link": {
+    "type": "generated-index",
+    "title": "Open source",
+    "description": "How realtime-calib is licensed — AGPL-3.0, with a commercial option."
+  }
+}
