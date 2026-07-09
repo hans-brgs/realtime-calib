@@ -26,6 +26,20 @@ class _FakePublisher:
         self.muted.append(name)
 
 
+class _FakeTrackPublisher:
+    """Records track publishes + mutes for the track-set reconcile (ADR-0029)."""
+
+    def __init__(self) -> None:
+        self.published: list[str] = []
+        self.muted: list[str] = []
+
+    async def publish_camera_track(self, name: str, width: int, height: int, fps: int) -> None:
+        self.published.append(name)
+
+    def mute(self, name: str) -> None:
+        self.muted.append(name)
+
+
 class _FakeCamera:
     def __init__(self) -> None:
         self.released = False
@@ -160,32 +174,63 @@ def test_capture_loop_releases_the_camera_in_its_finally(tmp_path: Path) -> None
     asyncio.run(scenario())
 
 
-def test_lifecycle_lock_serializes_concurrent_refreshes(tmp_path: Path) -> None:
-    # Two quick drag-reorders fire two concurrent refresh() calls: they must
-    # queue (never two live sessions, never a re-cancel during cleanup) and
-    # leave exactly ONE running session at the end (real-rig orphan-session fix).
+def test_refresh_signals_the_session_without_reconnecting(tmp_path: Path) -> None:
+    # ADR-0029: refresh() reconciles IN PLACE (signals the reconcile event); it must NOT
+    # tear down + restart the publish session — that disconnect/reconnect crashes the
+    # LiveKit FFI. Concurrent refreshes on a running session leave it started exactly
+    # once (no reconnect), each just waking the reconcile loop.
     async def scenario() -> None:
         service = _service(tmp_path)
-        alive = 0
-        peak = 0
+        starts = 0
+        reconciles = 0
 
         async def fake_session() -> None:
-            nonlocal alive, peak
-            alive += 1
-            peak = max(peak, alive)
-            try:
-                await asyncio.sleep(3600)
-            finally:
-                alive -= 1
+            nonlocal starts, reconciles
+            starts += 1
+            while True:  # emulate the persistent reconcile loop
+                service._reconcile.clear()
+                await service._reconcile.wait()
+                reconciles += 1
 
         service._publish_session = fake_session  # type: ignore[method-assign]
         await service.start()
         await asyncio.sleep(0.01)
         await asyncio.gather(service.refresh(), service.refresh(), service.refresh())
         await asyncio.sleep(0.01)
-        assert peak == 1  # sessions never overlapped
-        assert alive == 1  # exactly one survivor
+        assert starts == 1  # signalled, never restarted -> no reconnect
+        assert reconciles >= 1  # refresh woke the reconcile loop
         await service.stop()
-        assert alive == 0
+
+    asyncio.run(scenario())
+
+
+def test_reconfigure_reconciles_tracks_in_place(tmp_path: Path) -> None:
+    # ADR-0029: on reconfiguration the track set is reconciled in place — a new camera's
+    # track is published (muted), a removed camera's track is muted (never unpublished,
+    # #449). No reconnect (connect is never involved here).
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        publisher = _FakeTrackPublisher()
+        published: dict[str, tuple[int, int]] = {}
+        by_name: dict[str, _PublishTarget] = {}
+
+        # Initial config: cam_0, cam_1 -> both tracks published.
+        needs = await service._reconcile_tracks(  # type: ignore[arg-type]
+            publisher, list(_targets("cam_0", "cam_1").values()), published, by_name
+        )
+        assert needs is False
+        assert publisher.published == ["cam_0", "cam_1"]
+        assert set(by_name) == {"cam_0", "cam_1"}
+
+        # Reconfigure: cam_0 kept, cam_1 removed, cam_2 added.
+        reconf = [
+            _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30),
+            _PublishTarget("cam_2", 2, "/dev/video2", 1920, 1080, 30),
+        ]
+        needs = await service._reconcile_tracks(publisher, reconf, published, by_name)  # type: ignore[arg-type]
+        assert needs is False
+        assert "cam_2" in publisher.published  # new camera -> track published
+        assert publisher.muted == ["cam_1"]  # removed camera -> muted, not unpublished
+        assert set(by_name) == {"cam_0", "cam_2"}  # by_name = current config only
 
     asyncio.run(scenario())
