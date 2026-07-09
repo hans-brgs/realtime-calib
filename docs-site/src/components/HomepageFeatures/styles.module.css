@@ -25,7 +25,7 @@
 .featureMedia {
   aspect-ratio: 16 / 10;
   overflow: hidden;
-  background: var(--rc-bg-deep, #09090b);
+  background: #0f0f12;
   border-bottom: 1px solid var(--rc-border, #232329);
 }
 
