@@ -27,7 +27,7 @@ const FeatureList: FeatureItem[] = [
     description: (
       <>
         Per-camera focal length and distortion, then full 6-DoF pose across the
-        rig via PnP, pairwise stereo chaining and bundle adjustment.
+        rig via pairwise stereo calibration, anchor chaining and bundle adjustment.
       </>
     ),
   },
@@ -37,8 +37,9 @@ const FeatureList: FeatureItem[] = [
     description: (
       <>
         Exports the same per-camera TOML fields as{' '}
-        <a href="https://github.com/mprib/caliscope">Caliscope</a> plus aniposelib
-        output — drop the results straight into your existing pipeline.
+        <a href="https://github.com/mprib/caliscope">Caliscope</a>, plus engine-ready
+        JSON (three.js, Blender, Unity, Unreal) — drop the results straight into
+        your pipeline.
       </>
     ),
   },
@@ -47,8 +48,8 @@ const FeatureList: FeatureItem[] = [
     icon: '🧭',
     description: (
       <>
-        A guided flow — cameras → board → intrinsics → extrinsics → 3D review →
-        export — that works on desktop, tablet and mobile.
+        A guided flow — board → cameras → intrinsics → extrinsics (with 3D review)
+        → export — that runs in the browser on desktop, tablet or mobile.
       </>
     ),
   },
@@ -57,8 +58,9 @@ const FeatureList: FeatureItem[] = [
     icon: '🔒',
     description: (
       <>
-        Everything runs on your machine via Docker or <code>uv</code>. No cloud,
-        no data leaving the rig — TLS and tablet access built in.
+        Everything runs on the machine your cameras are plugged into — even a
+        headless server — and you drive it from any device on your LAN. No cloud,
+        no data leaving the rig; TLS and tablet access built in.
       </>
     ),
   },

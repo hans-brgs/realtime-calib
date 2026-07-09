@@ -21,7 +21,7 @@ function HomepageHero() {
         <p className={styles.heroTagline}>
           Real-time multi-camera calibration — intrinsics, distortion and 6-DoF
           extrinsics for a rig of USB cameras, with live feedback and{' '}
-          <strong>Caliscope-compatible</strong> exports.
+          <strong>Caliscope-compatible</strong> and engine-ready exports.
         </p>
         <div className={styles.heroButtons}>
           <Link className="button button--primary button--lg" to="/docs/intro">
@@ -29,7 +29,7 @@ function HomepageHero() {
           </Link>
           <Link
             className="button button--secondary button--lg"
-            to="/docs/guides/configure-cameras">
+            to="/docs/guides/start-or-load-session">
             Read the guides
           </Link>
           <Link
@@ -39,8 +39,8 @@ function HomepageHero() {
           </Link>
         </div>
         <p className={styles.heroNote}>
-          Runs locally · Docker or <code>uv</code> · desktop, tablet &amp; mobile
-          operator UI
+          Runs on the camera server, even headless · Docker · drive it from any
+          device on your LAN — desktop, tablet or mobile
         </p>
       </div>
     </header>
@@ -73,7 +73,7 @@ function SupportCallout() {
           </div>
           <p className={styles.supportFinePrint}>
             Need it for a proprietary or commercial product?{' '}
-            <Link to="/docs/contributing/license#commercial-use">
+            <Link to="/docs/open-source/license#commercial-use">
               A commercial license &amp; custom development
             </Link>{' '}
             are available.
@@ -89,7 +89,7 @@ export default function Home(): ReactNode {
   return (
     <Layout
       title={`${siteConfig.title} — real-time multi-camera calibration`}
-      description="Real-time multi-camera intrinsic and extrinsic calibration with live feedback and Caliscope-compatible exports.">
+      description="Real-time multi-camera intrinsic and extrinsic calibration with live feedback and Caliscope-compatible, engine-ready exports.">
       <HomepageHero />
       <main>
         <HomepageFeatures />

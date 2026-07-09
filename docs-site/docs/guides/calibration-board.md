@@ -4,23 +4,43 @@ sidebar_position: 2
 
 # Define a calibration board
 
-Configure the board realtime-calib will detect. **ChArUco** is recommended
-(robust detection plus checkerboard-corner accuracy).
+Configure the board realtime-calib will detect, download it to print, then enter
+its measured size. **ChArUco** is recommended (robust detection plus
+checkerboard-corner accuracy).
 
 :::note Work in progress
-Scaffold page — to be expanded with board configuration UI and print guidance.
+Scaffold page — to be expanded with screenshots of the board configuration UI.
 :::
 
 ## Board types
 
-Following Caliscope's model, the supported families are **ChArUco**, **ArUco** and
-plain **chessboard**. Board detection uses OpenCV's `CharucoDetector`
-(OpenCV ≥ 4.8).
+The supported targets are **ChArUco** and **ArUco**. Detection uses OpenCV's
+ArUco / ChArUco detectors (OpenCV ≥ 4.8).
 
-## Geometry and scale
+## Geometry (renders the printable PNG)
 
-The board's square/marker counts and its **physical scale** must match the board
-you actually printed. Scale is set by measurement so that translations come out in
-real-world units.
+The geometry defines what gets rendered and printed:
 
-→ Reference: [Data entities](/docs/reference/entities) · `CalibrationBoard`
+- **Type** — ChArUco (a grid) or ArUco (a single marker).
+- **Dictionary** — an OpenCV predefined ArUco dictionary (e.g. `DICT_5X5_100`).
+- **Columns × rows** — the ChArUco grid size.
+- **Marker ratio** — the marker/square size ratio (render-only).
+
+A live preview updates as you edit, and you **Download the PNG** to print it. The
+preview and the download come from the same server-side render engine.
+
+## Metric scale (measured after printing)
+
+The physical scale does **not** come from the render — it comes from **measuring
+your printed board**. After printing, measure a printed square (ChArUco) or the
+marker side (ArUco) with a caliper and enter that value in millimetres. That
+measurement is what puts extrinsic translations into real-world units.
+
+## One board or two
+
+By default the same board is used for intrinsics and extrinsics. A **"use a
+different board for extrinsic"** option lets you define a second, distinct board
+for the extrinsic step.
+
+→ See also: [Calibration best practices](/docs/reference/calibration-best-practices)
+— board type, dictionary and geometry.

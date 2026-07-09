@@ -60,20 +60,19 @@ docker compose build calibration-service    # rebuild one service after dep chan
   tablet, install the mkcert root CA on the tablet).
 
 ### LiveKit media not flowing (tiles stay black)
-- LiveKit runs on the **host network** and binds `7880` (signal), `7882` (UDP
-  media), `7883` (TCP media fallback) directly on the host. They must be free and
-  reachable at `HOST_IP`. Override the UDP media port with `LIVEKIT_UDP_PORT` in
-  `.env` if it clashes.
+- LiveKit runs on the Docker bridge; its media ports are **published to the host**
+  and advertised at `HOST_IP` (`NODE_IP`): **UDP `50000-50010`** (WebRTC media) and
+  **TCP `7881`** (ICE-TCP fallback). They must be free and reachable at `HOST_IP`.
+- Signaling (`7880`) stays internal to the bridge — Caddy proxies it as `wss`, so
+  it is not published on the host.
 - `NODE_IP` (from `HOST_IP`) must be the LAN IP reachable by clients.
-- Why host network: the in-container publisher (`calibration-service`) cannot
-  hairpin to a *published* port (UDP or TCP) over the docker bridge; it can only
-  reach LiveKit as a *real* host listener at `HOST_IP`. Same single endpoint then
-  serves LAN browsers.
 
 ### Running alongside another LiveKit (e.g. samvision)
-- This stack's LiveKit uses host ports `7880`/`7882`/`7883`, which do not overlap a
-  typical second LiveKit (`7881` + `50000-50010`), so both can run at once.
-- Only `443` (Caddy) may still clash — override `CADDY_HTTPS_PORT` in `.env`.
+- This stack's LiveKit publishes TCP `7881` and UDP `50000-50010` — the same
+  defaults a typical second LiveKit uses, so they **will** clash. Change one
+  stack's ports in `livekit.yaml` (`rtc.tcp_port` / `port_range_*`) and the
+  matching `docker-compose.yml` port mappings.
+- `443` (Caddy) may also clash — override `CADDY_HTTPS_PORT` in `.env`.
 
 ### Port 443 already in use
 - Another service holds it. Override `CADDY_HTTPS_PORT` in `.env` (then access

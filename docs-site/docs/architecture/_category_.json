@@ -6,6 +6,6 @@
   "link": {
     "type": "generated-index",
     "title": "Architecture",
-    "description": "System architecture and the public subset of Architecture Decision Records."
+    "description": "System architecture: services, topology and the real-time data flow."
   }
 }
