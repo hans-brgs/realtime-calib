@@ -1,0 +1,28 @@
+cff-version: 1.2.0
+message: "If you use realtime-calib in your research, please cite it."
+title: "realtime-calib: real-time multi-camera calibration"
+abstract: >-
+  A local, real-time, open-source multi-camera calibration application. It
+  recovers the intrinsics and 6-DoF extrinsics of a rig of USB cameras, is driven
+  from a responsive web app on any device (single-pass capture and calibration,
+  usable on headless Linux servers), and exports Caliscope-compatible and
+  engine-ready calibration files.
+type: software
+authors:
+  - family-names: Bourgeois
+    given-names: Hans
+    email: hans95.bourgeois@gmail.com
+    affiliation: Myosin
+repository-code: "https://github.com/hans-brgs/realtime-calib"
+url: "https://github.com/hans-brgs/realtime-calib"
+license: AGPL-3.0-or-later
+date-released: "2026-07-09"
+keywords:
+  - camera calibration
+  - multi-camera
+  - ChArUco
+  - ArUco
+  - extrinsic calibration
+  - intrinsic calibration
+  - computer vision
+  - OpenCV

@@ -40,10 +40,10 @@ export default function UsedBy(): ReactNode {
     <section className={styles.usedBy}>
       <div className="container">
         <Heading as="h2" className={styles.title}>
-          Already trusted in production
+          Used by
         </Heading>
         <p className={styles.subtitle}>
-          Powering real multi-camera calibration setups — not a lab demo.
+          Powering real multi-camera calibration setups.
         </p>
         <div className={styles.grid}>
           {USERS.map((user) => (

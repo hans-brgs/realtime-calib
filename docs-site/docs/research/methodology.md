@@ -13,9 +13,10 @@ you want the mathematics, follow the references — they are the ground truth.
 Per-camera intrinsics and distortion are estimated from ChArUco detections using
 OpenCV:
 
-- `cv2.aruco.calibrateCameraCharucoExtended`
+- ChArUco corners are interpolated, then solved with `cv2.calibrateCameraExtended`
+  (the ChArUco-specific `calibrateCameraCharucoExtended` was removed in OpenCV ≥ 4.7)
 - flags `CALIB_USE_INTRINSIC_GUESS + CALIB_RATIONAL_MODEL + CALIB_FIX_ASPECT_RATIO`
-- `perViewErrors` are exposed and drive outlier rejection
+  (8-coefficient rational distortion model)
 
 **Sources**
 
@@ -25,20 +26,54 @@ OpenCV:
 - Caliscope's intrinsic pipeline —
   [Caliscope](https://github.com/mprib/caliscope) (BSD-2-Clause).
 
+### Keyframe selection
+
+Before solving, realtime-calib picks a small, diverse subset of the captured
+detections — this coverage-aware selection is where the pipeline earns its
+single-pass, real-time behaviour:
+
+1. **Stride** — decimate high-fps runs (keep one detection every N).
+2. **Quality gates** — drop frames that are blurry (Laplacian-variance sharpness
+   below a floor), carry too few ChArUco corners, or whose corners are degenerate
+   / poorly spread.
+3. **Farthest-point sampling** — if more candidates remain than the cap (default
+   25), describe each by a 3-D feature — board **tilt** (0–45°, normalised) and the
+   detection **centroid** (x, y as image fractions) — then start from the frame
+   with the most corners and greedily add the candidate farthest from those
+   already selected.
+
+The result maximises **orientation and sensor-region coverage** rather than raw
+frame count, which is what keeps the intrinsic solve well-conditioned.
+
+**Sources**: farthest-point sampling is a standard diversity-sampling technique;
+the coverage / diversity goal follows Caliscope's approach to keyframe quality.
+
 ## Extrinsic calibration
 
-Camera poses are recovered in a single frame:
+Every camera's 6-DoF pose is recovered in a **single shared coordinate frame**
+(the anchor's), from synchronized multi-camera detections of the board:
 
-1. Pairwise relative poses via PnP / `stereoCalibrate`.
-2. Transitive chaining from an **anchor** camera.
-3. Joint refinement with **bundle adjustment** (`scipy.least_squares`).
+1. **Pairwise poses** — for each co-visible camera pair, the relative transform is
+   estimated with `cv2.stereoCalibrate` on their shared board views (in normalized
+   coordinates).
+2. **Chaining from the anchor** — the pairwise estimates form a co-visibility
+   graph; each camera's pose is chained from the **anchor** (camera index 0, fixed
+   as identity) along the lowest-cumulative-error path (Dijkstra), with
+   bridge-filling so indirect routes can beat noisy direct edges.
+3. **Triangulation** — the board corners are triangulated (DLT over all observing
+   rays) into a 3D point cloud.
+4. **Bundle adjustment** — `scipy.optimize.least_squares` (trf, sparse Jacobian)
+   jointly refines every non-anchor pose and the 3D points, minimizing
+   reprojection error. The anchor stays fixed, which removes the gauge freedom.
 
 **Sources**
 
-- OpenCV `solvePnP` / `stereoCalibrate` documentation.
+- OpenCV `stereoCalibrate` and triangulation documentation —
+  [calib3d module](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html).
 - `scipy.optimize.least_squares` —
   [SciPy docs](https://docs.scipy.org/doc/scipy/reference/generated/scipy.optimize.least_squares.html).
-- Caliscope's extrinsic + bundle-adjustment implementation.
+- Caliscope's extrinsic + bundle-adjustment implementation —
+  [Caliscope](https://github.com/mprib/caliscope) (BSD-2-Clause).
 
 :::info Why we cite instead of explain
 realtime-calib's contribution is making this pipeline **real-time and

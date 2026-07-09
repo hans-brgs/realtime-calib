@@ -6,18 +6,17 @@ import type * as Preset from '@docusaurus/preset-classic';
 // Decisions: ADR-0024 (Docusaurus, docs-site/ in main repo, EN, GitHub Pages, versioned)
 // and ADR-0025 (AGPL-3.0 + commercial license + CLA).
 
-// In dev, serve from the root so `yarn start` works at http://localhost:3000/.
-// In production (GitHub Pages project site), serve under /realtime-calib/.
-const isDev = process.env.NODE_ENV === 'development';
+// Served at the custom-domain root (realtime-calib.hans-brgs.dev), so baseUrl is '/'
+// in both dev and production.
 
 const config: Config = {
   title: 'realtime-calib',
   tagline: 'Real-time multi-camera calibration — intrinsics, extrinsics, live feedback',
   favicon: 'img/favicon.png',
 
-  // Production URL and base path for GitHub Pages project site.
-  url: 'https://hans-brgs.github.io',
-  baseUrl: isDev ? '/' : '/realtime-calib/',
+  // Production URL and base path (custom domain on GitHub Pages).
+  url: 'https://realtime-calib.hans-brgs.dev',
+  baseUrl: '/',
 
   organizationName: 'hans-brgs',
   projectName: 'realtime-calib',
@@ -27,10 +26,13 @@ const config: Config = {
   onBrokenLinks: 'warn',
 
   markdown: {
+    mermaid: true,
     hooks: {
       onBrokenMarkdownLinks: 'warn',
     },
   },
+
+  themes: ['@docusaurus/theme-mermaid'],
 
   // English only for now; i18n scaffolding kept so locales can be added later.
   i18n: {
@@ -97,8 +99,9 @@ const config: Config = {
         },
         {
           href: 'https://github.com/hans-brgs/realtime-calib',
-          label: 'GitHub',
           position: 'right',
+          className: 'header-github-link',
+          'aria-label': 'GitHub repository',
         },
       ],
     },
@@ -109,8 +112,8 @@ const config: Config = {
           title: 'Docs',
           items: [
             {label: 'Getting Started', to: '/docs/intro'},
-            {label: 'Guides', to: '/docs/guides/configure-cameras'},
-            {label: 'Reference', to: '/docs/reference/configuration-format'},
+            {label: 'Guides', to: '/docs/guides/start-or-load-session'},
+            {label: 'Reference', to: '/docs/reference/output-calibration-files'},
             {label: 'Research', to: '/docs/research/methodology'},
           ],
         },
@@ -118,8 +121,7 @@ const config: Config = {
           title: 'Project',
           items: [
             {label: 'Architecture', to: '/docs/architecture/overview'},
-            {label: 'Contributing', to: '/docs/contributing/dev-setup'},
-            {label: 'License (AGPL-3.0)', to: '/docs/contributing/license'},
+            {label: 'License (AGPL-3.0)', to: '/docs/open-source/license'},
             {label: 'GitHub', href: 'https://github.com/hans-brgs/realtime-calib'},
           ],
         },
@@ -136,7 +138,7 @@ const config: Config = {
             },
             {
               label: 'Commercial license',
-              to: '/docs/contributing/license#commercial-use',
+              to: '/docs/open-source/license#commercial-use',
             },
           ],
         },

@@ -4,9 +4,9 @@ sidebar_position: 3
 
 # Bibliography & references
 
-The authoritative sources realtime-calib builds on.
+The tools and literature behind realtime-calib.
 
-## Software & references
+## Software & tools
 
 - **Caliscope** — the conceptual reference for the calibration logic (board
   definitions, ChArUco calibration, PnP/stereo extrinsics, bundle adjustment).
@@ -15,12 +15,8 @@ The authoritative sources realtime-calib builds on.
   [docs.opencv.org](https://docs.opencv.org/)
 - **SciPy** — `scipy.optimize.least_squares` for bundle adjustment.
   [scipy.org](https://scipy.org/)
-- **aniposelib** — export target for downstream reconstruction.
-  [github.com/lambdaloop/aniposelib](https://github.com/lambdaloop/aniposelib)
 - **LiveKit** — real-time transport for camera streams and overlays.
   [livekit.io](https://livekit.io/)
 
-:::note Work in progress
-Foundational papers (camera models, distortion, bundle adjustment) will be added
-here with full citations.
-:::
+For the peer-reviewed literature behind the method and the capture recommendations,
+see [Calibration best practices](/docs/reference/calibration-best-practices).

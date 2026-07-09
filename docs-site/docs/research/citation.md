@@ -6,12 +6,16 @@ sidebar_position: 4
 
 If realtime-calib is useful in your research, please cite it.
 
-:::note Work in progress
-A `CITATION.cff` file and a DOI (e.g. via Zenodo) will be added to the repository;
-the canonical BibTeX will then be generated from it.
+A machine-readable [`CITATION.cff`](https://github.com/hans-brgs/realtime-calib/blob/main/CITATION.cff)
+lives at the repository root — GitHub shows a **"Cite this repository"** button that
+generates APA and BibTeX from it.
+
+:::note DOI coming
+A DOI (via Zenodo, minted on the first tagged GitHub release) will be added here and
+to the `CITATION.cff` once available.
 :::
 
-## Provisional BibTeX
+## BibTeX
 
 ```bibtex
 @software{realtime_calib,
@@ -19,9 +23,9 @@ the canonical BibTeX will then be generated from it.
   author = {Bourgeois, Hans},
   year   = {2026},
   url    = {https://github.com/hans-brgs/realtime-calib},
-  note   = {AGPL-3.0}
+  note   = {AGPL-3.0-or-later}
 }
 ```
 
-Please also cite **Caliscope**, whose calibration logic this project reimplements,
-and **OpenCV**.
+Please also cite [**Caliscope**](https://github.com/mprib/caliscope), whose
+calibration logic this project reimplements, and [**OpenCV**](https://opencv.org/).

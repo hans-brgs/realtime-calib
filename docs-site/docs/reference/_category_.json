@@ -6,6 +6,6 @@
   "link": {
     "type": "generated-index",
     "title": "Reference",
-    "description": "Factual reference: configuration format, HTTP API, data entities and output files."
+    "description": "Factual reference: calibration output files and calibration best practices."
   }
 }
