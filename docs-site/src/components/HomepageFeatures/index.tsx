@@ -18,11 +18,9 @@ const FeatureList: FeatureItem[] = [
     alt: 'realtime-calib running on a phone, a tablet and a laptop',
     description: (
       <>
-        The service runs in Docker on the machine the cameras are plugged into — no
-        desktop or GUI required on that host. Drive everything from a web app served
-        over the local network, on <strong>any device</strong>: laptop, tablet or
-        phone. Fits headless servers, robotics rigs, motion-capture setups and
-        production lines.
+        Cameras plug into a headless server; drive the whole calibration from a
+        browser on <strong>any device</strong> — laptop, tablet or phone. Built for
+        robotics, mocap and production lines.
       </>
     ),
   },
@@ -32,9 +30,8 @@ const FeatureList: FeatureItem[] = [
     alt: 'Live intrinsic capture with board detection and quality gauges',
     description: (
       <>
-        No separate video-recording step: capture, detection, quality feedback and
-        computation happen live, in a single flow.{' '}
-        <strong>What you see is what gets calibrated.</strong>
+        Capture, live feedback and compute in a single flow — no separate recording
+        step. <strong>What you see is what gets calibrated.</strong>
       </>
     ),
   },
@@ -44,9 +41,8 @@ const FeatureList: FeatureItem[] = [
     alt: 'Extrinsic 3D review with camera frustums and per-camera reprojection error',
     description: (
       <>
-        Inspect the solved multi-camera rig in 3D — every camera in one shared world
-        frame — backed by objective figures: overall and per-camera reprojection
-        error. Re-orient the world, re-run the solve, then export.
+        Inspect the solved rig in 3D, backed by hard numbers — overall and
+        per-camera reprojection error — then export.
       </>
     ),
   },
