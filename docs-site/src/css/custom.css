@@ -114,11 +114,6 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Hide the doc pagination "Next" link at the bottom of doc pages. */
-.pagination-nav__link--next {
-  display: none;
-}
-
 /* Hide the auto-appended external-link glyph; show the GitHub mark instead. */
 .header-github-link svg {
   display: none;

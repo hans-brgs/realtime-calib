@@ -94,10 +94,6 @@ const config: Config = {
         {to: '/docs/research/methodology', label: 'Research', position: 'left'},
         {to: '/blog', label: 'Releases', position: 'left'},
         {
-          type: 'docsVersionDropdown',
-          position: 'right',
-        },
-        {
           href: 'https://github.com/hans-brgs/realtime-calib',
           position: 'right',
           className: 'header-github-link',
