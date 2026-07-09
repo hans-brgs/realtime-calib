@@ -427,7 +427,14 @@ async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
 
 @router.post("/intrinsic/{camera}/stop")
 async def stop_intrinsic(request: Request, camera: str) -> dict[str, object]:
-    """Finalise the recording; the video is ready to compute."""
+    """Finalise the recording; the video is ready to compute.
+
+    Idempotent no-op: returns a zero frame count when nothing is recording or
+    the capture service is unavailable. Unlike ``start`` (which needs the service
+    and 503s without it), ``stop`` only guarantees "nothing is recording" — a
+    state already met when the service is absent, so the webapp can call it
+    defensively on teardown without provoking spurious errors.
+    """
     service = get_publish_service(request)
     frames = await service.stop_intrinsic_recording() if service is not None else 0
     return {"camera": camera, "frames": frames}
@@ -456,7 +463,7 @@ async def intrinsic_preview(request: Request, camera: str) -> FileResponse:
 async def intrinsic_preview_status(request: Request, camera: str) -> dict[str, object]:
     """Transcode state (auto-enqueues a missing preview when the source exists)."""
     source = get_manager(request).intrinsic_video_path(camera)
-    return _preview_status_out(get_preview_jobs(request).status(source))
+    return _preview_status_out(await get_preview_jobs(request).status(source))
 
 
 @router.post("/intrinsic/{camera}/preview/transcode")
@@ -465,7 +472,7 @@ async def intrinsic_preview_retry(request: Request, camera: str) -> dict[str, ob
     source = get_manager(request).intrinsic_video_path(camera)
     jobs = get_preview_jobs(request)
     jobs.retry(source)
-    return _preview_status_out(jobs.status(source))
+    return _preview_status_out(await jobs.status(source))
 
 
 class ComputeRequest(BaseModel):
@@ -597,7 +604,14 @@ async def start_extrinsic(request: Request) -> dict[str, object]:
 
 @router.post("/extrinsic/stop")
 async def stop_extrinsic(request: Request) -> dict[str, object]:
-    """Finalise the synchronized sweep; per-camera videos + sidecars are on disk."""
+    """Finalise the synchronized sweep; per-camera videos + sidecars are on disk.
+
+    Idempotent no-op: returns empty counts when no sweep is running or the capture
+    service is unavailable. Unlike ``start`` (which needs the service and 503s
+    without it), ``stop`` only guarantees "nothing is recording" — a state already
+    met when the service is absent, so the webapp can call it defensively on
+    teardown without provoking spurious errors.
+    """
     service = get_publish_service(request)
     counts = await service.stop_extrinsic_recording() if service is not None else {}
     return {"frames": counts}
@@ -865,7 +879,7 @@ async def extrinsic_preview_status(request: Request) -> dict[str, object]:
     cameras: dict[str, dict[str, object]] = {}
     states: list[PreviewState] = []
     for camera in manager.current().cameras:
-        status = jobs.status(directory / f"{camera.name}.mkv")
+        status = await jobs.status(directory / f"{camera.name}.mkv")
         cameras[camera.name] = _preview_status_out(status)
         if status.state is not PreviewState.MISSING:
             states.append(status.state)
@@ -888,7 +902,7 @@ async def extrinsic_preview_retry(request: Request) -> dict[str, object]:
     directory = manager.extrinsic_dir()
     for camera in manager.current().cameras:
         source = directory / f"{camera.name}.mkv"
-        if jobs.status(source).state is PreviewState.FAILED:
+        if (await jobs.status(source)).state is PreviewState.FAILED:
             jobs.retry(source)
     return await extrinsic_preview_status(request)
 

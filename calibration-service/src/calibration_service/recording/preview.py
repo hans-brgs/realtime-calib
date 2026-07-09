@@ -124,8 +124,15 @@ class PreviewJobs:
             task.cancel()
         destination.unlink(missing_ok=True)
 
-    def status(self, source: Path) -> PreviewStatus:
-        """Current state for a recording; auto-enqueues a missing preview."""
+    async def status(self, source: Path) -> PreviewStatus:
+        """Current state for a recording; auto-enqueues a missing preview.
+
+        Async because the DONE branch probes the source frame count with a
+        synchronous cv2.VideoCapture open — that must run in the default
+        executor, not on the event loop (the API polls this while capture,
+        LiveKit publishing and telemetry share the loop). The auto-enqueue
+        (``ensure`` -> ``asyncio.create_task``) stays on the loop.
+        """
         destination = preview_path(source)
         key = str(destination)
         if key in self._errors:
@@ -133,7 +140,9 @@ class PreviewJobs:
         if destination.is_file():
             task = self._tasks.get(key)
             if task is None or task.done():
-                return PreviewStatus(PreviewState.DONE, frames=self._source_frames(source))
+                loop = asyncio.get_running_loop()
+                frames = await loop.run_in_executor(None, self._source_frames, source)
+                return PreviewStatus(PreviewState.DONE, frames=frames)
         if not source.is_file():
             return PreviewStatus(PreviewState.MISSING)
         self.ensure(source)

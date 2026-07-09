@@ -35,7 +35,7 @@ async def _drain(jobs: PreviewJobs) -> None:
 def test_status_missing_without_source(tmp_path: Path) -> None:
     async def scenario() -> None:
         jobs = PreviewJobs()
-        assert jobs.status(tmp_path / "none.mkv").state is PreviewState.MISSING
+        assert (await jobs.status(tmp_path / "none.mkv")).state is PreviewState.MISSING
 
     asyncio.run(scenario())
 
@@ -52,7 +52,7 @@ def test_failed_then_explicit_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         monkeypatch.setattr(preview_module, "transcode_args", lambda s, d: ["/bin/false"])
         jobs.ensure(source)
         await _drain(jobs)
-        status = jobs.status(source)
+        status = await jobs.status(source)
         assert status.state is PreviewState.FAILED
         assert status.error
 
@@ -64,7 +64,7 @@ def test_failed_then_explicit_retry(tmp_path: Path, monkeypatch: pytest.MonkeyPa
         )
         jobs.retry(source)
         await _drain(jobs)
-        assert jobs.status(source).state is PreviewState.DONE
+        assert (await jobs.status(source)).state is PreviewState.DONE
         assert preview_path(source).is_file()
 
     asyncio.run(scenario())
@@ -93,9 +93,9 @@ def test_real_transcode_preserves_frames_and_cfr(tmp_path: Path) -> None:
 
     async def scenario() -> None:
         jobs = PreviewJobs()
-        assert jobs.status(source).state is PreviewState.RUNNING  # auto-enqueued
+        assert (await jobs.status(source)).state is PreviewState.RUNNING  # auto-enqueued
         await _drain(jobs)
-        status = jobs.status(source)
+        status = await jobs.status(source)
         assert status.state is PreviewState.DONE
         assert status.frames == 5
 
