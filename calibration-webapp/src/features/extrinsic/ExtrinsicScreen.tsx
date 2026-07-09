@@ -23,6 +23,8 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
+import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
 import {
@@ -286,8 +288,6 @@ function ExtrinsicInner() {
   const [recording, setRecording] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [overwriteOpen, setOverwriteOpen] = useState(false);
-  // Preview transcode popup (ADR-0027): null = idle, 'running' = spinner, else error.
-  const [transcoding, setTranscoding] = useState<string | null>(null);
 
   // Prepare state: synchronized groups + the compute knobs (ADR-0023).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
@@ -343,37 +343,19 @@ function ExtrinsicInner() {
     }
   };
 
-  // Wait for the background preview transcodes of the sweep (ADR-0027) behind a
-  // blocking popup, then enter Prepare. 'transcoding' is 'running' or an error.
-  const waitForPreviews = async () => {
-    setTranscoding('running');
-    try {
-      let status = await fetchExtrinsicPreviewStatus();
-      for (let i = 0; status.state === 'running' && i < 150; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        status = await fetchExtrinsicPreviewStatus();
-      }
-      if (status.state === 'failed' || status.state === 'running') {
-        const failed = Object.values(status.cameras).find((c) => c.error);
-        setTranscoding(failed?.error ?? 'preview transcode timed out');
-        return;
-      }
-      setTranscoding(null);
-      setStep('prepare');
-    } catch (cause) {
-      setTranscoding(cause instanceof Error ? cause.message : 'preview transcode failed');
-    }
-  };
+  // Background preview transcodes of the sweep (ADR-0027) behind a blocking modal,
+  // then enter Prepare. The error can surface on any camera's transcode job.
+  const transcode = usePreviewTranscode({
+    poll: fetchExtrinsicPreviewStatus,
+    onReady: () => setStep('prepare'),
+    getError: (status) => Object.values(status.cameras).find((c) => c.error)?.error ?? null,
+    retryJob: retryExtrinsicPreview,
+  });
 
   const stopSweep = async () => {
     await stopExtrinsic().catch(() => {});
     setRecording(false);
-    await waitForPreviews();
-  };
-
-  const retryTranscode = async () => {
-    await retryExtrinsicPreview().catch(() => {});
-    await waitForPreviews();
+    await transcode.run();
   };
 
   const runCompute = async () => {
@@ -576,7 +558,7 @@ function ExtrinsicInner() {
                   fullWidth
                   variant="light"
                   mb="sm"
-                  onClick={() => void waitForPreviews()}
+                  onClick={() => void transcode.run()}
                 >
                   Recompute (tune again)
                 </Button>
@@ -639,36 +621,15 @@ function ExtrinsicInner() {
         </Group>
       </Modal>
 
-      {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
       {/* Preview transcodes (ADR-0027): block the Stop -> Prepare transition. */}
-      <Modal
-        opened={transcoding !== null}
-        onClose={() => setTranscoding(null)}
-        withCloseButton={transcoding !== 'running'}
-        closeOnClickOutside={false}
-        closeOnEscape={false}
-        centered
-        title="Preparing replay"
-      >
-        {transcoding === 'running' ? (
-          <Group gap="sm">
-            <Loader size="sm" />
-            <Text fz="0.84rem" c="dark.1">
-              Transcoding previews…
-            </Text>
-          </Group>
-        ) : (
-          <>
-            <Text fz="0.8rem" c="var(--rc-error)" mb="md">
-              {transcoding}
-            </Text>
-            <Group justify="flex-end">
-              <Button onClick={() => void retryTranscode()}>Retry transcode</Button>
-            </Group>
-          </>
-        )}
-      </Modal>
+      <TranscodePreparingModal
+        status={transcode.status}
+        onRetry={() => void transcode.retry()}
+        onClose={transcode.dismiss}
+        label="Transcoding previews…"
+      />
 
+      {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
       <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title="Overwrite array calibration?">
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
           <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
