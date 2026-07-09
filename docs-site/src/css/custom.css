@@ -114,9 +114,11 @@
   background: rgba(255, 255, 255, 0.08);
 }
 
-/* Hide the doc pagination "Next" link at the bottom of doc pages. */
-.pagination-nav__link--next {
-  display: none;
+/* Hide the doc pagination "Next" link at the bottom of doc pages.
+   Descendant selector (higher specificity than .pagination-nav__link) so it wins
+   over Infima's display:block regardless of the minifier's rule order. */
+.pagination-nav .pagination-nav__link--next {
+  display: none !important;
 }
 
 /* Hide the auto-appended external-link glyph; show the GitHub mark instead. */
