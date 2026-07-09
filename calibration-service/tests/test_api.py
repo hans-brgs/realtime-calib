@@ -525,6 +525,14 @@ def test_extrinsic_stop_without_service_returns_empty_counts(tmp_path: Path) -> 
     assert response.json() == {"frames": {}}
 
 
+def test_intrinsic_stop_without_service_returns_zero_frames(tmp_path: Path) -> None:
+    # stop is an idempotent no-op (unlike start's 503): no capture service wired
+    # still resolves to 200 with a zero count, so teardown never errors.
+    response = _client(tmp_path).post("/intrinsic/cam_0/stop")
+    assert response.status_code == 200
+    assert response.json() == {"camera": "cam_0", "frames": 0}
+
+
 def test_extrinsic_compute_guards(tmp_path: Path) -> None:
     # No board / no cameras -> 422; with prereqs but no recording -> 404.
     assert _client(tmp_path).post("/extrinsic/compute").status_code == 422

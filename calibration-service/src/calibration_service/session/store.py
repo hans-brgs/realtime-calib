@@ -177,8 +177,8 @@ def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
         step=WizardStep(data["step"]),
         mode=_parse_mode(str(data["mode"])),
         cameras=cameras,
-        intrinsic_fps=int(data["intrinsic_fps"]),
-        optimization_strategy=str(data["optimization_strategy"]),
+        intrinsic_fps=int(data.get("intrinsic_fps", 30)),
+        optimization_strategy=str(data.get("optimization_strategy", "coverage-aware")),
         export_units=str(data.get("export_units", "mm")),
         export_targets=[str(t) for t in data.get("export_targets", [])],
     )

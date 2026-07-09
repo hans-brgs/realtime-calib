@@ -129,3 +129,20 @@ def test_reload_maps_legacy_modes(tmp_path: Path) -> None:
     loaded = load_session(tmp_path, "legacy")
 
     assert loaded.mode is SessionMode.LOAD_FROM_FILES
+
+
+def test_reload_defaults_missing_fps_and_strategy(tmp_path: Path) -> None:
+    """session.toml files predating intrinsic_fps/optimization_strategy still load."""
+    base = session_dir(tmp_path, "legacy")
+    base.mkdir(parents=True)
+    (base / SESSION_FILE).write_text(
+        'session_id = "legacy"\n'
+        'step = "camera_setup"\n'
+        'mode = "new-realtime"\n'
+        "cameras = []\n"
+    )
+
+    loaded = load_session(tmp_path, "legacy")
+
+    assert loaded.intrinsic_fps == 30
+    assert loaded.optimization_strategy == "coverage-aware"
