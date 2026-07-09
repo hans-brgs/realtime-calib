@@ -77,3 +77,15 @@ docker compose build calibration-service    # rebuild one service after dep chan
 ### Port 443 already in use
 - Another service holds it. Override `CADDY_HTTPS_PORT` in `.env` (then access
   `https://<HOST_IP>:<port>`).
+
+### calibration-service crashes (SIGILL) during calibration
+- OpenBLAS auto-detects the CPU kernel at load time and can pick one that emits
+  an illegal instruction on some AVX-512 CPUs, hard-crashing (SIGILL) the heavy
+  linear algebra in `cv2.calibrateCamera`. The fault is inside libopenblas, not
+  OpenCV.
+- The service already guards against this by pinning `OPENBLAS_CORETYPE=Haswell`
+  before the first numpy import, so the default build is safe.
+- To override per host (e.g. a different safe kernel), set `OPENBLAS_CORETYPE`
+  in `.env` (Docker passes it through) or export it before launch when running
+  outside Docker. It must be set before numpy loads, so it cannot go through the
+  service `Config` class.
