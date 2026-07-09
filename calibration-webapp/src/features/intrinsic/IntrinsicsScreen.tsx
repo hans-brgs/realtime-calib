@@ -23,7 +23,9 @@ import { lazy, Suspense, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
 import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
+import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
@@ -51,8 +53,6 @@ type ResultsView = 'coverage' | 'poses';
 const PoseScene = lazy(() =>
   import('@/features/intrinsic/PoseScene').then((m) => ({ default: m.PoseScene })),
 );
-
-type Step = 'capture' | 'prepare' | 'computing' | 'results';
 
 // Board coverage (extrapolated area / frame) → colour band; green >= 0.50 = calib.io.
 function fillColor(coverage: number): string {
@@ -298,7 +298,7 @@ const PHASES = [
   { key: 'capture', label: 'Capture', sub: 'live capture + video' },
   { key: 'prepare', label: 'Prepare', sub: 'replay + trim + stride' },
   { key: 'computing', label: 'Computing', sub: 'keyframes + solve' },
-  { key: 'results', label: 'Results', sub: 'params + coverage' },
+  { key: 'review', label: 'Results', sub: 'params + coverage' },
 ];
 
 function IntrinsicsInner() {
@@ -309,11 +309,6 @@ function IntrinsicsInner() {
   const coverage = useAppSelector(selectCoverage(active));
   const camera = cameras.find((c) => c.name === active) ?? null;
 
-  const [step, setStep] = useState<Step>('capture');
-  const [recording, setRecording] = useState(false);
-  const [overwriteOpen, setOverwriteOpen] = useState(false);
-  const [computeError, setComputeError] = useState<string | null>(null);
-
   // Prepare-step state (ADR-0022): the recorded sweep + the operator knobs.
   const [frameTotal, setFrameTotal] = useState(0);
   const [frame, setFrame] = useState(0);
@@ -323,6 +318,55 @@ function IntrinsicsInner() {
   const [trimEnd, setTrimEnd] = useState(0);
   const [metrics, setMetrics] = useState<IntrinsicMetrics | null>(null);
   const [resultsView, setResultsView] = useState<ResultsView>('coverage');
+
+  // Prepare-step knobs setup from the recorded sweep (ADR-0022). The step move to
+  // Prepare is driven by the wizard (transcode onReady), not here.
+  const enterPrepare = (total: number) => {
+    setFrameTotal(total);
+    setFrame(0);
+    setTrimStart(0);
+    setTrimEnd(Math.max(0, total - 1));
+    setStride(5);
+    setKeyframeCap(25);
+  };
+
+  // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
+  const wizard = useCaptureWizard({
+    initialStep: 'capture',
+    start: async () => {
+      if (!active) throw new Error('no active camera');
+      await startIntrinsic(active);
+    },
+    stop: async () => {
+      if (active) await stopIntrinsic(active).catch(() => {});
+    },
+    afterStop: () => transcode.run(),
+    compute: async () => {
+      if (!active) throw new Error('no active camera');
+      await dispatch(
+        computeIntrinsicThunk({
+          camera: active,
+          params: { stride, cap: keyframeCap, frame_start: trimStart, frame_end: trimEnd + 1 },
+        }),
+      ).unwrap();
+    },
+  });
+
+  // Background preview transcode (ADR-0027) behind a blocking modal, then enter Prepare.
+  const transcode = usePreviewTranscode({
+    poll: async () => {
+      if (!active) throw new Error('no active camera');
+      return fetchIntrinsicPreviewStatus(active);
+    },
+    onReady: (status) => {
+      enterPrepare(status.state === 'done' ? status.frames : 0);
+      wizard.toPrepare();
+    },
+    getError: (status) => status.error,
+    retryJob: async () => {
+      if (active) await retryIntrinsicPreview(active);
+    },
+  });
 
   // Cameras rehydrate from the API after mount; if this screen mounted first, the
   // initial `active` is null. Once the list arrives (or the config changes so the
@@ -338,22 +382,21 @@ function IntrinsicsInner() {
   // On camera switch: reset to the right sub-step for that camera's status.
   useEffect(() => {
     if (!active) return;
-    setRecording(false);
-    // Land on Results whenever intrinsics EXIST (matrix present) — the status
-    // moves on to 'extrinsic_done' later, but the calibration is not lost.
-    setStep(camera?.matrix != null ? 'results' : 'capture');
+    // Land on Review whenever intrinsics EXIST (matrix present) — the status moves on
+    // to 'extrinsic_done' later, but the calibration is not lost. reset also stops REC.
+    wizard.reset(camera?.matrix != null ? 'review' : 'capture');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
-  // The live camera is only needed while capturing; Prepare/Results scrub the file.
+  // The live camera is only needed while capturing; Prepare/Review scrub the file.
   useEffect(() => {
     if (!active) return;
-    setActiveIntrinsic(step === 'capture' ? active : null).catch(() => { });
-  }, [active, step]);
+    setActiveIntrinsic(wizard.step === 'capture' ? active : null).catch(() => { });
+  }, [active, wizard.step]);
 
-  // On the Results step, load the persisted review metrics for the active camera.
+  // On the Review step, load the persisted review metrics for the active camera.
   useEffect(() => {
-    if (step !== 'results' || !active) {
+    if (wizard.step !== 'review' || !active) {
       setMetrics(null);
       return;
     }
@@ -364,7 +407,7 @@ function IntrinsicsInner() {
     return () => {
       cancelled = true;
     };
-  }, [step, active]);
+  }, [wizard.step, active]);
 
   useEffect(() => () => void setActiveIntrinsic(null).catch(() => { }), []);
 
@@ -372,85 +415,6 @@ function IntrinsicsInner() {
     isTrackReference,
   );
   const activeRef = trackRefs.find((r) => r.publication.trackName === active);
-
-  const startRecording = async () => {
-    if (!active) return;
-    setComputeError(null);
-    try {
-      await startIntrinsic(active);
-      setRecording(true);
-      setStep('capture');
-    } catch (err) {
-      // Surface the failure instead of showing a REC badge over a recording that
-      // never started (which would later transcode an empty file).
-      setComputeError(err instanceof Error ? err.message : 'could not start recording');
-    }
-  };
-
-  const enterPrepare = (total: number) => {
-    setFrameTotal(total);
-    setFrame(0);
-    setTrimStart(0);
-    setTrimEnd(Math.max(0, total - 1));
-    setStride(5);
-    setKeyframeCap(25);
-    setStep('prepare');
-  };
-
-  // Background preview transcode (ADR-0027) behind a blocking modal, then enter Prepare.
-  const transcode = usePreviewTranscode({
-    poll: async () => {
-      if (!active) throw new Error('no active camera');
-      return fetchIntrinsicPreviewStatus(active);
-    },
-    onReady: (status) => enterPrepare(status.state === 'done' ? status.frames : 0),
-    getError: (status) => status.error,
-    retryJob: async () => {
-      if (active) await retryIntrinsicPreview(active);
-    },
-  });
-
-  // Stop the sweep and move to Prepare (replay + tuning) — no longer straight to compute.
-  const stopRecording = async () => {
-    if (!active) return;
-    await stopIntrinsic(active).catch(() => { });
-    setRecording(false);
-    await transcode.run();
-  };
-
-  const runCompute = async () => {
-    if (!active) return;
-    setStep('computing');
-    setComputeError(null);
-    try {
-      await dispatch(
-        computeIntrinsicThunk({
-          camera: active,
-          params: { stride, cap: keyframeCap, frame_start: trimStart, frame_end: trimEnd + 1 },
-        }),
-      ).unwrap();
-      setStep('results');
-    } catch (err) {
-      setComputeError(err instanceof Error ? err.message : 'compute failed');
-      setStep('prepare');
-    }
-  };
-
-  // Re-record replaces the sweep (and, once recomputed, the calibration). On an
-  // already-calibrated camera, confirm the overwrite first (ADR-0019).
-  const reRecord = () => {
-    if (camera?.status === 'intrinsic_done') {
-      setOverwriteOpen(true);
-    } else {
-      setStep('capture');
-    }
-  };
-
-  const confirmReRecord = () => {
-    setOverwriteOpen(false);
-    setRecording(false);
-    setStep('capture');
-  };
 
   const nextCamera = () => {
     const idx = cameras.findIndex((c) => c.name === active);
@@ -467,131 +431,120 @@ function IntrinsicsInner() {
   // persisted step to extrinsic capture and let the wizard rail follow (no explicit
   // navigation needed, spec wizard-navigation).
   const validateAndAdvance = async () => {
-    setComputeError(null);
+    wizard.setMessage(null);
     try {
       await dispatch(validateIntrinsicThunk()).unwrap();
     } catch (err) {
-      setComputeError(err instanceof Error ? err.message : 'validate failed');
+      wizard.setMessage(err instanceof Error ? err.message : 'validate failed');
     }
   };
 
-  const scrubbing = step === 'prepare' || step === 'computing';
+  const scrubbing = wizard.step === 'prepare' || wizard.step === 'computing';
 
   return (
     <>
-      <SegmentedControl
-        color="violet"
-        value={active ?? ''}
-        onChange={setActive}
-        data={cameras.map((c) => ({
-          label: c.status === 'intrinsic_done' ? `${c.name} ✓` : c.name,
-          value: c.name,
-        }))}
-        mb="md"
-      />
-      <PhaseStepper phases={PHASES} current={step} />
-
-      <Box
-        className="rc-camsetup-grid"
-        style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 22 }}
-      >
-        <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
-          {step === 'results' ? (
-            // ADR-0022 Results: toggle between the coverage heatmap and the 3D pose scene
-            // (boards at their recovered poses); the result summary is on the right.
-            metrics ? (
-              <>
-                {resultsView === 'poses' ? (
-                  <Suspense
-                    fallback={
-                      <Center h="100%">
-                        <Loader size="sm" />
-                      </Center>
-                    }
-                  >
-                    <PoseScene quads={metrics.board_quads} />
-                  </Suspense>
-                ) : (
-                  <CoverageHeatmap grid={metrics.coverage} />
-                )}
-                <Box style={{ position: 'absolute', top: 38, right: 12, zIndex: 2 }}>
-                  <SegmentedControl
-                    size="xs"
-                    value={resultsView}
-                    onChange={(v) => setResultsView(v as ResultsView)}
-                    data={[
-                      { label: 'Coverage', value: 'coverage' },
-                      { label: '3D poses', value: 'poses' },
-                    ]}
-                    styles={{
-                      root: {
-                        background: 'rgba(9,9,11,0.72)',
-                        backdropFilter: 'blur(6px)',
-                        border: '1px solid var(--rc-border)',
-                      },
-                    }}
-                  />
-                </Box>
-              </>
+      <CaptureWizardLayout
+        top={
+          <SegmentedControl
+            color="violet"
+            value={active ?? ''}
+            onChange={setActive}
+            data={cameras.map((c) => ({
+              // ✓ = has intrinsics (matrix present): both intrinsic_done AND extrinsic_done.
+              label: c.matrix != null ? `${c.name} ✓` : c.name,
+              value: c.name,
+            }))}
+            mb="md"
+          />
+        }
+        stepper={<PhaseStepper phases={PHASES} current={wizard.step} />}
+        main={
+          <>
+            {wizard.step === 'review' ? (
+              // ADR-0022 Review: toggle between the coverage heatmap and the 3D pose scene
+              // (boards at their recovered poses); the result summary is on the right.
+              metrics ? (
+                <>
+                  {resultsView === 'poses' ? (
+                    <Suspense
+                      fallback={
+                        <Center h="100%">
+                          <Loader size="sm" />
+                        </Center>
+                      }
+                    >
+                      <PoseScene quads={metrics.board_quads} />
+                    </Suspense>
+                  ) : (
+                    <CoverageHeatmap grid={metrics.coverage} />
+                  )}
+                  <Box style={{ position: 'absolute', top: 38, right: 12, zIndex: 2 }}>
+                    <SegmentedControl
+                      size="xs"
+                      value={resultsView}
+                      onChange={(v) => setResultsView(v as ResultsView)}
+                      data={[
+                        { label: 'Coverage', value: 'coverage' },
+                        { label: '3D poses', value: 'poses' },
+                      ]}
+                      styles={{
+                        root: {
+                          background: 'rgba(9,9,11,0.72)',
+                          backdropFilter: 'blur(6px)',
+                          border: '1px solid var(--rc-border)',
+                        },
+                      }}
+                    />
+                  </Box>
+                </>
+              ) : (
+                <Center h="100%">
+                  <Text c="dark.3" fz="0.84rem">
+                    Loading review…
+                  </Text>
+                </Center>
+              )
+            ) : scrubbing && active ? (
+              <PrepareScrubber
+                camera={active}
+                total={frameTotal}
+                frame={frame}
+                onFrame={setFrame}
+                trim={[trimStart, trimEnd]}
+              />
+            ) : activeRef ? (
+              <CameraTile trackRef={activeRef} label={active ?? undefined} />
             ) : (
               <Center h="100%">
                 <Text c="dark.3" fz="0.84rem">
-                  Loading review…
+                  Waiting for {active ?? 'camera'} stream…
                 </Text>
               </Center>
-            )
-          ) : scrubbing && active ? (
-            <PrepareScrubber
-              camera={active}
-              total={frameTotal}
-              frame={frame}
-              onFrame={setFrame}
-              trim={[trimStart, trimEnd]}
-            />
-          ) : activeRef ? (
-            <CameraTile trackRef={activeRef} label={active ?? undefined} />
-          ) : (
-            <Center h="100%">
-              <Text c="dark.3" fz="0.84rem">
-                Waiting for {active ?? 'camera'} stream…
-              </Text>
-            </Center>
-          )}
-          {recording && step === 'capture' && (
-            <Group
-              gap={6}
-              px={10}
-              py={5}
-              style={{
-                position: 'absolute',
-                top: 12,
-                left: '50%',
-                transform: 'translateX(-50%)',
-                borderRadius: 20,
-                background: 'rgba(9,9,11,0.7)',
-              }}
-            >
-              <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
-              <Text fz="0.72rem" fw={600}>
-                REC
-              </Text>
-            </Group>
-          )}
-        </Box>
-
-        <Box
-          style={{
-            minHeight: 0,
-            overflowY: 'auto',
-            border: '1px solid var(--rc-border)',
-            borderRadius: 'var(--mantine-radius-lg)',
-            background: 'var(--rc-panel)',
-            padding: 16,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {step === 'results' && camera ? (
+            )}
+            {wizard.recording && wizard.step === 'capture' && (
+              <Group
+                gap={6}
+                px={10}
+                py={5}
+                style={{
+                  position: 'absolute',
+                  top: 12,
+                  left: '50%',
+                  transform: 'translateX(-50%)',
+                  borderRadius: 20,
+                  background: 'rgba(9,9,11,0.7)',
+                }}
+              >
+                <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
+                <Text fz="0.72rem" fw={600}>
+                  REC
+                </Text>
+              </Group>
+            )}
+          </>
+        }
+        panel={
+          wizard.step === 'review' && camera ? (
             <ResultPanel camera={camera} metrics={metrics} />
           ) : scrubbing ? (
             <PreparePanel
@@ -607,76 +560,74 @@ function IntrinsicsInner() {
             />
           ) : (
             <GaugesPanel coverage={coverage} />
-          )}
-
-          {computeError && (
-            <Text fz="0.72rem" c="var(--rc-error)" mt="sm">
-              {computeError}
-            </Text>
-          )}
-
-          <Box mt="auto" pt="md">
-            {step === 'results' ? (
-              <>
-                {isLastCamera ? (
-                  <Button
-                    fullWidth
-                    leftSection={<IconCheck size={15} />}
-                    onClick={() => void validateAndAdvance()}
-                    disabled={!allCalibrated}
-                  >
-                    Validate → Extrinsics
-                  </Button>
-                ) : (
-                  <Button fullWidth onClick={nextCamera}>
-                    Validate → next camera
-                  </Button>
-                )}
-                {/* Back to Prepare on the SAME recording: retune trim/stride/cap,
-                    then Compute again (the preview mp4 is already there). */}
-                <Button fullWidth variant="light" mt="sm" onClick={() => void transcode.run()}>
-                  Recompute (tune again)
-                </Button>
+          )
+        }
+        action={
+          wizard.step === 'review' ? (
+            <>
+              {isLastCamera ? (
                 <Button
                   fullWidth
-                  variant="light"
-                  color="gray"
-                  mt="sm"
-                  leftSection={<IconPlayerRecordFilled size={15} />}
-                  onClick={reRecord}
+                  leftSection={<IconCheck size={15} />}
+                  onClick={() => void validateAndAdvance()}
+                  disabled={!allCalibrated}
                 >
-                  Re-record
+                  Validate → Extrinsics
                 </Button>
-              </>
-            ) : scrubbing ? (
-              <Button fullWidth loading={step === 'computing'} onClick={() => void runCompute()}>
-                Compute
+              ) : (
+                <Button fullWidth onClick={nextCamera}>
+                  Validate → next camera
+                </Button>
+              )}
+              {/* Back to Prepare on the SAME recording: retune trim/stride/cap,
+                  then Compute again (the preview mp4 is already there). */}
+              <Button fullWidth variant="light" mt="sm" onClick={() => void transcode.run()}>
+                Recompute (tune again)
               </Button>
-            ) : recording ? (
               <Button
                 fullWidth
-                color="red"
-                leftSection={<IconPlayerStopFilled size={16} />}
-                onClick={() => void stopRecording()}
+                variant="light"
+                color="gray"
+                mt="sm"
+                leftSection={<IconPlayerRecordFilled size={15} />}
+                onClick={wizard.reRecord}
               >
-                Stop
+                Re-record
               </Button>
-            ) : (
-              <Button
-                fullWidth
-                leftSection={<IconPlayerRecordFilled size={16} />}
-                onClick={() => void startRecording()}
-              >
-                Start recording
-              </Button>
-            )}
-          </Box>
-        </Box>
-      </Box>
+            </>
+          ) : scrubbing ? (
+            <Button
+              fullWidth
+              loading={wizard.step === 'computing'}
+              onClick={() => void wizard.runCompute()}
+            >
+              Compute
+            </Button>
+          ) : wizard.recording ? (
+            <Button
+              fullWidth
+              color="red"
+              leftSection={<IconPlayerStopFilled size={16} />}
+              onClick={() => void wizard.stopRecording()}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button
+              fullWidth
+              leftSection={<IconPlayerRecordFilled size={16} />}
+              onClick={() => void wizard.startRecording()}
+            >
+              Start recording
+            </Button>
+          )
+        }
+        message={wizard.message}
+      />
 
       {/* Blocking compute modal (ADR-0019: capture released, solver runs). */}
       <Modal
-        opened={step === 'computing'}
+        opened={wizard.step === 'computing'}
         onClose={() => { }}
         withCloseButton={false}
         closeOnClickOutside={false}
@@ -701,7 +652,7 @@ function IntrinsicsInner() {
       />
 
       {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}
-      <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title={`Overwrite ${active} calibration?`}>
+      <Modal opened={wizard.overwriteOpen} onClose={wizard.cancelOverwrite} centered title={`Overwrite ${active} calibration?`}>
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
           <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
           <Text fz="0.84rem" c="dark.1">
@@ -711,10 +662,10 @@ function IntrinsicsInner() {
           </Text>
         </Group>
         <Group justify="flex-end">
-          <Button variant="default" onClick={() => setOverwriteOpen(false)}>
+          <Button variant="default" onClick={wizard.cancelOverwrite}>
             Cancel
           </Button>
-          <Button color="red" onClick={confirmReRecord}>
+          <Button color="red" onClick={wizard.confirmReRecord}>
             Discard &amp; re-record
           </Button>
         </Group>
