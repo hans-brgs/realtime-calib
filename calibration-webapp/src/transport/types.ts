@@ -52,6 +52,22 @@ export interface Board {
 
 export type BoardTarget = 'intrinsic' | 'extrinsic';
 
+// Capture-view id reported to the service (POST /capture/view) so it opens only the
+// cameras that view needs (ADR-0021): a wizard stage, the transient 'load' sub-flow, or
+// 'idle' (explicit "release all" for a non-capturing screen). MUST match the backend
+// Literal (CaptureViewRequest.view). Never null from a screen — the backend reads null
+// as "not reported yet -> publish all", so a non-capturing screen sends 'idle'.
+export type CaptureView =
+  | 'session'
+  | 'cameras'
+  | 'boards'
+  | 'intrinsic'
+  | 'extrinsic'
+  | 'export'
+  | 'load'
+  | 'review'
+  | 'idle';
+
 export interface BoardConfigRequest {
   target: BoardTarget;
   board: Board | null; // null = inherit the intrinsic board (extrinsic only)

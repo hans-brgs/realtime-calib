@@ -326,7 +326,7 @@ function ExtrinsicInner() {
   // Live cameras are only needed while capturing; Prepare/Review scrub the files.
   // Reporting a non-live view id releases every camera (ADR-0021 view mapping).
   useEffect(() => {
-    setCaptureView(wizard.step === 'capture' ? 'extrinsic' : 'extrinsic-idle').catch(() => {});
+    setCaptureView(wizard.step === 'capture' ? 'extrinsic' : 'idle').catch(() => {});
   }, [wizard.step]);
 
   // Refetch the group list when the spread threshold changes (server-side filter,

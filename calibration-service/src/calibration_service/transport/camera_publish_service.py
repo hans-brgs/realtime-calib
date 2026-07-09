@@ -528,7 +528,7 @@ class CameraPublishService:
             return set(by_name)  # None = not reported yet -> publish all (safe default)
         if view == _INTRINSIC_VIEW:
             return {self._active_intrinsic} if self._active_intrinsic in by_name else set()
-        return set()  # boards / review / export / entry -> no live camera
+        return set()  # boards / export / session / load / review / idle -> no live camera
 
     async def _reconcile_open_set(
         self,

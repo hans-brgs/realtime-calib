@@ -342,6 +342,20 @@ def test_capture_view_accepts_null(tmp_path: Path) -> None:
     assert response.json() == {"view": None}
 
 
+def test_capture_view_accepts_idle(tmp_path: Path) -> None:
+    # 'idle' is the explicit "release all" for a non-capturing screen (D7.3).
+    response = _client(tmp_path).post("/capture/view", json={"view": "idle"})
+    assert response.status_code == 200
+    assert response.json() == {"view": "idle"}
+
+
+def test_capture_view_rejects_unknown_id(tmp_path: Path) -> None:
+    # D7.3: an unknown view id (a typo, or the old 'extrinsic-idle' magic string) is now
+    # rejected with 422 instead of silently mapping to "no camera".
+    response = _client(tmp_path).post("/capture/view", json={"view": "extrinsic-idle"})
+    assert response.status_code == 422
+
+
 def test_preview_routes_without_recording(tmp_path: Path) -> None:
     # ADR-0027: no source recording -> preview 404, status 'missing' (no job).
     client = _client(tmp_path)

@@ -383,8 +383,17 @@ async def set_active_intrinsic(request: Request, body: ActiveIntrinsicRequest) -
     return {"active": body.camera}
 
 
+# Capture-view id (ADR-0021): a wizard stage, the transient 'load' sub-flow, or 'idle'
+# (explicit "release all"). Must match the webapp CaptureView union. None = not reported
+# yet -> publish all (safe default); an unknown id is rejected (422) instead of silently
+# mapping to no camera.
+CaptureView = Literal[
+    "session", "cameras", "boards", "intrinsic", "extrinsic", "export", "load", "review", "idle"
+]
+
+
 class CaptureViewRequest(BaseModel):
-    view: str | None  # wizard view id (e.g. "intrinsic", "cameras"), or null
+    view: CaptureView | None = None
 
 
 @router.post("/capture/view")
