@@ -78,7 +78,9 @@ export function TargetConfigScreen() {
   const session = useAppSelector(selectSession);
 
   const [dictionaries, setDictionaries] = useState<string[]>([DEFAULT_BOARD.dictionary]);
-  const [active, setActive] = useState<BoardTarget>('intrinsic');
+  const [active, setActive] = useState<BoardTarget>(
+    session?.step === 'extrinsic_board_choice' ? 'extrinsic' : 'intrinsic',
+  );
   const [intrinsic, setIntrinsic] = useState<Board>(session?.intrinsic_board ?? DEFAULT_BOARD);
   const [extrinsic, setExtrinsic] = useState<Board>(
     session?.extrinsic_board ?? session?.intrinsic_board ?? DEFAULT_BOARD,
@@ -135,7 +137,15 @@ export function TargetConfigScreen() {
     const target: BoardTarget = active;
     setSaving(true);
     try {
-      await dispatch(applyBoardConfig({ target, board: normalizeBoard(board) })).unwrap();
+      // Inheriting (extrinsic tab, box unchecked) sends board=null: the backend keeps
+      // extrinsic_board null and completes Target Config.
+      const payload = editingInherited ? null : normalizeBoard(board);
+      await dispatch(applyBoardConfig({ target, board: payload })).unwrap();
+      // Saving the intrinsic board advances to the extrinsic choice — surface that tab
+      // (the backend now stops at extrinsic_board_choice, so the view stays here).
+      if (target === 'intrinsic') {
+        setActive('extrinsic');
+      }
     } finally {
       setSaving(false);
     }
@@ -385,11 +395,11 @@ export function TargetConfigScreen() {
             </Box>
           )}
 
-          {!editingInherited && (
-            <Button fullWidth mt="lg" onClick={save} loading={saving}>
-              Save {active} board
-            </Button>
-          )}
+          {/* Always present — the extrinsic choice (a board, or inherit) must be
+              confirmed to complete Target Config, so it can't be skipped. */}
+          <Button fullWidth mt="lg" onClick={save} loading={saving}>
+            Save {active} board
+          </Button>
         </Box>
       </Box>
     </Box>

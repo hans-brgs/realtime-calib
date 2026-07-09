@@ -5,6 +5,7 @@ import type {
   Board,
   BoardConfigRequest,
   BoardTarget,
+  CaptureView,
   ConfigRequest,
   DetectedCamera,
   Session,
@@ -97,8 +98,8 @@ export const setActiveIntrinsic = (camera: string | null): Promise<{ active: str
 
 // Report the operator's current wizard view so the service captures only the cameras
 // that view needs (ADR-0021: cameras/extrinsic -> all, intrinsic -> active, else none).
-export const setCaptureView = (view: string | null): Promise<{ view: string | null }> =>
-  postJson<{ view: string | null }>('/capture/view', { view });
+export const setCaptureView = (view: CaptureView | null): Promise<{ view: CaptureView | null }> =>
+  postJson<{ view: CaptureView | null }>('/capture/view', { view });
 
 export const startIntrinsic = (camera: string): Promise<{ recording: string }> =>
   postJson<{ recording: string }>(`/intrinsic/${camera}/start`);

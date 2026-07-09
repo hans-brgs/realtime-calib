@@ -185,19 +185,28 @@ class SessionManager:
             )
         return sorted(result, key=lambda s: s.modified_at, reverse=True)
 
-    def define_board(self, target: str, board: CalibrationBoard) -> CalibrationSession:
+    def define_board(
+        self, target: str, board: CalibrationBoard | None
+    ) -> CalibrationSession:
         """Set the intrinsic or extrinsic board, advance the FSM, and persist config.toml.
 
-        ``target`` is ``"intrinsic"`` or ``"extrinsic"``. Defining the intrinsic
-        board completes Target Config and unlocks Camera Setup (board-first flow).
+        ``target`` is ``"intrinsic"`` or ``"extrinsic"``. Defining the intrinsic board
+        advances Target Config to the extrinsic-board choice; confirming the extrinsic
+        board — a real board, or ``None`` to inherit the intrinsic one — completes Target
+        Config and unlocks Camera Setup (board-first flow, spec wizard-navigation). Both
+        steps are walked so the extrinsic choice can't be skipped.
         """
         session = self.current()
         if target == "intrinsic":
+            if board is None:
+                raise ValueError("intrinsic board is required")
             session.intrinsic_board = board
+            if session.step == WizardStep.INTRINSIC_BOARD:
+                session.step = WizardStep.EXTRINSIC_BOARD_CHOICE
+        elif target == "extrinsic":
+            session.extrinsic_board = board  # None = inherit the intrinsic board
             if session.step in (WizardStep.INTRINSIC_BOARD, WizardStep.EXTRINSIC_BOARD_CHOICE):
                 session.step = WizardStep.CAMERA_SETUP
-        elif target == "extrinsic":
-            session.extrinsic_board = board
         else:
             raise ValueError(f"unknown board target: {target!r}")
 

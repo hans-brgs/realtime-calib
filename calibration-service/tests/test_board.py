@@ -100,8 +100,18 @@ def test_define_board_advances_and_persists(tmp_path: Path) -> None:
     resp = client.post("/board", json=body)
     assert resp.status_code == 200
     session = resp.json()
-    assert session["step"] == "camera_setup"  # board-first: intrinsic board unlocks cameras
+    # Defining the intrinsic board advances to the extrinsic-board choice (not straight
+    # to Camera Setup) so the extrinsic choice can't be skipped.
+    assert session["step"] == "extrinsic_board_choice"
     assert session["intrinsic_board"]["columns"] == 8
+
+    # Confirming the extrinsic choice — here inheriting (board=None) — completes Target
+    # Config and unlocks Camera Setup.
+    resp = client.post("/board", json={"target": "extrinsic", "board": None})
+    assert resp.status_code == 200
+    session = resp.json()
+    assert session["step"] == "camera_setup"
+    assert session["extrinsic_board"] is None
 
     # Persisted: a fresh manager reloads the board from config.toml.
     reloaded = SessionManager(tmp_path, "default").current()

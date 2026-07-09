@@ -176,6 +176,10 @@ class CameraPublishService:
         # default until the webapp is wired). `_reconcile` wakes the reconcile loop.
         self._active_view: str | None = None
         self._reconcile = asyncio.Event()
+        # Set by refresh() (config/session change) so the persistent session re-resolves
+        # targets + reconciles the TRACK set (ADR-0029). A bare view change does NOT set
+        # it (no re-enumerate): only the open-set reconciles.
+        self._targets_dirty = False
         # Track name currently in intrinsic capture: only that camera runs detection +
         # burn-in + telemetry; in the intrinsic view it is the *only* camera live.
         self._active_intrinsic: str | None = None
@@ -335,16 +339,21 @@ class CameraPublishService:
             self._start_locked()
 
     async def refresh(self) -> None:
-        """Stop the current publisher and re-launch from the current session/config.
+        """Reconcile the publisher against the current session/config (ADR-0029).
 
-        Serialized under the lifecycle lock (see __init__): overlapping refreshes
-        queue up, so a session is always fully torn down — cameras released,
-        room closed — before the next one starts.
+        NO teardown/reconnect: it signals the persistent publish session to re-resolve
+        targets and reconcile the track + open sets IN PLACE (a disconnect/reconnect
+        crashes the LiveKit FFI). If no session is running yet (idle), it starts the run
+        loop, which connects once a session has cameras. Serialized under the lifecycle
+        lock so two concurrent idle-starts can't spawn overlapping sessions.
         """
         logger.info("refreshing camera publishers")
         async with self._lifecycle:
-            await self._stop_locked()
-            self._start_locked()
+            self._targets_dirty = True
+            if self._task is None:
+                self._start_locked()
+            else:
+                self._reconcile.set()
 
     async def stop(self) -> None:
         async with self._lifecycle:
@@ -376,15 +385,21 @@ class CameraPublishService:
             )
 
     async def _run(self) -> None:
-        """Reconnect loop: (re)publish all cameras whenever a session ends."""
+        """Session loop: hold one persistent publish session; when it returns (network
+        drop or a deliberate session close/resize) wait — interruptibly — before
+        retrying. A refresh() wakes the wait so a new session connects promptly (ADR-0029).
+        """
         while True:
+            self._reconcile.clear()
             try:
                 await self._publish_session()
             except asyncio.CancelledError:
                 raise
             except Exception:
                 logger.exception("publish session failed; reconnecting")
-            await asyncio.sleep(_RECONNECT_BACKOFF_S)
+            # Interruptible backoff: a refresh (new/changed session) wakes us at once.
+            with contextlib.suppress(TimeoutError):
+                await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONNECT_BACKOFF_S)
 
     def _resolve_targets(self) -> list[_PublishTarget]:
         session = self._sessions.current_or_none()
@@ -404,11 +419,15 @@ class CameraPublishService:
         ]
 
     async def _publish_session(self) -> None:
-        """Connect once, publish every track (muted), then reconcile the open set.
+        """Hold one persistent connection, reconciling the published-track set and the
+        open set in a loop (ADR-0029), until the room drops or the session closes.
 
-        On-demand capture (ADR-0021): the N tracks are published up-front and muted;
-        the reconcile loop opens + unmutes only the cameras the current view needs,
-        and closes + mutes the rest — until the room drops (then ``_run`` reconnects).
+        On-demand capture (ADR-0021): tracks are published up-front (muted) and opened
+        on demand per view. On a config change the track set is reconciled IN PLACE — a
+        new camera's track is published, a removed one muted (never unpublished, #449) —
+        with NO reconnect; the disconnect/reconnect that crashes the LiveKit FFI happens
+        only on a real network drop (``_run`` republishes all) or a deliberate session
+        close/resize.
         """
         loop = asyncio.get_running_loop()
         executor = self._capture_executor
@@ -416,16 +435,17 @@ class CameraPublishService:
             return
         targets = await loop.run_in_executor(executor, self._resolve_targets)
         if not targets:
-            # No active session (dashboard) is the normal idle state, not a fault —
-            # don't spam a warning every reconnect tick (ADR-0028).
+            # No active session (dashboard) is the normal idle state, not a fault — stay
+            # disconnected until a session with cameras appears (refresh() wakes _run).
             if self._sessions.current_or_none() is None:
                 logger.debug("no active session; publisher idle")
             else:
                 logger.warning("no camera to publish")
             return
-        # Built as cameras are actually published below: a camera skipped for missing
-        # dimensions must not enter the desired/open set (its track was never
-        # published, so opening + pushing it would crash-loop the session).
+        # Published-track set for THIS connection (union of cameras seen, ADR-0029):
+        # track name -> published preview size. `by_name` is the CURRENT config, rebuilt
+        # each reconcile; a camera skipped for missing dimensions never enters it.
+        published: dict[str, tuple[int, int]] = {}
         by_name: dict[str, _PublishTarget] = {}
 
         token = mint_publish_token(
@@ -436,16 +456,16 @@ class CameraPublishService:
         try:
             await publisher.connect(self._config.url, token)
             await publisher.await_connected()  # WebRTC handshake before media (#449)
-            # Publish every camera's track once (muted); cameras open on demand.
-            for target in targets:
-                size = _preview_size(target.width, target.height) if target.width else None
-                if size is None:
-                    logger.warning("camera %s has no dimensions; not published", target.name)
-                    continue
-                await publisher.publish_camera_track(target.name, size[0], size[1], _PREVIEW_FPS)
-
+            self._targets_dirty = True  # publish the initial track set on the first tick
             while not publisher.is_disconnected():
                 self._reconcile.clear()
+                if self._targets_dirty:
+                    self._targets_dirty = False
+                    targets = await loop.run_in_executor(executor, self._resolve_targets)
+                    if not targets:
+                        break  # session closed -> graceful disconnect (ADR-0029)
+                    if await self._reconcile_tracks(publisher, targets, published, by_name):
+                        break  # a track needs a new size -> reconnect to republish it
                 await self._reconcile_open_set(loop, executor, publisher, by_name, open_cams)
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONCILE_TICK_S)
@@ -456,6 +476,46 @@ class CameraPublishService:
                 _camera, task = open_cams.pop(name)
                 await self._stop_capture(publisher, name, task)
             await publisher.aclose()
+
+    async def _reconcile_tracks(
+        self,
+        publisher: LiveKitPublisher,
+        targets: list[_PublishTarget],
+        published: dict[str, tuple[int, int]],
+        by_name: dict[str, _PublishTarget],
+    ) -> bool:
+        """Reconcile the published-track set to the current config (ADR-0029).
+
+        Publishes a muted track for each newly-configured camera, mutes the ones no
+        longer configured (never ``unpublish`` — leak #449), and rebuilds ``by_name`` to
+        the current config so the open-set reconcile never opens a removed camera.
+        Returns True if a still-configured camera now needs a DIFFERENT preview size than
+        published (a track can't be resized in place) — the caller reconnects to
+        republish at the new size (rare: an aspect-ratio change).
+        """
+        by_name.clear()
+        for target in targets:
+            size = _preview_size(target.width, target.height) if target.width else None
+            if size is None:
+                logger.warning("camera %s has no dimensions; not published", target.name)
+                continue
+            previous = published.get(target.name)
+            if previous is None:
+                await publisher.publish_camera_track(target.name, size[0], size[1], _PREVIEW_FPS)
+                published[target.name] = size
+            elif previous != size:
+                logger.info(
+                    "camera %s preview size %s -> %s; reconnecting to resize",
+                    target.name,
+                    previous,
+                    size,
+                )
+                return True
+            by_name[target.name] = target
+        for name in published:
+            if name not in by_name:
+                publisher.mute(name)
+        return False
 
     def _desired_cameras(self, by_name: dict[str, _PublishTarget]) -> set[str]:
         """The cameras that should be live for the current view (ADR-0021)."""
@@ -468,7 +528,7 @@ class CameraPublishService:
             return set(by_name)  # None = not reported yet -> publish all (safe default)
         if view == _INTRINSIC_VIEW:
             return {self._active_intrinsic} if self._active_intrinsic in by_name else set()
-        return set()  # boards / review / export / entry -> no live camera
+        return set()  # boards / export / session / load / review / idle -> no live camera
 
     async def _reconcile_open_set(
         self,

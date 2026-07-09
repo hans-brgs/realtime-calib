@@ -38,6 +38,9 @@ class LiveKitConfig(BaseSettings):
 
     model_config = SettingsConfigDict(env_prefix="LIVEKIT_", extra="ignore")
 
+    # Same-machine default for bare runs (LiveKit dev server on localhost). In
+    # docker-compose this is ALWAYS overridden by LIVEKIT_URL from the .env, which
+    # targets the bridge service name (ws://livekit:7880, ADR-0014 — no host network).
     url: str = "ws://localhost:7880"
     api_key: str = "devkey"
     api_secret: str = "secret"

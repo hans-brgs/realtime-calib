@@ -82,6 +82,14 @@ describe('selectStages (completion-driven)', () => {
     expect(stages[1]).toMatchObject({ id: 'cameras', status: 'locked' });
   });
 
+  it('at extrinsic_board_choice: boards active, cameras locked (extrinsic not skippable)', () => {
+    const stages = selectStages(
+      stateWith(session({ step: 'extrinsic_board_choice', intrinsic_board: board() })),
+    );
+    expect(stages.find((s) => s.id === 'boards')?.status).toBe('active');
+    expect(stages.find((s) => s.id === 'cameras')?.status).toBe('locked');
+  });
+
   it('all cameras extrinsic_done at extrinsic_capture: extrinsic active, export unlocked', () => {
     // No "Review 3D" stage: the 3D review lives inside the Extrinsics Result
     // sub-step, so a fully-solved array unlocks Export directly.

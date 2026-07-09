@@ -1,4 +1,3 @@
-import { useDataChannel } from '@livekit/components-react';
 import {
   ActionIcon,
   Box,
@@ -24,6 +23,10 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
+import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
+import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
+import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
 import {
@@ -31,14 +34,7 @@ import {
   selectSession,
   validateExtrinsicThunk,
 } from '@/features/session/sessionSlice';
-import {
-  type CoverageMetrics,
-  type Covisibility,
-  coverageReceived,
-  covisibilityCleared,
-  covisibilityReceived,
-  selectCovisibility,
-} from '@/features/telemetry/telemetrySlice';
+import { covisibilityCleared, selectCovisibility } from '@/features/telemetry/telemetrySlice';
 import {
   type ExtrinsicGroup,
   type ExtrinsicResultPayload,
@@ -53,8 +49,6 @@ import {
   stopExtrinsic,
 } from '@/transport/httpClient';
 
-type Step = 'capture' | 'prepare' | 'computing' | 'result';
-
 // Lazy so three.js only ships when the operator reaches the 3D array review.
 const ArrayReview = lazy(() =>
   import('@/features/review3d/ArrayReview').then((m) => ({ default: m.ArrayReview })),
@@ -64,30 +58,10 @@ const PHASES = [
   { key: 'capture', label: 'Capture', sub: 'synchronized sweep' },
   { key: 'prepare', label: 'Prepare', sub: 'groups + thresholds' },
   { key: 'computing', label: 'Computing', sub: 'pairs + chain + BA' },
-  { key: 'result', label: 'Result', sub: '3D review + orient' },
+  { key: 'review', label: 'Result', sub: '3D review + orient' },
 ];
 
 const PLAY_FPS = 8;
-
-// Routes both telemetry payload types from the shared data channel to the store.
-function TelemetryListener() {
-  const dispatch = useAppDispatch();
-  useDataChannel('telemetry', (msg) => {
-    try {
-      const data = JSON.parse(new TextDecoder().decode(msg.payload)) as
-        | CoverageMetrics
-        | Covisibility;
-      if (data?.type === 'coverage_metrics') {
-        dispatch(coverageReceived(data));
-      } else if (data?.type === 'covisibility') {
-        dispatch(covisibilityReceived(data));
-      }
-    } catch {
-      /* ignore malformed telemetry */
-    }
-  });
-  return null;
-}
 
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
@@ -310,13 +284,6 @@ function ExtrinsicInner() {
   const extrinsicBoard = session?.extrinsic_board ?? session?.intrinsic_board ?? null;
   const markerBoard = extrinsicBoard?.board_type === 'aruco';
 
-  const [step, setStep] = useState<Step>(allDone ? 'result' : 'capture');
-  const [recording, setRecording] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [overwriteOpen, setOverwriteOpen] = useState(false);
-  // Preview transcode popup (ADR-0027): null = idle, 'running' = spinner, else error.
-  const [transcoding, setTranscoding] = useState<string | null>(null);
-
   // Prepare state: synchronized groups + the compute knobs (ADR-0023).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
   const [groupIndex, setGroupIndex] = useState(0);
@@ -325,16 +292,47 @@ function ExtrinsicInner() {
   const [maxSpreadMs, setMaxSpreadMs] = useState<number | ''>('');
   const [result, setResult] = useState<ExtrinsicResultPayload | null>(null);
 
-  // Live cameras are only needed while capturing; Prepare/Result scrub the files.
+  // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
+  const wizard = useCaptureWizard({
+    initialStep: allDone ? 'review' : 'capture',
+    start: async () => {
+      await startExtrinsic();
+      dispatch(covisibilityCleared());
+    },
+    stop: async () => {
+      await stopExtrinsic().catch(() => {});
+    },
+    afterStop: () => transcode.run(),
+    compute: async () => {
+      await dispatch(
+        computeExtrinsicThunk({
+          stride: stride > 1 ? stride : undefined,
+          max_spread_ms: maxSpreadMs === '' ? undefined : maxSpreadMs,
+          min_shared: minShared,
+        }),
+      ).unwrap();
+    },
+  });
+
+  // Background preview transcodes of the sweep (ADR-0027) behind a blocking modal,
+  // then enter Prepare. The error can surface on any camera's transcode job.
+  const transcode = usePreviewTranscode({
+    poll: fetchExtrinsicPreviewStatus,
+    onReady: () => wizard.toPrepare(),
+    getError: (status) => Object.values(status.cameras).find((c) => c.error)?.error ?? null,
+    retryJob: retryExtrinsicPreview,
+  });
+
+  // Live cameras are only needed while capturing; Prepare/Review scrub the files.
   // Reporting a non-live view id releases every camera (ADR-0021 view mapping).
   useEffect(() => {
-    setCaptureView(step === 'capture' ? 'extrinsic' : 'extrinsic-idle').catch(() => {});
-  }, [step]);
+    setCaptureView(wizard.step === 'capture' ? 'extrinsic' : 'idle').catch(() => {});
+  }, [wizard.step]);
 
   // Refetch the group list when the spread threshold changes (server-side filter,
   // same semantics as the compute). Stride/min-shared are compute-only knobs.
   useEffect(() => {
-    if (step !== 'prepare') return;
+    if (wizard.step !== 'prepare') return;
     let cancelled = false;
     fetchExtrinsicGroups(maxSpreadMs === '' ? undefined : { max_spread_ms: maxSpreadMs })
       .then((body) => {
@@ -346,11 +344,11 @@ function ExtrinsicInner() {
     return () => {
       cancelled = true;
     };
-  }, [step, maxSpreadMs]);
+  }, [wizard.step, maxSpreadMs]);
 
-  // On the Result step, load the persisted solve (also restores after a reload).
+  // On the Review step, load the persisted solve (also restores after a reload).
   useEffect(() => {
-    if (step !== 'result') return;
+    if (wizard.step !== 'review') return;
     let cancelled = false;
     fetchExtrinsicResult()
       .then((payload) => !cancelled && setResult(payload))
@@ -358,109 +356,28 @@ function ExtrinsicInner() {
     return () => {
       cancelled = true;
     };
-  }, [step]);
-
-  const startSweep = async () => {
-    setMessage(null);
-    try {
-      await startExtrinsic();
-      dispatch(covisibilityCleared());
-      setRecording(true);
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'start failed');
-    }
-  };
-
-  // Wait for the background preview transcodes of the sweep (ADR-0027) behind a
-  // blocking popup, then enter Prepare. 'transcoding' is 'running' or an error.
-  const waitForPreviews = async () => {
-    setTranscoding('running');
-    try {
-      let status = await fetchExtrinsicPreviewStatus();
-      for (let i = 0; status.state === 'running' && i < 150; i += 1) {
-        await new Promise((resolve) => setTimeout(resolve, 700));
-        status = await fetchExtrinsicPreviewStatus();
-      }
-      if (status.state === 'failed' || status.state === 'running') {
-        const failed = Object.values(status.cameras).find((c) => c.error);
-        setTranscoding(failed?.error ?? 'preview transcode timed out');
-        return;
-      }
-      setTranscoding(null);
-      setStep('prepare');
-    } catch (cause) {
-      setTranscoding(cause instanceof Error ? cause.message : 'preview transcode failed');
-    }
-  };
-
-  const stopSweep = async () => {
-    await stopExtrinsic().catch(() => {});
-    setRecording(false);
-    await waitForPreviews();
-  };
-
-  const retryTranscode = async () => {
-    await retryExtrinsicPreview().catch(() => {});
-    await waitForPreviews();
-  };
-
-  const runCompute = async () => {
-    setStep('computing');
-    setMessage(null);
-    try {
-      await dispatch(
-        computeExtrinsicThunk({
-          stride: stride > 1 ? stride : undefined,
-          max_spread_ms: maxSpreadMs === '' ? undefined : maxSpreadMs,
-          min_shared: minShared,
-        }),
-      ).unwrap();
-      setStep('result');
-    } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'compute failed');
-      setStep('prepare');
-    }
-  };
-
-  const reRecord = () => {
-    if (allDone) {
-      setOverwriteOpen(true);
-    } else {
-      setStep('capture');
-    }
-  };
+  }, [wizard.step]);
 
   // Sign-off: the server advances the step to 'export' and the wizard rail
   // follows the persisted step, so no explicit navigation is needed here.
   const validateAndExport = async () => {
-    setMessage(null);
+    wizard.setMessage(null);
     try {
       await dispatch(validateExtrinsicThunk()).unwrap();
     } catch (err) {
-      setMessage(err instanceof Error ? err.message : 'validate failed');
+      wizard.setMessage(err instanceof Error ? err.message : 'validate failed');
     }
   };
 
-  const confirmReRecord = () => {
-    setOverwriteOpen(false);
-    setRecording(false);
-    setStep('capture');
-  };
-
-  const scrubbing = step === 'prepare' || step === 'computing';
+  const scrubbing = wizard.step === 'prepare' || wizard.step === 'computing';
 
   return (
     <>
-      <TelemetryListener />
-      <PhaseStepper phases={PHASES} current={step} />
-
-      <Box
-        className="rc-camsetup-grid"
-        style={{ flex: 1, minHeight: 0, display: 'grid', gridTemplateColumns: 'minmax(0, 1fr) 300px', gap: 22 }}
-      >
-        <Box style={{ minWidth: 0, minHeight: 0, position: 'relative' }}>
-          {step === 'result' ? (
-            // The Result sub-step IS the 3D array review (spec 3d-extrinsic-review):
+      <CaptureWizardLayout
+        stepper={<PhaseStepper phases={PHASES} current={wizard.step} />}
+        main={
+          wizard.step === 'review' ? (
+            // The Review sub-step IS the 3D array review (spec 3d-extrinsic-review):
             // labeled frustums + corner cloud + board triad + convention selector.
             result ? (
               <Suspense
@@ -489,7 +406,7 @@ function ExtrinsicInner() {
           ) : (
             <>
               <CameraGrid />
-              {recording && (
+              {wizard.recording && (
                 <Group
                   gap={6}
                   px={10}
@@ -503,22 +420,10 @@ function ExtrinsicInner() {
                 </Group>
               )}
             </>
-          )}
-        </Box>
-
-        <Box
-          style={{
-            minHeight: 0,
-            overflowY: 'auto',
-            border: '1px solid var(--rc-border)',
-            borderRadius: 'var(--mantine-radius-lg)',
-            background: 'var(--rc-panel)',
-            padding: 16,
-            display: 'flex',
-            flexDirection: 'column',
-          }}
-        >
-          {step === 'result' && result ? (
+          )
+        }
+        panel={
+          wizard.step === 'review' && result ? (
             <ResultSummary result={result} />
           ) : scrubbing ? (
             <>
@@ -578,81 +483,75 @@ function ExtrinsicInner() {
                 joint views — especially pairs involving the anchor.
               </Text>
             </>
-          )}
-
-          {message && (
-            <Text fz="0.72rem" c="var(--rc-error)" mt="sm">
-              {message}
-            </Text>
-          )}
-
-          <Box mt="auto" pt="md">
-            {step === 'result' ? (
-              <>
-                {/* Sign-off: the persisted step moves to 'export' and the wizard
-                    rail follows — this button IS the navigation to Export. */}
-                <Button
-                  fullWidth
-                  mb="sm"
-                  leftSection={<IconCheck size={15} />}
-                  onClick={() => void validateAndExport()}
-                >
-                  Validate → Export
-                </Button>
-                {/* Back to Prepare on the SAME sweep: retune stride/spread/min-shared,
-                    then Compute again (the preview mp4s are already there). */}
-                <Button
-                  fullWidth
-                  variant="light"
-                  mb="sm"
-                  onClick={() => void waitForPreviews()}
-                >
-                  Recompute (tune again)
-                </Button>
-                <Button
-                  fullWidth
-                  variant="light"
-                  color="gray"
-                  leftSection={<IconPlayerRecordFilled size={15} />}
-                  onClick={reRecord}
-                >
-                  Re-record sweep
-                </Button>
-              </>
-            ) : scrubbing ? (
+          )
+        }
+        action={
+          wizard.step === 'review' ? (
+            <>
+              {/* Sign-off: the persisted step moves to 'export' and the wizard
+                  rail follows — this button IS the navigation to Export. */}
               <Button
                 fullWidth
-                loading={step === 'computing'}
-                disabled={groups.length === 0}
-                onClick={() => void runCompute()}
+                mb="sm"
+                leftSection={<IconCheck size={15} />}
+                onClick={() => void validateAndExport()}
               >
-                Compute
+                Validate → Export
               </Button>
-            ) : recording ? (
+              {/* Back to Prepare on the SAME sweep: retune stride/spread/min-shared,
+                  then Compute again (the preview mp4s are already there). */}
               <Button
                 fullWidth
-                color="red"
-                leftSection={<IconPlayerStopFilled size={16} />}
-                onClick={() => void stopSweep()}
+                variant="light"
+                mb="sm"
+                onClick={() => void transcode.run()}
               >
-                Stop
+                Recompute (tune again)
               </Button>
-            ) : (
               <Button
                 fullWidth
-                leftSection={<IconPlayerRecordFilled size={16} />}
-                onClick={() => void startSweep()}
+                variant="light"
+                color="gray"
+                leftSection={<IconPlayerRecordFilled size={15} />}
+                onClick={wizard.reRecord}
               >
-                Start synchronized sweep
+                Re-record sweep
               </Button>
-            )}
-          </Box>
-        </Box>
-      </Box>
+            </>
+          ) : scrubbing ? (
+            <Button
+              fullWidth
+              loading={wizard.step === 'computing'}
+              disabled={groups.length === 0}
+              onClick={() => void wizard.runCompute()}
+            >
+              Compute
+            </Button>
+          ) : wizard.recording ? (
+            <Button
+              fullWidth
+              color="red"
+              leftSection={<IconPlayerStopFilled size={16} />}
+              onClick={() => void wizard.stopRecording()}
+            >
+              Stop
+            </Button>
+          ) : (
+            <Button
+              fullWidth
+              leftSection={<IconPlayerRecordFilled size={16} />}
+              onClick={() => void wizard.startRecording()}
+            >
+              Start synchronized sweep
+            </Button>
+          )
+        }
+        message={wizard.message}
+      />
 
       {/* Blocking compute modal (capture released during the solve, ADR-0021/0023). */}
       <Modal
-        opened={step === 'computing'}
+        opened={wizard.step === 'computing'}
         onClose={() => {}}
         withCloseButton={false}
         closeOnClickOutside={false}
@@ -668,37 +567,16 @@ function ExtrinsicInner() {
         </Group>
       </Modal>
 
-      {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
       {/* Preview transcodes (ADR-0027): block the Stop -> Prepare transition. */}
-      <Modal
-        opened={transcoding !== null}
-        onClose={() => setTranscoding(null)}
-        withCloseButton={transcoding !== 'running'}
-        closeOnClickOutside={false}
-        closeOnEscape={false}
-        centered
-        title="Preparing replay"
-      >
-        {transcoding === 'running' ? (
-          <Group gap="sm">
-            <Loader size="sm" />
-            <Text fz="0.84rem" c="dark.1">
-              Transcoding previews…
-            </Text>
-          </Group>
-        ) : (
-          <>
-            <Text fz="0.8rem" c="var(--rc-error)" mb="md">
-              {transcoding}
-            </Text>
-            <Group justify="flex-end">
-              <Button onClick={() => void retryTranscode()}>Retry transcode</Button>
-            </Group>
-          </>
-        )}
-      </Modal>
+      <TranscodePreparingModal
+        status={transcode.status}
+        onRetry={() => void transcode.retry()}
+        onClose={transcode.dismiss}
+        label="Transcoding previews…"
+      />
 
-      <Modal opened={overwriteOpen} onClose={() => setOverwriteOpen(false)} centered title="Overwrite array calibration?">
+      {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
+      <Modal opened={wizard.overwriteOpen} onClose={wizard.cancelOverwrite} centered title="Overwrite array calibration?">
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
           <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
           <Text fz="0.84rem" c="dark.1">
@@ -708,10 +586,10 @@ function ExtrinsicInner() {
           </Text>
         </Group>
         <Group justify="flex-end">
-          <Button variant="default" onClick={() => setOverwriteOpen(false)}>
+          <Button variant="default" onClick={wizard.cancelOverwrite}>
             Cancel
           </Button>
-          <Button color="red" onClick={confirmReRecord}>
+          <Button color="red" onClick={wizard.confirmReRecord}>
             Discard &amp; re-record
           </Button>
         </Group>

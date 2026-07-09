@@ -37,9 +37,15 @@ function isComplete(id: StageId, session: Session | null): boolean {
   const cameras = session.cameras;
   switch (id) {
     case 'boards':
-      // Target Config complete once the intrinsic board is defined (the extrinsic
-      // board inherits it by default) — this unlocks Camera Setup (board-first).
-      return session.intrinsic_board !== null;
+      // Target Config completes only when BOTH board choices are locked in: the
+      // intrinsic board is defined AND the extrinsic choice is confirmed (the persisted
+      // step advanced past the boards stage). Keeps Camera Setup locked so the extrinsic
+      // board can't be skipped via the rail (board-first, spec wizard-navigation).
+      return (
+        session.intrinsic_board !== null &&
+        session.step !== 'intrinsic_board' &&
+        session.step !== 'extrinsic_board_choice'
+      );
     case 'cameras':
       return cameras.length > 0;
     case 'intrinsic':
