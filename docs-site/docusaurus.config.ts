@@ -216,6 +216,7 @@ const config: Config = {
           position: 'left',
           label: 'Docs',
         },
+        {to: '/docs/faq', label: 'FAQ', position: 'left'},
         {to: '/docs/research/methodology', label: 'Research', position: 'left'},
         {to: '/blog', label: 'Releases', position: 'left'},
         {
