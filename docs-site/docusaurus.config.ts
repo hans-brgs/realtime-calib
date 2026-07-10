@@ -90,6 +90,16 @@ const config: Config = {
     },
   ],
 
+  // Privacy-friendly analytics (Umami Cloud): no cookies, no consent banner.
+  // The website id is a public tracking identifier, safe to commit.
+  scripts: [
+    {
+      src: 'https://cloud.umami.is/script.js',
+      defer: true,
+      'data-website-id': 'c3c18d67-a6d3-478b-b10d-5ccc427cac9f',
+    },
+  ],
+
   markdown: {
     mermaid: true,
     hooks: {
@@ -188,8 +198,11 @@ const config: Config = {
           'motion capture calibration, stereo calibration, OpenCV calibration',
       },
       {name: 'author', content: 'Hans Bourgeois (Myosin)'},
-      // Google Search Console: once you have the token, add
-      // {name: 'google-site-verification', content: '<token>'},
+      // Google Search Console ownership verification (public token).
+      {
+        name: 'google-site-verification',
+        content: 'o9tX7xbPMyNVEVMpIEdfMWCR36Wou9DM64Gdzjd6Hq8',
+      },
     ],
     // Algolia DocSearch. The apiKey is the public "search-only" key (safe to commit).
     algolia: {
