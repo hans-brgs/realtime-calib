@@ -86,6 +86,14 @@ export const faqJsonLd = {
     },
     {
       '@type': 'Question',
+      name: 'Can I use RTSP or IP cameras, or only USB cameras?',
+      acceptedAnswer: {
+        '@type': 'Answer',
+        text: 'Right now, only USB cameras are supported — they are read via V4L2 on the Linux host. RTSP streams and IP cameras are not supported yet. It is a natural extension, though: if you need it, open an issue or a feature request on GitHub (github.com/hans-brgs/realtime-calib), since demand drives the roadmap, and RTSP / IP-camera support could land in a future version.',
+      },
+    },
+    {
+      '@type': 'Question',
       name: 'How accurate is the calibration?',
       acceptedAnswer: {
         '@type': 'Answer',
@@ -190,6 +198,16 @@ resolution is chosen.
 A **Linux host**: cameras are read via V4L2 and the stack runs with Docker
 Compose. The operator device only needs a modern browser — any OS. See
 [Installation](/docs/getting-started/installation).
+
+## Can I use RTSP or IP cameras, or only USB?
+
+Right now, **only USB cameras are supported** — they are read via V4L2 on the
+Linux host. RTSP streams and IP cameras are **not supported yet**.
+
+It is a natural extension, though. If you need it,
+**[open an issue or a feature request on GitHub](https://github.com/hans-brgs/realtime-calib/issues)**
+— demand is what drives the roadmap, and RTSP / IP-camera support could land in
+a future version.
 
 ## How accurate is the calibration?
 
