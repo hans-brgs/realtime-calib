@@ -1,0 +1,56 @@
+# robots.txt — realtime-calib documentation
+# Policy: welcome every crawler. We want maximum reach on classic search (SEO)
+# AND on generative engines (GEO), so AI assistants are explicitly allowed below.
+#
+# IMPORTANT: robots.txt is only a polite hint, read *after* a bot reaches the
+# site. The decisive gate for AI crawlers is at the network edge (Cloudflare AI
+# bot controls) — those must ALSO allow these bots, or this file has no effect.
+
+User-agent: *
+Allow: /
+
+# --- AI assistants: retrieval / live citation (most important for GEO) ---
+User-agent: OAI-SearchBot
+Allow: /
+
+User-agent: ChatGPT-User
+Allow: /
+
+User-agent: PerplexityBot
+Allow: /
+
+User-agent: Perplexity-User
+Allow: /
+
+User-agent: ClaudeBot
+Allow: /
+
+User-agent: Claude-Web
+Allow: /
+
+User-agent: Google-Extended
+Allow: /
+
+User-agent: Applebot-Extended
+Allow: /
+
+# --- AI assistants: model training (allowed too, per project decision) ---
+User-agent: GPTBot
+Allow: /
+
+User-agent: anthropic-ai
+Allow: /
+
+User-agent: CCBot
+Allow: /
+
+User-agent: Amazonbot
+Allow: /
+
+User-agent: Bytespider
+Allow: /
+
+User-agent: Meta-ExternalAgent
+Allow: /
+
+Sitemap: https://realtime-calib.hans-brgs.dev/sitemap.xml
