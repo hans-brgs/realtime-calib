@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+description: "Create a new calibration session or resume an existing one — a session is a folder on the server holding its recordings, board config and results."
+keywords: [calibration session, multi-camera calibration workflow]
 ---
 
 # Start or load a session

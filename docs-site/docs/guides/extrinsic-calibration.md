@@ -1,5 +1,9 @@
 ---
 sidebar_position: 5
+title: "Extrinsic calibration — 6-DoF camera poses"
+sidebar_label: Extrinsic calibration
+description: "Recover the 6-DoF position and orientation of every camera in one shared frame, refine with bundle adjustment and review the solved rig in 3D."
+keywords: [camera extrinsic calibration, 6-DoF camera pose, multi-camera extrinsics, bundle adjustment, stereo calibration]
 ---
 
 # Extrinsic calibration

@@ -1,7 +1,6 @@
 import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
-import useDocusaurusContext from '@docusaurus/useDocusaurusContext';
 import Layout from '@theme/Layout';
 import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import UsedBy from '@site/src/components/UsedBy';
@@ -10,18 +9,17 @@ import Heading from '@theme/Heading';
 import styles from './index.module.css';
 
 function HomepageHero() {
-  const {siteConfig} = useDocusaurusContext();
   return (
     <header className={clsx('hero', styles.hero)}>
       <div className="container">
         <span className={styles.eyebrow}>Open source · AGPL-3.0</span>
         <Heading as="h1" className={styles.heroTitle}>
-          {siteConfig.title}
+          Real-time multi-camera calibration
         </Heading>
         <p className={styles.heroTagline}>
-          Real-time multi-camera calibration — intrinsics, distortion and 6-DoF
-          extrinsics for a rig of USB cameras, with live feedback and{' '}
-          <strong>Caliscope-compatible</strong> and engine-ready exports.
+          Intrinsics, distortion and 6-DoF extrinsics for a rig of USB cameras,
+          with live feedback — exports ready for Unity, Unreal, Blender,
+          three.js and ROS.
         </p>
         <div className={styles.heroButtons}>
           <Link className="button button--primary button--lg" to="/docs/intro">
@@ -38,10 +36,6 @@ function HomepageHero() {
             ★ Star on GitHub
           </Link>
         </div>
-        <p className={styles.heroNote}>
-          Runs on the camera server, even headless · Docker · drive it from any
-          device on your LAN — desktop, tablet or mobile
-        </p>
       </div>
     </header>
   );
@@ -85,10 +79,9 @@ function SupportCallout() {
 }
 
 export default function Home(): ReactNode {
-  const {siteConfig} = useDocusaurusContext();
   return (
     <Layout
-      title={`${siteConfig.title} — real-time multi-camera calibration`}
+      title="Real-time multi-camera calibration"
       description="Real-time multi-camera intrinsic and extrinsic calibration with live feedback and Caliscope-compatible, engine-ready exports.">
       <HomepageHero />
       <main>

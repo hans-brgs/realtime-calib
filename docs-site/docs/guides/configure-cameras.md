@@ -1,5 +1,7 @@
 ---
 sidebar_position: 3
+description: "Detect the USB cameras, set one shared capture configuration (resolution, frame rate, resize factor) and order the rig — the first camera anchors the extrinsics."
+keywords: [USB camera calibration, multi-camera rig, camera detection, multi-camera USB calibration software]
 ---
 
 # Configure cameras

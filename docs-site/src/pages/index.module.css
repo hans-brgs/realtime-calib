@@ -1,6 +1,6 @@
 .hero {
   position: relative;
-  padding: 6rem 0 5rem;
+  padding: 7.5rem 0 6.5rem;
   text-align: center;
   background:
     radial-gradient(60% 80% at 50% -10%, rgba(139, 92, 246, 0.22), transparent 70%),
@@ -20,13 +20,13 @@
   border: 1px solid var(--rc-border-strong, #2a2a32);
   padding: 0.3rem 0.8rem;
   border-radius: 999px;
-  margin-bottom: 1.5rem;
+  margin-bottom: 2.25rem;
 }
 
 .heroTitle {
   font-size: clamp(2.6rem, 6vw, 4.2rem);
   line-height: 1.05;
-  margin-bottom: 1rem;
+  margin-bottom: 1.5rem;
   background: linear-gradient(180deg, #ffffff, var(--rc-accent-soft, #c4b5fd));
   -webkit-background-clip: text;
   background-clip: text;
@@ -34,19 +34,18 @@
 }
 
 .heroTagline {
-  max-width: 720px;
-  margin: 0 auto 2rem;
+  max-width: 680px;
+  margin: 0 auto 2.75rem;
   font-size: 1.2rem;
-  line-height: 1.6;
+  line-height: 1.65;
   color: var(--rc-text-secondary, #bcbcc6);
 }
 
 .heroButtons {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.8rem;
+  gap: 1rem;
   justify-content: center;
-  margin-bottom: 1.5rem;
 }
 
 .ghostBtn {
@@ -60,16 +59,6 @@
   background: var(--rc-border, #232329);
   border-color: var(--rc-accent, #8b5cf6);
   color: #ffffff;
-}
-
-.heroNote {
-  font-size: 0.95rem;
-  color: var(--rc-text-muted, #9a9aa5);
-}
-
-.heroNote code {
-  background: var(--rc-surface-raised, #1c1c22);
-  border: 1px solid var(--rc-border, #232329);
 }
 
 /* Support callout */
@@ -115,6 +104,10 @@
 
 @media (max-width: 600px) {
   .hero {
-    padding: 4rem 0 3rem;
+    padding: 4.5rem 0 3.5rem;
+  }
+
+  .eyebrow {
+    margin-bottom: 1.75rem;
   }
 }

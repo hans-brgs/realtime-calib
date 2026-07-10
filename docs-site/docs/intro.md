@@ -1,7 +1,10 @@
 ---
 sidebar_position: 1
 slug: /intro
-title: Introduction
+title: What is realtime-calib?
+sidebar_label: Introduction
+description: "Local, real-time, open-source multi-camera calibration: intrinsics and 6-DoF extrinsics for USB camera rigs, live feedback, Caliscope-compatible exports."
+keywords: [multi-camera calibration, real-time camera calibration, open-source camera calibration, headless camera calibration, camera intrinsics, camera extrinsics, Caliscope alternative]
 ---
 
 # What is realtime-calib?
@@ -83,7 +86,9 @@ realtime-calib **reimplements** Caliscope's calibration logic (it is not a
 dependency) to make it real-time and single-pass, while staying
 **output-compatible**. Caliscope remains the conceptual reference for board
 definitions, `calibrateCameraCharucoExtended`, PnP/stereo extrinsic
-initialization and bundle adjustment.
+initialization and bundle adjustment. For a side-by-side comparison — workflow,
+interface, exports, licensing — see
+[realtime-calib vs Caliscope](/docs/realtime-calib-vs-caliscope).
 
 :::tip Next step
 Head to [Installation](/docs/getting-started/installation), then run your

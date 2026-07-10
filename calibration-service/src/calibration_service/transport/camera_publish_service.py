@@ -49,10 +49,10 @@ logger = logging.getLogger(__name__)
 def _process_frame(
     detector: BoardDetector, image: NDArray[np.uint8], preview_size: tuple[int, int]
 ) -> tuple[NDArray[np.uint8], BoardDetection]:
-    """Detect the board (native res) + burn the overlay in, downscaled to the preview.
+    """Detect the board (native res) + burn the overlay in at preview resolution.
 
     CPU-bound; meant for an executor. Detection uses the full-resolution frame; the
-    returned preview is the downscaled burn-in for LiveKit.
+    returned preview is the burn-in composited at ``preview_size`` for LiveKit.
     """
     detection = detector.detect(image)
     return _draw_preview(image, detection, preview_size), detection
@@ -63,14 +63,17 @@ def _draw_preview(
     detection: BoardDetection | None,
     preview_size: tuple[int, int],
 ) -> NDArray[np.uint8]:
-    """Burn the (last known) detection overlay in and downscale — no re-detection.
+    """Burn the (last known) detection overlay in at preview resolution — no re-detect.
 
     Drawn on every published frame so the board overlay stays steady at the preview
-    rate instead of flickering at the (slower) detection rate. ``None`` -> raw preview.
+    rate instead of flickering at the (slower) detection rate. The overlay is
+    composited directly at ``preview_size`` (ADR-0003/0015), not at native then
+    downscaled. ``None`` -> raw downscaled preview.
     """
     if detection is None:
         return _downscale(image, preview_size)
-    return _downscale(draw_overlay(image, detection, resize_factor=1.0), preview_size)
+    return draw_overlay(image, detection, preview_size)
+
 
 
 _EMPTY_READ_BACKOFF_S = 0.005

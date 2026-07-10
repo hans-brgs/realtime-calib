@@ -1,5 +1,9 @@
 ---
 sidebar_position: 1
+title: "Calibration output files — TOML & JSON reference"
+sidebar_label: Calibration output files
+description: "Field-by-field reference of exported calibration files: camera matrix, distortion, rotation, translation and reprojection error — Caliscope TOML and engine JSON."
+keywords: [camera matrix, distortion coefficients, camera calibration TOML, calibration file format, reprojection error]
 ---
 
 import ConventionsImg from '@site/static/img/coordinate_conventions.png';
