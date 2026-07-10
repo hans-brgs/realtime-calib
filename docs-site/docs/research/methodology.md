@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+description: "What realtime-calib computes, grounded in sources: ChArUco intrinsics, diversity-based keyframe selection, pairwise stereo poses, anchor chaining and bundle adjustment."
+keywords: [camera calibration methodology, bundle adjustment, stereo calibration, ChArUco detection, OpenCV calibration]
 ---
 
 # Methodology

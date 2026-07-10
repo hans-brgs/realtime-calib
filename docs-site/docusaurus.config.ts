@@ -9,13 +9,69 @@ import type * as Preset from '@docusaurus/preset-classic';
 // Served at the custom-domain root (realtime-calib.hans-brgs.dev), so baseUrl is '/'
 // in both dev and production.
 
+const SITE_URL = 'https://realtime-calib.hans-brgs.dev';
+const REPO_URL = 'https://github.com/hans-brgs/realtime-calib';
+
+// One SEO/GEO description, reused for the page metadata and the structured data.
+const SITE_DESCRIPTION =
+  'Real-time, open-source multi-camera calibration: recover camera intrinsics ' +
+  '(focal length, distortion) and 6-DoF extrinsics for a rig of USB cameras, with ' +
+  'live feedback. Runs headless in Docker, driven from any device, with ' +
+  'Caliscope-compatible and engine-ready exports (Unity, Unreal, Blender, three.js, ROS).';
+
+// JSON-LD structured data (schema.org), injected site-wide via `headTags`.
+// Lets Google understand the project (rich results) and helps AI assistants
+// (ChatGPT, Claude, Perplexity) cite it accurately — a GEO lever.
+const structuredData = {
+  '@context': 'https://schema.org',
+  '@graph': [
+    {
+      '@type': 'SoftwareApplication',
+      name: 'realtime-calib',
+      applicationCategory: 'DeveloperApplication',
+      operatingSystem: 'Linux, Docker',
+      description: SITE_DESCRIPTION,
+      url: SITE_URL,
+      downloadUrl: REPO_URL,
+      softwareHelp: `${SITE_URL}/docs/intro`,
+      license: 'https://www.gnu.org/licenses/agpl-3.0.html',
+      isAccessibleForFree: true,
+      offers: {'@type': 'Offer', price: '0', priceCurrency: 'USD'},
+      author: {
+        '@type': 'Person',
+        name: 'Hans Bourgeois',
+        url: 'https://github.com/hans-brgs',
+        affiliation: {'@type': 'Organization', name: 'Myosin'},
+      },
+    },
+    {
+      '@type': 'WebSite',
+      name: 'realtime-calib',
+      url: SITE_URL,
+      description: SITE_DESCRIPTION,
+      inLanguage: 'en',
+      potentialAction: {
+        '@type': 'SearchAction',
+        target: `${SITE_URL}/search?q={search_term_string}`,
+        'query-input': 'required name=search_term_string',
+      },
+    },
+    {
+      '@type': 'Person',
+      name: 'Hans Bourgeois',
+      url: 'https://github.com/hans-brgs',
+      affiliation: {'@type': 'Organization', name: 'Myosin'},
+    },
+  ],
+};
+
 const config: Config = {
   title: 'realtime-calib',
   tagline: 'Real-time multi-camera calibration — intrinsics, extrinsics, live feedback',
   favicon: 'img/favicon.png',
 
   // Production URL and base path (custom domain on GitHub Pages).
-  url: 'https://realtime-calib.hans-brgs.dev',
+  url: SITE_URL,
   baseUrl: '/',
 
   organizationName: 'hans-brgs',
@@ -23,7 +79,16 @@ const config: Config = {
   deploymentBranch: 'gh-pages',
   trailingSlash: false,
 
-  onBrokenLinks: 'warn',
+  onBrokenLinks: 'throw',
+
+  // Inject the site-wide JSON-LD structured data into <head>.
+  headTags: [
+    {
+      tagName: 'script',
+      attributes: {type: 'application/ld+json'},
+      innerHTML: JSON.stringify(structuredData),
+    },
+  ],
 
   markdown: {
     mermaid: true,
@@ -67,12 +132,65 @@ const config: Config = {
         theme: {
           customCss: './src/css/custom.css',
         },
+        // Search-engine sitemap. Drop thin/no-SEO-value routes:
+        // blog taxonomies (tags/authors/archive) and the search page.
+        sitemap: {
+          lastmod: 'date',
+          changefreq: 'weekly',
+          priority: 0.5,
+          ignorePatterns: [
+            '/search',
+            '/blog/archive',
+            '/blog/authors',
+            '/blog/authors/**',
+            '/blog/tags',
+            '/blog/tags/**',
+          ],
+          filename: 'sitemap.xml',
+        },
       } satisfies Preset.Options,
+    ],
+  ],
+
+  // Auto-generate llms.txt + llms-full.txt + per-page Markdown for AI engines,
+  // regenerated on every build so it never drifts from the docs.
+  plugins: [
+    [
+      '@signalwire/docusaurus-plugin-llms-txt',
+      {
+        siteTitle: 'realtime-calib',
+        siteDescription: SITE_DESCRIPTION,
+        depth: 2,
+        content: {
+          enableLlmsFullTxt: true,
+          excludeRoutes: [
+            '/search',
+            '/blog/archive',
+            '/blog/authors/**',
+            '/blog/tags/**',
+            '/docs/category/**',
+          ],
+        },
+      },
     ],
   ],
 
   themeConfig: {
     image: 'img/social-card.png',
+    // Global SEO meta tags (long-tail target queries + author).
+    metadata: [
+      {
+        name: 'keywords',
+        content:
+          'camera calibration, multi-camera calibration, real-time camera calibration, ' +
+          'camera intrinsics, camera extrinsics, ChArUco, ArUco, USB camera calibration, ' +
+          'headless calibration, Caliscope alternative, bundle adjustment, reprojection error, ' +
+          'motion capture calibration, stereo calibration, OpenCV calibration',
+      },
+      {name: 'author', content: 'Hans Bourgeois (Myosin)'},
+      // Google Search Console: once you have the token, add
+      // {name: 'google-site-verification', content: '<token>'},
+    ],
     // Algolia DocSearch. The apiKey is the public "search-only" key (safe to commit).
     algolia: {
       appId: 'HIS77Z2B0I',
@@ -98,6 +216,7 @@ const config: Config = {
           position: 'left',
           label: 'Docs',
         },
+        {to: '/docs/faq', label: 'FAQ', position: 'left'},
         {to: '/docs/research/methodology', label: 'Research', position: 'left'},
         {to: '/blog', label: 'Releases', position: 'left'},
         {
@@ -118,6 +237,7 @@ const config: Config = {
             {label: 'Guides', to: '/docs/guides/start-or-load-session'},
             {label: 'Reference', to: '/docs/reference/output-calibration-files'},
             {label: 'Research', to: '/docs/research/methodology'},
+            {label: 'FAQ', to: '/docs/faq'},
           ],
         },
         {

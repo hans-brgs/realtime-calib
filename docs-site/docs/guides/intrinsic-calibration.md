@@ -1,5 +1,9 @@
 ---
 sidebar_position: 4
+title: "Intrinsic calibration — focal length & distortion"
+sidebar_label: Intrinsic calibration
+description: "Estimate each camera's focal length and distortion: capture a sweep with live coverage overlays, tune the replay, and solve on diverse keyframes."
+keywords: [camera intrinsic calibration, focal length, lens distortion, reprojection error, ChArUco intrinsics]
 ---
 
 # Intrinsic calibration

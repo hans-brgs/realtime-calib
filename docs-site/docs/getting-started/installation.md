@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+description: "Install and run realtime-calib on your own hardware with Docker Compose — works on headless Linux servers; the web app is served over your local network."
+keywords: [install camera calibration software, Docker camera calibration, headless Linux server, multi-camera rig]
 ---
 
 # Installation

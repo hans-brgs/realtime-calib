@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+description: "realtime-calib is free software under AGPL-3.0 — what that means in practice, plus commercial licensing and custom development for proprietary products."
+keywords: [AGPL-3.0, open source license, commercial license]
 ---
 
 # License

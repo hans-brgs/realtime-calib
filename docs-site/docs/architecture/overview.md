@@ -1,5 +1,7 @@
 ---
 sidebar_position: 1
+description: "How realtime-calib is built: a Python calibration service, a React web app, LiveKit WebRTC streaming and Caddy TLS, orchestrated with Docker Compose."
+keywords: [multi-camera architecture, LiveKit, WebRTC camera streaming, Docker Compose]
 ---
 
 # Architecture overview
