@@ -117,7 +117,14 @@ class LiveKitPublisher:
             track.mute()
 
     def push(self, name: str, image: NDArray[np.uint8]) -> None:
-        """Push a BGR frame to the named track's source."""
+        """Push a BGR frame to the named track's source.
+
+        BLOCKING (~8 ms for a 960x540 preview): ``capture_frame`` is a synchronous
+        FFI round-trip (colour conversion + buffer copy in the Rust core). Per-frame
+        callers must run it in an executor — on the event loop it serializes every
+        camera's capture loop. Safe to call from worker threads: the FFI request
+        path holds no shared lock, so concurrent pushes proceed in parallel.
+        """
         source = self._sources.get(name)
         if source is None:
             raise RuntimeError(f"push() for unpublished track {name!r}")

@@ -72,6 +72,7 @@ def _draw_preview(
         return _downscale(image, preview_size)
     return _downscale(draw_overlay(image, detection, resize_factor=1.0), preview_size)
 
+
 _EMPTY_READ_BACKOFF_S = 0.005
 _FIRST_FRAME_ATTEMPTS = 60
 _FIRST_FRAME_BACKOFF_S = 0.1
@@ -106,7 +107,7 @@ _PUSH_PERIOD_S = 1 / _PREVIEW_FPS
 # Dedicated capture thread pool (ADR-0021): isolate the blocking cv2 reads/decodes/
 # writes from the default executor (shared with the intrinsic compute + sync HTTP
 # routes). Sized for a handful of cameras each parking a thread in a blocking grab()
-# plus brief retrieve/detect/write bursts; threads parked in grab() cost ~no CPU.
+# plus brief retrieve/detect/push/write bursts; threads parked in grab() cost ~no CPU.
 _CAPTURE_THREADS = 16
 # Re-check the desired camera set at least this often (also woken immediately on a
 # view / active-camera change), and use it to notice a dropped room.
@@ -641,7 +642,9 @@ class CameraPublishService:
         but only ``retrieve()``s (decodes) one when the target interval has elapsed —
         honouring the chosen fps even if the driver ignores ``CAP_PROP_FPS``, and
         skipping the JPEG decode of frames we would drop. The preview published to
-        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder.
+        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder,
+        and pushed OFF the event loop like every other per-frame call — see the
+        comment at the push site.
 
         Detection modes: the camera in intrinsic capture (``_active_intrinsic``) gets
         board detection + burn-in + telemetry + recording; during a synchronized
@@ -725,12 +728,17 @@ class CameraPublishService:
                         preview = await loop.run_in_executor(
                             executor, _draw_preview, frame.image, last_detection, preview_size
                         )
-                    publisher.push(target.name, preview)
+                    # push() is a BLOCKING FFI round-trip (~8 ms at 960x540): run it
+                    # in the executor like every other per-frame call. Left on the
+                    # event loop it serialized ALL cameras' loops through the one
+                    # loop thread and throttled the synchronized sweep to ~18 fps
+                    # for a 30 fps config (measured; raw 4-cam delivery does ~48).
+                    await loop.run_in_executor(executor, publisher.push, target.name, preview)
                 else:
                     small = await loop.run_in_executor(
                         executor, _downscale, frame.image, preview_size
                     )
-                    publisher.push(target.name, small)
+                    await loop.run_in_executor(executor, publisher.push, target.name, small)
 
             # Record the RAW native frame (detection fidelity), throttled, off event loop.
             if now - last_record >= _RECORD_PERIOD_S:
@@ -752,9 +760,7 @@ class CameraPublishService:
                     last_record = now
                     async with self._recorder_lock:
                         if self._recorder is not None:
-                            await loop.run_in_executor(
-                                executor, self._recorder.write, frame.image
-                            )
+                            await loop.run_in_executor(executor, self._recorder.write, frame.image)
             await asyncio.sleep(0)
         logger.info("capture loop %s exiting (disconnected)", target.name)
 
