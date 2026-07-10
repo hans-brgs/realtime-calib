@@ -236,6 +236,7 @@ const config: Config = {
             {label: 'Guides', to: '/docs/guides/start-or-load-session'},
             {label: 'Reference', to: '/docs/reference/output-calibration-files'},
             {label: 'Research', to: '/docs/research/methodology'},
+            {label: 'FAQ', to: '/docs/faq'},
           ],
         },
         {

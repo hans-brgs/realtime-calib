@@ -86,7 +86,9 @@ realtime-calib **reimplements** Caliscope's calibration logic (it is not a
 dependency) to make it real-time and single-pass, while staying
 **output-compatible**. Caliscope remains the conceptual reference for board
 definitions, `calibrateCameraCharucoExtended`, PnP/stereo extrinsic
-initialization and bundle adjustment.
+initialization and bundle adjustment. For a side-by-side comparison — workflow,
+interface, exports, licensing — see
+[realtime-calib vs Caliscope](/docs/realtime-calib-vs-caliscope).
 
 :::tip Next step
 Head to [Installation](/docs/getting-started/installation), then run your
