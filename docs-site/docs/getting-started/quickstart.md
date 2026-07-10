@@ -1,5 +1,7 @@
 ---
 sidebar_position: 2
+description: "Your first multi-camera calibration end to end: define a ChArUco board, set up USB cameras, calibrate intrinsics and extrinsics live, then review in 3D and export."
+keywords: [camera calibration tutorial, multi-camera calibration quickstart, ChArUco calibration, USB camera calibration]
 ---
 
 # Quickstart: your first calibration

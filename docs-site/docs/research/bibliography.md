@@ -1,5 +1,7 @@
 ---
 sidebar_position: 3
+description: "The tools and literature behind realtime-calib: Caliscope, OpenCV, SciPy, LiveKit and the peer-reviewed references grounding the method."
+keywords: [camera calibration references, Caliscope, OpenCV, multi-camera calibration papers]
 ---
 
 # Bibliography & references

@@ -1,5 +1,9 @@
 ---
 sidebar_position: 2
+title: "Define a calibration board (ChArUco / ArUco)"
+sidebar_label: Define a calibration board
+description: "Configure the ChArUco or ArUco board realtime-calib detects, download it to print, and enter its real measured size for an accurate metric scale."
+keywords: [ChArUco board, ArUco board, calibration board, calibration target, ChArUco multi-camera calibration]
 ---
 
 # Define a calibration board

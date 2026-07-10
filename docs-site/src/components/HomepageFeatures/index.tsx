@@ -18,7 +18,7 @@ const FeatureList: FeatureItem[] = [
     alt: 'realtime-calib running on a phone, a tablet and a laptop',
     description: (
       <>
-        Cameras plug into a headless server; drive the whole calibration from a
+        Cameras plug into a headless Docker host; drive the whole calibration from a
         browser on <strong>any device</strong> — laptop, tablet or phone. Built for
         robotics, mocap and production lines.
       </>

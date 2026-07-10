@@ -1,5 +1,7 @@
 ---
 sidebar_position: 4
+description: "How to cite realtime-calib in academic work — CITATION.cff and a ready-to-use BibTeX entry."
+keywords: [cite camera calibration software, BibTeX, CITATION.cff, research software citation]
 ---
 
 # How to cite

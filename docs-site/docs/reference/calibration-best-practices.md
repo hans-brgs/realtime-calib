@@ -1,5 +1,7 @@
 ---
 sidebar_position: 2
+description: "How to capture data that yields an accurate calibration: board choice, tilt and frame coverage, lighting, working distance, and how to read reprojection error."
+keywords: [camera calibration best practices, accurate camera calibration, reprojection error, calibration accuracy]
 ---
 
 # Calibration best practices

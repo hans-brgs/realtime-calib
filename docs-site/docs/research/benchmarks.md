@@ -1,5 +1,7 @@
 ---
 sidebar_position: 2
+description: "How realtime-calib's accuracy is measured and published: reprojection-error metrics, datasets and exact commits so every number can be reproduced."
+keywords: [camera calibration accuracy, calibration benchmark, reprojection error]
 ---
 
 # Accuracy & benchmarks

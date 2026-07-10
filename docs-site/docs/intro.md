@@ -1,7 +1,10 @@
 ---
 sidebar_position: 1
 slug: /intro
-title: Introduction
+title: What is realtime-calib?
+sidebar_label: Introduction
+description: "Local, real-time, open-source multi-camera calibration: intrinsics and 6-DoF extrinsics for USB camera rigs, live feedback, Caliscope-compatible exports."
+keywords: [multi-camera calibration, real-time camera calibration, open-source camera calibration, headless camera calibration, camera intrinsics, camera extrinsics, Caliscope alternative]
 ---
 
 # What is realtime-calib?
