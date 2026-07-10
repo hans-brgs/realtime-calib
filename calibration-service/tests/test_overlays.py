@@ -30,7 +30,7 @@ def test_overlay_downscales_and_draws() -> None:
     detection = BoardDetector(board).detect(gray)
     assert detection.found
 
-    out = draw_overlay(gray, detection, resize_factor=0.5)
+    out = draw_overlay(gray, detection, (gray.shape[1] // 2, gray.shape[0] // 2))
     assert out.shape[0] == gray.shape[0] // 2
     assert out.shape[1] == gray.shape[1] // 2
     assert out.ndim == 3 and out.dtype == np.uint8
@@ -40,7 +40,7 @@ def test_overlay_downscales_and_draws() -> None:
 
 def test_overlay_no_detection_returns_plain_preview() -> None:
     frame = np.full((480, 640, 3), 30, np.uint8)
-    out = draw_overlay(frame, BoardDetection.empty(), resize_factor=1.0)
+    out = draw_overlay(frame, BoardDetection.empty())
     assert out.shape == frame.shape
     assert np.array_equal(out, frame)  # nothing drawn
     assert out is not frame  # but still a copy
