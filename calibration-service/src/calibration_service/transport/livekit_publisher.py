@@ -117,7 +117,11 @@ class LiveKitPublisher:
             track.mute()
 
     def push(self, name: str, image: NDArray[np.uint8]) -> None:
-        """Push a BGR frame to the named track's source."""
+        """Push a BGR frame to the named track's source.
+
+        ``capture_frame`` is a synchronous, BLOCKING FFI round-trip (~8 ms for a
+        960x540 preview: colour conversion + buffer copy in the Rust core).
+        """
         source = self._sources.get(name)
         if source is None:
             raise RuntimeError(f"push() for unpublished track {name!r}")

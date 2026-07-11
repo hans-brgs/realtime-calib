@@ -47,13 +47,30 @@ logger = logging.getLogger(__name__)
 
 
 def _process_frame(
-    detector: BoardDetector, image: NDArray[np.uint8], preview_size: tuple[int, int]
+    detector: BoardDetector,
+    image: NDArray[np.uint8],
+    preview_size: tuple[int, int],
+    detect_at_preview: bool,
 ) -> tuple[NDArray[np.uint8], BoardDetection]:
-    """Detect the board (native res) + burn the overlay in at preview resolution.
+    """Detect the board and burn the overlay in at preview resolution.
 
-    CPU-bound; meant for an executor. Detection uses the full-resolution frame; the
-    returned preview is the burn-in composited at ``preview_size`` for LiveKit.
+    CPU-bound; meant for an executor. Returns ``(preview, detection)`` — the preview is
+    the overlay composited at ``preview_size`` for LiveKit.
+
+    ``detect_at_preview`` (the extrinsic sweep) runs the detector on the DOWNSCALED
+    preview frame, not the native one. The extrinsic solve re-detects on the recorded
+    native mkv (see calibration.extrinsic), so the live detection only drives the overlay
+    + co-visibility telemetry — neither needs native precision — and detecting at preview
+    res cuts ~10 ms/frame (16 -> 6) off the sweep's serial per-camera chain. The corners
+    then live in preview space, exactly what the overlay wants (drawn at scale 1). Its
+    one side effect: ``sharpness`` reads lower (Laplacian on the reduced frame), and it
+    gates nothing in the extrinsic phase. Intrinsic keeps native detection (single active
+    camera, and its sharpness gate selects keyframes).
     """
+    if detect_at_preview:
+        small = _downscale(image, preview_size)
+        detection = detector.detect(small)
+        return _draw_preview(small, detection, preview_size), detection
     detection = detector.detect(image)
     return _draw_preview(image, detection, preview_size), detection
 
@@ -62,6 +79,7 @@ def _draw_preview(
     image: NDArray[np.uint8],
     detection: BoardDetection | None,
     preview_size: tuple[int, int],
+    detect_at_preview: bool = False,
 ) -> NDArray[np.uint8]:
     """Burn the (last known) detection overlay in at preview resolution — no re-detect.
 
@@ -69,10 +87,15 @@ def _draw_preview(
     rate instead of flickering at the (slower) detection rate. The overlay is
     composited directly at ``preview_size`` (ADR-0003/0015), not at native then
     downscaled. ``None`` -> raw downscaled preview.
+
+    ``detect_at_preview`` mirrors _process_frame for the redraw path: the frame is
+    downscaled first so a detection that ran at preview resolution (its corners already
+    in preview space) is drawn at scale 1, staying consistent between re-detect ticks.
     """
+    base = _downscale(image, preview_size) if detect_at_preview else image
     if detection is None:
-        return _downscale(image, preview_size)
-    return draw_overlay(image, detection, preview_size)
+        return _downscale(base, preview_size)
+    return draw_overlay(base, detection, preview_size)
 
 
 _EMPTY_READ_BACKOFF_S = 0.005
@@ -644,7 +667,9 @@ class CameraPublishService:
         but only ``retrieve()``s (decodes) one when the target interval has elapsed —
         honouring the chosen fps even if the driver ignores ``CAP_PROP_FPS``, and
         skipping the JPEG decode of frames we would drop. The preview published to
-        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder.
+        LiveKit is then downscaled + rate-capped (ADR-0015) to spare the encoder,
+        and pushed OFF the event loop like every other per-frame call — see the
+        comment at the push site.
 
         Detection modes: the camera in intrinsic capture (``_active_intrinsic``) gets
         board detection + burn-in + telemetry + recording; during a synchronized
@@ -707,7 +732,7 @@ class CameraPublishService:
                     if detector is not None and tick != last_tick:
                         last_tick = tick
                         preview, detection = await loop.run_in_executor(
-                            executor, _process_frame, detector, frame.image, preview_size
+                            executor, _process_frame, detector, frame.image, preview_size, extrinsic
                         )
                         last_detection = detection
                         if sweeping:
@@ -726,8 +751,18 @@ class CameraPublishService:
                     else:
                         # Redraw the last detection (no re-detect) so the overlay is steady.
                         preview = await loop.run_in_executor(
-                            executor, _draw_preview, frame.image, last_detection, preview_size
+                            executor,
+                            _draw_preview,
+                            frame.image,
+                            last_detection,
+                            preview_size,
+                            extrinsic,
                         )
+                    # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
+                    # detect-at-preview both sides) showed running it in the executor vs
+                    # synchronously here is a wash (~25 fps both): the sweep is bound by
+                    # 4-camera single-process serialization, not this call. Kept inline —
+                    # simplest, one fewer executor hop.
                     publisher.push(target.name, preview)
                 else:
                     small = await loop.run_in_executor(
