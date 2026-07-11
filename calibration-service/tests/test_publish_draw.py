@@ -125,8 +125,49 @@ def test_process_frame_detects_and_returns_preview_size() -> None:
     png = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
     preview_size = _preview_size(png.shape[1], png.shape[0])
 
-    preview, detection = _process_frame(BoardDetector(board), png, preview_size)
+    preview, detection = _process_frame(
+        BoardDetector(board), png, preview_size, detect_at_preview=False
+    )
 
     assert detection.found  # real detection ran on the native frame
     assert (preview.shape[1], preview.shape[0]) == preview_size
     assert preview.ndim == 3 and preview.dtype == np.uint8
+
+
+def test_process_frame_detect_at_preview_feeds_the_downscaled_frame(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The extrinsic sweep detects at preview res (16->6 ms): the detector must receive
+    the downscaled frame, not the native one. Pinned by capturing the shape it sees."""
+    detector = BoardDetector(_charuco())
+    preview_size = _preview_size(1920, 1080)  # (960, 540)
+    image: NDArray[np.uint8] = np.full((1080, 1920, 3), 40, np.uint8)
+    seen: list[tuple[int, int]] = []
+
+    def spy_detect(img: NDArray[np.uint8]) -> BoardDetection:
+        seen.append((img.shape[1], img.shape[0]))
+        return _synthetic_detection(img.shape[1], img.shape[0])
+
+    monkeypatch.setattr(detector, "detect", spy_detect)
+
+    preview, _ = _process_frame(detector, image, preview_size, detect_at_preview=True)
+    assert seen == [preview_size]  # detector ran on the 960x540 frame, not (1920, 1080)
+    assert (preview.shape[1], preview.shape[0]) == preview_size
+
+    seen.clear()
+    _process_frame(detector, image, preview_size, detect_at_preview=False)
+    assert seen == [(1920, 1080)]  # intrinsic path still feeds the full-resolution frame
+
+
+def test_draw_preview_detect_at_preview_redraws_preview_space_detection() -> None:
+    """Redraw tick during the sweep: a NATIVE frame + a detection whose corners are
+    already in preview space must still yield the exact preview size — the frame is
+    downscaled first and the corners drawn at scale 1 (no double-scaling)."""
+    image: NDArray[np.uint8] = np.full((1080, 1920, 3), 40, np.uint8)
+    preview_size = _preview_size(1920, 1080)  # (960, 540)
+    preview_space_detection = _synthetic_detection(*preview_size)
+
+    out = _draw_preview(image, preview_space_detection, preview_size, detect_at_preview=True)
+
+    assert (out.shape[1], out.shape[0]) == preview_size
+    assert out.ndim == 3 and out.dtype == np.uint8
