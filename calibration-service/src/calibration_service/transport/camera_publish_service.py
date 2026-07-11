@@ -132,7 +132,7 @@ _PUSH_PERIOD_S = 1 / _PREVIEW_FPS
 # Dedicated capture thread pool (ADR-0021): isolate the blocking cv2 reads/decodes/
 # writes from the default executor (shared with the intrinsic compute + sync HTTP
 # routes). Sized for a handful of cameras each parking a thread in a blocking grab()
-# plus brief retrieve/detect/push/write bursts; threads parked in grab() cost ~no CPU.
+# plus brief retrieve/detect/write bursts; threads parked in grab() cost ~no CPU.
 _CAPTURE_THREADS = 16
 # Re-check the desired camera set at least this often (also woken immediately on a
 # view / active-camera change), and use it to notice a dropped room.
@@ -758,17 +758,17 @@ class CameraPublishService:
                             preview_size,
                             extrinsic,
                         )
-                    # push() is a BLOCKING FFI round-trip (~8 ms at 960x540): run it
-                    # in the executor like every other per-frame call. Left on the
-                    # event loop it serialized ALL cameras' loops through the one
-                    # loop thread and throttled the synchronized sweep to ~18 fps
-                    # for a 30 fps config (measured; raw 4-cam delivery does ~48).
-                    await loop.run_in_executor(executor, publisher.push, target.name, preview)
+                    # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
+                    # detect-at-preview both sides) showed running it in the executor vs
+                    # synchronously here is a wash (~25 fps both): the sweep is bound by
+                    # 4-camera single-process serialization, not this call. Kept inline —
+                    # simplest, one fewer executor hop.
+                    publisher.push(target.name, preview)
                 else:
                     small = await loop.run_in_executor(
                         executor, _downscale, frame.image, preview_size
                     )
-                    await loop.run_in_executor(executor, publisher.push, target.name, small)
+                    publisher.push(target.name, small)
 
             # Record the RAW native frame (detection fidelity), throttled, off event loop.
             if now - last_record >= _RECORD_PERIOD_S:
