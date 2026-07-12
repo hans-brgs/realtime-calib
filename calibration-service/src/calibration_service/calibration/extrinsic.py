@@ -140,6 +140,10 @@ class ExtrinsicResult:
     # t-l in board frame) lets the webapp derive the board's local xyz triad.
     points: list[list[float]] = field(default_factory=list)
     point_groups: list[int] = field(default_factory=list)
+    # Group whose board received the operator's "set frame" gesture (ADR-0026):
+    # shown as a marker on the review scrubber. None until the gesture; a fresh
+    # solve resets it (new world), rotate/minimize preserve it (same world).
+    framed_group: int | None = None
     board_quads: list[list[list[float]] | None] = field(default_factory=list)
 
 

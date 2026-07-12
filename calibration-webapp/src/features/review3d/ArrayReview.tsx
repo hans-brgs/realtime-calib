@@ -101,7 +101,13 @@ function cameraPoses(result: ExtrinsicResultPayload): CameraPose[] {
   });
 }
 
-function Frustum({ pose, size, color, m, anchor }: {
+function Frustum({
+  pose,
+  size,
+  color,
+  m,
+  anchor,
+}: {
   pose: CameraPose;
   size: number;
   color: string;
@@ -163,7 +169,11 @@ function AxisLabel({ position, text, color }: { position: Vec3; text: string; co
 // c0->c1 = board +x, c0->c3 = board +y, z = x cross y). A single-ArUco marker's
 // frame sits at its CENTER (cv2 convention) — anchor the triad on the centroid;
 // a ChArUco board frame originates at its first chessboard corner (c0).
-function BoardWithTriad({ quad, m, centered }: {
+function BoardWithTriad({
+  quad,
+  m,
+  centered,
+}: {
   quad: number[][];
   m: number[][];
   centered: boolean;
@@ -284,11 +294,23 @@ export function ArrayReview({
   const initialCamera: Vec3 = [camDistance, camDistance * 0.7, camDistance];
 
   return (
-    <Box style={{ position: 'relative', height: '100%', minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+    <Box
+      style={{
+        position: 'relative',
+        height: '100%',
+        minHeight: 0,
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
       <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
         <Canvas
           camera={{ position: initialCamera, up: VIEW_UP, fov: 50 }}
-          style={{ borderRadius: 'var(--mantine-radius-md)', background: '#16161b', height: '100%' }}
+          style={{
+            borderRadius: 'var(--mantine-radius-md)',
+            background: '#16161b',
+            height: '100%',
+          }}
         >
           <ambientLight intensity={0.8} />
           <Bounds fit clip observe margin={1.25}>
@@ -303,9 +325,7 @@ export function ArrayReview({
                 anchor={i === 0}
               />
             ))}
-            {positions.length > 0 && (
-              <GroupPoints positions={positions} size={sceneScale * 0.02} />
-            )}
+            {positions.length > 0 && <GroupPoints positions={positions} size={sceneScale * 0.02} />}
             {quad && <BoardWithTriad quad={quad} m={VIEW_BASIS} centered={markerBoard} />}
           </Bounds>
           {/* Trackball, not Orbit: orbit clamps polar to [0, π] (blocks at the
@@ -414,8 +434,36 @@ export function ArrayReview({
           }}
           label={null}
           color="violet"
+          // "Set frame on board" marker (like the intrinsic trim marks): flags the
+          // group whose board carries the world frame — persisted server-side,
+          // kept through rotate/minimize, reset by a fresh solve.
+          marks={
+            result.framed_group != null && result.framed_group <= maxGroup
+              ? [
+                  {
+                    value: result.framed_group,
+                    label: (
+                      <Text
+                        fz="0.6rem"
+                        c="var(--rc-accent-bright)"
+                        style={{ whiteSpace: 'nowrap' }}
+                      >
+                        ⚑ frame
+                      </Text>
+                    ),
+                  },
+                ]
+              : undefined
+          }
         />
-        <Text className="rc-tnum" fz="0.72rem" c="dark.2" w={110} ta="right" style={{ flex: 'none' }}>
+        <Text
+          className="rc-tnum"
+          fz="0.72rem"
+          c="dark.2"
+          w={110}
+          ta="right"
+          style={{ flex: 'none' }}
+        >
           group {current} / {maxGroup}
         </Text>
       </Group>

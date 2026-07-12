@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import io
+import json
 import shutil
 import zipfile
 from pathlib import Path
@@ -698,6 +699,43 @@ def test_extrinsic_compute_stores_result_and_persists_json(
 
 def test_extrinsic_result_404_before_compute(tmp_path: Path) -> None:
     assert _client(tmp_path).get("/extrinsic/result").status_code == 404
+
+
+def test_orient_persists_the_framed_group_marker(tmp_path: Path) -> None:
+    # "Set frame on board" records WHICH group carried the gesture (the review
+    # scrubber marker): set by set_frame, kept through rotate, served on reload.
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 8, "rows": 5}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    fixture = {
+        "cameras": ["cam_0", "cam_1"],
+        "rotations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.0, 0.1, 0.0]},
+        "translations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [1.0, 0.0, 0.0]},
+        "per_camera_error": {"cam_0": 0.1, "cam_1": 0.2},
+        "error": 0.15,
+        "pair_errors": {"cam_0|cam_1": 0.01},
+        "group_count": 1,
+        "point_count": 4,
+        "points": [[0.0, 0.0, 5.0]],
+        "point_groups": [0],
+        "board_quads": [[[0.0, 0.0, 5.0], [1.0, 0.0, 5.0], [1.0, 1.0, 5.0], [0.0, 1.0, 5.0]]],
+    }
+    (directory / "result.json").write_text(json.dumps(fixture))
+
+    rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "x", "degrees": 90})
+    assert rotated.status_code == 200
+    assert rotated.json()["framed_group"] is None  # no gesture yet
+
+    framed = client.post("/extrinsic/orient", json={"op": "set_frame", "group": 0})
+    assert framed.status_code == 200
+    assert framed.json()["framed_group"] == 0
+
+    rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "y", "degrees": -90})
+    assert rotated.json()["framed_group"] == 0  # rotate keeps the marker
+    assert client.get("/extrinsic/result").json()["framed_group"] == 0  # survives reload
 
 
 def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:

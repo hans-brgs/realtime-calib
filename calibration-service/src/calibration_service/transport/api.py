@@ -12,7 +12,7 @@ import logging
 import shutil
 import tempfile
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Literal
@@ -852,6 +852,10 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
             raise HTTPException(status_code=422, detail="rotate needs axis + degrees")
         transform = axis_rotation_transform(body.axis, body.degrees)
     reoriented = reorient_result(result, transform)
+    # Remember which group carried the framing gesture (review-scrubber marker);
+    # a rotate keeps the existing marker — the world reference did not move.
+    framed = body.group if body.op == "set_frame" else result.framed_group
+    reoriented = replace(reoriented, framed_group=framed)
     _store_extrinsic_result(manager, reoriented)
     payload: dict[str, object] = asdict(reoriented)
     return payload
@@ -887,6 +891,8 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Minimize keeps the anchor pose, so the framing marker stays meaningful.
+    refined = replace(refined, framed_group=result.framed_group)
     _store_extrinsic_result(manager, refined)
     payload: dict[str, object] = asdict(refined)
     return payload

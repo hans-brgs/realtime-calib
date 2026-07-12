@@ -287,6 +287,9 @@ export interface ExtrinsicResultPayload {
   points: number[][];
   point_groups: number[];
   board_quads: (number[][] | null)[];
+  // Group that received the "set frame" gesture (review-scrubber marker);
+  // null/absent until the gesture, reset by a fresh solve.
+  framed_group?: number | null;
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
