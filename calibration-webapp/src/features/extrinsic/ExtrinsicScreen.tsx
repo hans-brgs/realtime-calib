@@ -497,7 +497,7 @@ function ExtrinsicInner() {
               />
               <NumberInput
                 label="Max groups (best kept)"
-                description="The solve keeps the sharpest groups, spread over time (ADR-0033)"
+                description="The solve keeps the sharpest groups, spread over time"
                 value={maxGroups}
                 onChange={(v) => setMaxGroups(Math.max(5, Number(v) || 5))}
                 min={5}
@@ -613,8 +613,12 @@ function ExtrinsicInner() {
         centered
         title="Computing camera array"
       >
-        <Text fz="0.8rem" c="dark.2" mb="md">
+        <Text fz="0.8rem" c="dark.2">
           Pairwise stereo → chaining from {anchor} → bundle adjustment
+        </Text>
+        <Text fz="0.72rem" c="dark.3" mt={6} mb="md">
+          Board detection scans the recorded sweep first — this can take a while (tens of seconds on
+          long recordings).
         </Text>
         <Group justify="center">
           <Loader size="sm" />
