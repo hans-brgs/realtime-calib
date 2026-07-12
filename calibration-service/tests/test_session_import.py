@@ -413,7 +413,9 @@ def test_ingest_rejects_resolution_mismatch(tmp_path: Path) -> None:
 
 
 @requires_ffmpeg
-def test_ingest_rejects_fps_disagreement_without_csv(tmp_path: Path) -> None:
+def test_ingest_aligns_disparate_cadences_without_csv(tmp_path: Path) -> None:
+    # Different fps/counts no longer reject: the caliscope-parity alignment
+    # normalises every camera onto shared sync slots (ADR-0031 follow-up).
     stage = tmp_path / "stage-fps"
     _make_video(stage / "intrinsics/cam_0.mkv", 4, fps=30)
     _make_video(stage / "intrinsics/cam_1.mkv", 4, fps=15)
@@ -424,8 +426,14 @@ def test_ingest_rejects_fps_disagreement_without_csv(tmp_path: Path) -> None:
         for file in sorted(stage.rglob("*")):
             if file.is_file():
                 bundle.write(file, str(file.relative_to(stage)))
-    with pytest.raises(ImportValidationError, match=r"timestamps\.csv"):
-        ingest(archive, "fps_mismatch", tmp_path / "sessions")
+    session = ingest(archive, "fps_mix", tmp_path / "sessions")
+    assert [c.name for c in session.cameras] == ["cam_0", "cam_1"]
+    sweep = tmp_path / "sessions/fps_mix/extrinsic"
+    a = read_timestamps(sweep / "cam_0.timestamps")
+    b = read_timestamps(sweep / "cam_1.timestamps")
+    # Same counts here -> identity slots: shared stamps despite the fps mismatch.
+    assert len(a) == len(b) == 4
+    assert a == b
 
 
 # --- Sidecar synthesis from a csv (pure: no ffmpeg) --------------------------------
@@ -449,16 +457,19 @@ def test_sidecar_times_remaps_constant_offset_csv_ids(tmp_path: Path) -> None:
     assert len(times[0]) == 3 and times[0] == sorted(times[0])
 
 
-def test_sidecar_times_rejects_inferred_uniform_grid(tmp_path: Path) -> None:
+def test_sidecar_times_ignores_inferred_grid_and_aligns_caliscope_style(tmp_path: Path) -> None:
     # Caliscope's inferred_timestamps.csv: one perfectly constant delta per camera
-    # -> not capture times; time-based pairing would mis-synchronize (10 px bug).
+    # -> not capture times (time-based pairing on it mis-synchronizes, 10 px bug).
+    # The csv is ignored and the videos are aligned the way caliscope does it.
     rows = "".join(f"0,{i * 0.033178:.9f}\n" for i in range(120)) + "".join(
         f"1,{i * 0.033490:.9f}\n" for i in range(120)
     )
     plan = _csv_plan(tmp_path, "cam_id,frame_time\n" + rows, [0, 1])
     props = {0: VideoProperties(64, 48, 30.0, 120), 1: VideoProperties(64, 48, 30.0, 120)}
-    with pytest.raises(ImportValidationError, match="INFERRED uniform grid"):
-        _sidecar_times(plan, props)
+    times = _sidecar_times(plan, props)
+    # Equal counts -> identity slots: both sidecars share the exact same stamps.
+    assert times[0] == times[1]
+    assert times[0][0] == 0.0 and times[0][1] == pytest.approx(1 / 30, rel=1e-3)
 
 
 def test_sidecar_times_accepts_real_jittery_timestamps(tmp_path: Path) -> None:

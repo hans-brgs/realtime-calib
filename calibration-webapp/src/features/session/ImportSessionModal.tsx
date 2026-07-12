@@ -77,9 +77,10 @@ function infoTooltip() {
             the number is the camera index (<Code fz="0.66rem">cam_0</Code> = anchor) and must match
             across both folders. Without <Code fz="0.66rem">timestamps.csv</Code> (Caliscope format:{' '}
             <Code fz="0.66rem">cam_id,frame_time</Code>), the extrinsic videos are assumed
-            frame-synchronized. Timestamps must be REAL capture times — not Caliscope&apos;s{' '}
-            <Code fz="0.66rem">inferred_timestamps.csv</Code> (a uniform grid that mis-synchronizes
-            the pairing). A single wrapper folder inside the archive is fine.
+            frame-synchronized. Only REAL capture timestamps are used for pairing — Caliscope&apos;s{' '}
+            <Code fz="0.66rem">inferred_timestamps.csv</Code> (a synthetic uniform grid) is detected
+            and ignored: the videos are then aligned Caliscope-style instead. A single wrapper
+            folder inside the archive is fine.
           </Text>
         </HoverCard.Dropdown>
       </HoverCard>

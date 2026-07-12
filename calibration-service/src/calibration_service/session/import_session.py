@@ -45,10 +45,18 @@ from calibration_service.recording.ffmpeg import (
     remux_copy_args,
     run_ffmpeg,
 )
-from calibration_service.recording.replay import VideoProperties, video_properties
+from calibration_service.recording.replay import (
+    VideoProperties,
+    decoded_frame_count,
+    video_properties,
+)
 from calibration_service.recording.video_writer import intrinsic_capture_path
 from calibration_service.session.manager import validate_session_id
 from calibration_service.session.store import SESSION_FILE, save_session, session_dir
+from calibration_service.synchronization.caliscope_alignment import (
+    greedy_sync_mapping,
+    inferred_grids,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -64,10 +72,6 @@ _CAMERA_RE = re.compile(r"^cam_(\d+)$")
 _CAMERA_PREFIX = "cam"
 # Archive junk silently skipped at extraction (macOS/Windows artifacts).
 _JUNK_BASENAMES = frozenset({".DS_Store", "Thumbs.db"})
-# Without a timestamps.csv the videos are taken as frame-synchronized: every camera
-# must then share one cadence (within this relative tolerance) so frame i can be
-# stamped i/fps with a SINGLE reference fps for all cameras.
-_FPS_MATCH_TOLERANCE = 0.05
 # Real recorders and their timestamp logs disagree by a few TRAILING frames (stop
 # flush; CAP_PROP_FRAME_COUNT is itself an estimate for some codecs). Tolerate up
 # to ~1 s of tail drift; beyond that the csv is considered misaligned (frame i of
@@ -306,18 +310,19 @@ def _normalise_video(source: Path, destination: Path) -> VideoProperties:
     return props
 
 
-def _reject_inferred_grid(parsed: dict[str, list[float]]) -> None:
-    """Refuse a timestamps.csv whose times are an INFERRED uniform grid.
+def _is_inferred_grid(parsed: dict[str, list[float]]) -> bool:
+    """True when a timestamps.csv carries an INFERRED uniform grid, not capture times.
 
     Caliscope's ``inferred_timestamps.csv`` spreads each camera's frames evenly
     over the recording (one constant delta per camera, no gaps, start at 0).
-    Those are not capture times: real frame drops get smeared over the whole
-    video, so nearest-time pairing drifts by whole frames between cameras —
-    measured 10.2 px vs 3.7 px extrinsic RMSE on a real dataset. Real capture
-    logs always jitter; a perfectly constant grid on 100+ frames is synthetic.
+    Real capture logs always jitter; a perfectly constant grid on 100+ frames is
+    synthetic. Nearest-time pairing on such grids drifts by whole frames between
+    cameras (measured 10.2 px vs 3.7 px extrinsic RMSE) — the import falls back
+    to the Caliscope-parity alignment instead (caliscope never reads this file
+    back either).
     """
-    suspicious: list[str] = []
-    for cam_id, times in parsed.items():
+    suspicious = 0
+    for times in parsed.values():
         if len(times) < 100:
             continue  # too short to judge
         deltas = np.diff(np.asarray(times, np.float64))
@@ -326,15 +331,8 @@ def _reject_inferred_grid(parsed: dict[str, list[float]]) -> None:
             continue
         spread = float(np.max(deltas) - np.min(deltas))
         if spread < 1e-4 * median:  # one constant delta across the whole video
-            suspicious.append(cam_id)
-    if suspicious and len(suspicious) == len(parsed):
-        raise ImportValidationError(
-            "timestamps.csv looks like an INFERRED uniform grid (e.g. Caliscope's "
-            "inferred_timestamps.csv): every camera has one perfectly constant "
-            "frame interval, which real capture logs never do. Time-based pairing "
-            "on such a grid mis-synchronizes the cameras. Provide real per-frame "
-            "capture timestamps, or omit the csv if the videos are frame-synchronized."
-        )
+            suspicious += 1
+    return 0 < suspicious == len(parsed)
 
 
 def _csv_camera_index(key: str) -> int:
@@ -347,20 +345,84 @@ def _csv_camera_index(key: str) -> int:
     raise ImportValidationError(f"timestamps.csv has an invalid cam_id {key!r}")
 
 
+def _caliscope_aligned_times(
+    plan: ImportPlan,
+    props: dict[int, VideoProperties],
+    sweep_dir: Path | None,
+) -> dict[int, list[float]]:
+    """Sidecar times from the Caliscope-parity videos-only alignment.
+
+    Frames sharing a sync slot get the SAME stamp (slot * period), so the
+    downstream sidecar grouping reproduces the slots exactly (spread 0). Frames
+    a slot skipped (stall-breaker, rare) get a half-period offset: never an
+    exact match, so they only ever fill a blank as a nearest fallback.
+
+    Frame counts come from a full decode when the videos are available
+    (``decoded_frame_count``): metadata estimates run a few frames long on
+    remuxes, which shifts the grids and desynchronizes the blank positions
+    (measured: pairing agreement 80% -> the estimate was the sole cause).
+    """
+    if sweep_dir is not None:
+        counts = {
+            str(video.index): decoded_frame_count(
+                sweep_dir / f"{_CAMERA_PREFIX}_{video.index}.mkv"
+            )
+            for video in plan.extrinsic
+        }
+    else:  # unit tests without files on disk
+        counts = {str(video.index): props[video.index].frames for video in plan.extrinsic}
+    fps = {str(video.index): max(props[video.index].fps, 1e-6) for video in plan.extrinsic}
+    grids = inferred_grids(counts, fps)
+    slots = greedy_sync_mapping(grids)
+    if not slots:
+        raise ImportValidationError("could not align the extrinsic videos (no frames)")
+    duration = max(series[-1] for series in grids.values() if series)
+    # Slot spacing spans the recording: N slots cover [0, duration] in N-1 steps.
+    period = duration / (len(slots) - 1) if len(slots) > 1 and duration > 0 else 1.0 / 30.0
+    times = {
+        video.index: [(-1.0) for _ in range(counts[str(video.index)])]
+        for video in plan.extrinsic
+    }
+    for slot, members in enumerate(slots):
+        for key, frame in members.items():
+            index = int(key)
+            if frame < len(times[index]):
+                times[index][frame] = slot * period
+    for series in times.values():  # stall-dropped / tail frames: keep monotone
+        previous = -period
+        for i, value in enumerate(series):
+            if value < 0:
+                series[i] = previous + period / 2.0
+            previous = series[i]
+    logger.info(
+        "caliscope-parity alignment: %d slots for %s frames",
+        len(slots),
+        {f"cam_{k}": v for k, v in sorted(counts.items())},
+    )
+    return times
+
+
 def _sidecar_times(
-    plan: ImportPlan, props: dict[int, VideoProperties]
+    plan: ImportPlan,
+    props: dict[int, VideoProperties],
+    sweep_dir: Path | None = None,
 ) -> dict[int, list[float]]:
     """Per-camera frame times (seconds) for the extrinsic sidecars (ADR-0007).
 
-    With a Caliscope ``timestamps.csv``: its rows drive the sync, validated against
-    each video's frame count (``rows == frames``, no blank-frame tolerance in v1).
-    Without one, the videos are taken as FRAME-synchronized: frame i is the same
-    instant on every camera, so every sidecar is synthesised as ``i / fps_ref`` with
-    one shared reference fps — identical stamps, exact grouping.
+    With a REAL Caliscope ``timestamps.csv`` (jittery capture times): its rows
+    drive the sync, validated against each video's frame count. Without one —
+    or when the csv is an inferred uniform grid (synthetic, mis-pairs cameras) —
+    the videos are aligned the way Caliscope itself does it from videos alone
+    (``caliscope_alignment``): consecutive consumption with blank slots.
     """
     if plan.timestamps_csv is not None:
         parsed = parse_caliscope_timestamps(plan.timestamps_csv)
-        _reject_inferred_grid(parsed)
+        if _is_inferred_grid(parsed):
+            logger.warning(
+                "timestamps.csv is an inferred uniform grid (not capture times); "
+                "ignoring it and aligning the videos caliscope-style instead"
+            )
+            return _caliscope_aligned_times(plan, props, sweep_dir)
         by_index: dict[int, list[float]] = {}
         for key, times in parsed.items():
             index = _csv_camera_index(key)
@@ -425,19 +487,7 @@ def _sidecar_times(
                 )
         return by_index
 
-    anchor = plan.extrinsic[0].index
-    reference = props[anchor].fps
-    for video in plan.extrinsic:
-        fps = props[video.index].fps
-        if abs(fps - reference) / reference > _FPS_MATCH_TOLERANCE:
-            raise ImportValidationError(
-                f"extrinsic videos disagree on frame rate (cam_{anchor}: {reference:.2f} fps, "
-                f"cam_{video.index}: {fps:.2f} fps); provide a timestamps.csv"
-            )
-    return {
-        video.index: [i / reference for i in range(props[video.index].frames)]
-        for video in plan.extrinsic
-    }
+    return _caliscope_aligned_times(plan, props, sweep_dir)
 
 
 def _write_manifest(directory: Path, plan: ImportPlan, props: dict[int, VideoProperties]) -> None:
@@ -508,7 +558,7 @@ def _materialize(plan: ImportPlan, sessions_dir: Path, session_id: str) -> list[
         extrinsic_props[video.index] = props
 
     if plan.extrinsic:
-        times = _sidecar_times(plan, extrinsic_props)
+        times = _sidecar_times(plan, extrinsic_props, sweep_dir)
         for video in plan.extrinsic:
             sidecar = sweep_dir / f"{_CAMERA_PREFIX}_{video.index}.timestamps"
             sidecar.write_text(

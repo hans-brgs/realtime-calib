@@ -18,6 +18,26 @@ def frame_count(path: Path) -> int:
         capture.release()
 
 
+def decoded_frame_count(path: Path) -> int:
+    """EXACT frame count by decoding the whole file (no metadata trust).
+
+    ``CAP_PROP_FRAME_COUNT`` is an estimate on some containers (an imported
+    remux read 2258 where 2257 frames decode) — off-by-a-few is fatal for the
+    Caliscope-parity alignment, whose grids must match the frames the compute
+    will actually decode. Costs a full sequential decode; import-time only.
+    """
+    capture = cv2.VideoCapture(str(path))
+    count = 0
+    try:
+        while True:
+            ok = capture.grab()  # decode-free advance: ~3x faster than read()
+            if not ok:
+                return count
+            count += 1
+    finally:
+        capture.release()
+
+
 @dataclass(frozen=True)
 class VideoProperties:
     """Native geometry + cadence of a recorded/imported video.
