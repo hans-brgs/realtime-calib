@@ -11,10 +11,12 @@ import functools
 import subprocess
 import sys
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
 import pytest
+from numpy.typing import NDArray
 
 from calibration_service.board import render_board_png
 from calibration_service.calibration import (
@@ -35,6 +37,13 @@ from calibration_service.calibration.intrinsic import (
 from calibration_service.detection import BoardDetection
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import VideoRecorder
+
+
+def _rendered_board_image(board: CalibrationBoard) -> NDArray[np.uint8]:
+    """Render + decode the board; narrow the Optional + dtype at the cv2 boundary."""
+    image = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    assert image is not None
+    return cast("NDArray[np.uint8]", image)
 
 
 @functools.cache
@@ -153,7 +162,7 @@ def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:
     board = CalibrationBoard(
         board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
     )
-    gray = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    gray = _rendered_board_image(board)
     h, w = gray.shape[:2]
     path = tmp_path / "capture.mkv"
     with VideoRecorder(path, w, h, fps=30) as rec:
@@ -218,7 +227,7 @@ def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None
     board = CalibrationBoard(
         board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
     )
-    gray = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    gray = _rendered_board_image(board)
     h, w = gray.shape[:2]
     path = tmp_path / "capture.mkv"
     with VideoRecorder(path, w, h, fps=30) as rec:

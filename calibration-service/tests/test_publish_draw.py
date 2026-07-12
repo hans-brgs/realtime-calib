@@ -15,6 +15,8 @@ Two guarantees are pinned here:
 
 from __future__ import annotations
 
+from typing import cast
+
 import cv2
 import numpy as np
 import pytest
@@ -23,6 +25,7 @@ from numpy.typing import NDArray
 from calibration_service.board import render_board_png
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.overlays import draw_overlay
 from calibration_service.transport import camera_publish_service as cps
 from calibration_service.transport.camera_publish_service import (
     _draw_preview,
@@ -104,7 +107,7 @@ def test_draw_preview_composites_at_preview_size(monkeypatch: pytest.MonkeyPatch
     not at native resolution then downscaled — this is the perf contract of the lot."""
     image: NDArray[np.uint8] = np.full((1080, 1920, 3), 40, np.uint8)
     preview_size = _preview_size(1920, 1080)
-    real = cps.draw_overlay
+    real = draw_overlay  # the canonical symbol; cps re-imports it (spy patches cps)
     seen: list[tuple[int, int] | None] = []
 
     def spy(
@@ -122,7 +125,9 @@ def test_draw_preview_composites_at_preview_size(monkeypatch: pytest.MonkeyPatch
 
 def test_process_frame_detects_and_returns_preview_size() -> None:
     board = _charuco()
-    png = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    decoded = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    png = cast("NDArray[np.uint8]", decoded)
     preview_size = _preview_size(png.shape[1], png.shape[0])
 
     preview, detection = _process_frame(
