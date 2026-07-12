@@ -68,9 +68,9 @@ class CameraConfig:
     status: CameraStatus = CameraStatus.CONFIGURED
     # Intrinsic calibration result (None until computed; camera-array-config fields).
     matrix: list[list[float]] | None = None  # 3x3 K
-    distortions: list[float] | None = None  # rational-model coefficients
+    distortions: list[float] | None = None  # classic 5 coefficients (ADR-0032)
     calibration_error: float | None = None  # RMS reprojection error (px)
-    grid_count: int | None = None  # corners used across keyframes
+    grid_count: int | None = None  # keyframes/views used (Caliscope semantics)
     # Extrinsic calibration result (ADR-0023; camera-array-config fields). The pose
     # maps world (anchor camera) coords -> this camera's coords; anchor = identity.
     rotation: list[float] | None = None  # Rodrigues 3-vector
