@@ -15,6 +15,7 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Box, Button, Group, Select, Text } from '@mantine/core';
+import { useMediaQuery } from '@mantine/hooks';
 import { IconGripVertical, IconInfoCircle, IconRefresh } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
@@ -29,18 +30,32 @@ import {
   parseResolution,
   RESIZE_FACTORS,
 } from '@/features/cameras/captureOptions';
-import { detectCamerasThunk, selectDetectedCameras, selectDetectStatus } from '@/features/cameras/camerasSlice';
+import {
+  detectCamerasThunk,
+  selectDetectedCameras,
+  selectDetectStatus,
+} from '@/features/cameras/camerasSlice';
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
 import {
   applyCameraConfig,
+  confirmCameraSetupThunk,
   rehydrateSession,
   reorderCamerasThunk,
   selectSession,
 } from '@/features/session/sessionSlice';
+import { errorMessage, intrinsicPreviewUrl } from '@/transport/httpClient';
+import type { Session } from '@/transport/types';
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb={11} style={{ letterSpacing: '0.07em' }}>
+    <Text
+      fz="0.66rem"
+      fw={600}
+      c="dark.3"
+      tt="uppercase"
+      mb={11}
+      style={{ letterSpacing: '0.07em' }}
+    >
       {children}
     </Text>
   );
@@ -156,11 +171,288 @@ function CameraRow({ row }: { row: RowData }) {
   );
 }
 
-// Camera Setup: live preview (left) + the shared capture configuration and index order
+// First-frame thumbnail of an imported camera's recording, via the preview mp4
+// (ADR-0027) seeked to 0. Fills its grid cell and letterboxes the frame
+// (objectFit: contain) exactly like the live CameraTile. The transcode is kicked
+// at import time; until it is ready the <video> 404s and we fall back to a
+// quiet placeholder.
+function ImportThumbnail({ name }: { name: string }) {
+  const [failed, setFailed] = useState(false);
+  return (
+    <Box
+      style={{
+        position: 'relative',
+        width: '100%',
+        height: '100%',
+        borderRadius: 'var(--mantine-radius-lg)',
+        border: '1px solid var(--mantine-color-dark-4)',
+        background: '#000',
+        overflow: 'hidden',
+      }}
+    >
+      {failed ? (
+        <Box
+          style={{
+            position: 'absolute',
+            inset: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+          }}
+        >
+          <Text c="dark.3" fz="0.75rem">
+            preview preparing…
+          </Text>
+        </Box>
+      ) : (
+        <video
+          src={intrinsicPreviewUrl(name)}
+          preload="metadata"
+          muted
+          playsInline
+          onError={() => setFailed(true)}
+          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+        />
+      )}
+      <Text
+        fw={600}
+        fz="0.72rem"
+        px={8}
+        py={3}
+        style={{
+          position: 'absolute',
+          left: 8,
+          bottom: 8,
+          borderRadius: 7,
+          background: 'rgba(11,11,14,0.72)',
+          border: '1px solid var(--mantine-color-dark-4)',
+        }}
+      >
+        {name}
+      </Text>
+    </Box>
+  );
+}
+
+// Read-only Camera Setup for an imported session (ADR-0031): the cameras derive
+// from the uploaded videos — nothing to detect, reordering disabled (the camera
+// number in the file name fixes the order, cam_0 = anchor). Continue advances the
+// wizard without rebuilding the configs (/cameras/confirm).
+function ImportedCameraSetup({ session }: { session: Session }) {
+  const dispatch = useAppDispatch();
+  // Same responsive switch as the live CameraGrid: desktop fills the area with a
+  // near-square grid (no scroll); phone/portrait scrolls a single column.
+  const compact = useMediaQuery('(max-width: 47.99em), (orientation: portrait)') ?? false;
+  const [confirming, setConfirming] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const cameras = [...session.cameras].sort((a, b) => a.index - b.index);
+  const cols = compact ? 1 : Math.ceil(Math.sqrt(Math.max(1, cameras.length)));
+  const rows = Math.ceil(Math.max(1, cameras.length) / cols);
+
+  const confirm = async () => {
+    setConfirming(true);
+    setError(null);
+    try {
+      await dispatch(confirmCameraSetupThunk()).unwrap();
+      // The persisted step moves to intrinsic_capture; the rail follows it.
+    } catch (err) {
+      setError(errorMessage(err, 'could not confirm the setup'));
+    } finally {
+      setConfirming(false);
+    }
+  };
+
+  return (
+    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+      <ScreenHeader
+        title="Camera Setup"
+        subtitle={
+          <>
+            Imported session — the cameras derive from the uploaded videos.{' '}
+            <Text span c="var(--rc-accent-bright)" inherit>
+              Index 0 (cam_0) is the extrinsic anchor.
+            </Text>
+          </>
+        }
+      />
+
+      <Box
+        style={{
+          flex: 1,
+          minHeight: 0,
+          display: 'grid',
+          gridTemplateColumns: 'minmax(0, 1fr) 348px',
+          gap: 24,
+        }}
+        className="rc-camsetup-grid"
+      >
+        <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+          <SectionLabel>Recordings · first frame</SectionLabel>
+          {/* Mirrors the live PreviewGrid geometry: fills the column height with a
+              cols = ceil(sqrt(n)) letterboxed grid (no scroll); same 58vh floor. */}
+          <Box style={{ flex: 1, minHeight: 'min(58vh, 560px)' }}>
+            <Box
+              style={
+                compact
+                  ? {
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 12,
+                      height: '100%',
+                      overflowY: 'auto',
+                    }
+                  : {
+                      display: 'grid',
+                      gridTemplateColumns: `repeat(${cols}, 1fr)`,
+                      gridTemplateRows: `repeat(${rows}, 1fr)`,
+                      gap: 12,
+                      height: '100%',
+                      overflow: 'hidden',
+                    }
+              }
+            >
+              {cameras.map((camera) => (
+                <Box
+                  key={camera.name}
+                  style={
+                    compact
+                      ? { width: '100%', aspectRatio: '16 / 9', flex: '0 0 auto' }
+                      : { minWidth: 0, minHeight: 0 }
+                  }
+                >
+                  <ImportThumbnail name={camera.name} />
+                </Box>
+              ))}
+            </Box>
+          </Box>
+        </Box>
+
+        <Box style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+          <Box>
+            <SectionLabel>
+              Cameras{' '}
+              <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
+                · order fixed by the file numbering
+              </Text>
+            </SectionLabel>
+            <Box style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+              {cameras.map((camera) => (
+                <Box
+                  key={camera.name}
+                  p={10}
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    borderRadius: 'var(--mantine-radius-lg)',
+                    border: '1px solid var(--mantine-color-dark-4)',
+                    background: 'var(--rc-panel)',
+                  }}
+                >
+                  <Box
+                    style={{
+                      width: 26,
+                      height: 26,
+                      flex: 'none',
+                      borderRadius: 7,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      fontFamily: 'var(--mantine-font-family-headings)',
+                      fontWeight: 600,
+                      fontSize: '0.78rem',
+                      background: camera.index === 0 ? 'rgba(167,139,250,0.14)' : 'var(--rc-input)',
+                      color:
+                        camera.index === 0
+                          ? 'var(--rc-accent-bright)'
+                          : 'var(--mantine-color-dark-2)',
+                      border: `1px solid ${
+                        camera.index === 0
+                          ? 'rgba(167,139,250,0.35)'
+                          : 'var(--mantine-color-dark-4)'
+                      }`,
+                    }}
+                  >
+                    {camera.index}
+                  </Box>
+                  <Box style={{ flex: 1, minWidth: 0 }}>
+                    <Group gap={7} wrap="nowrap">
+                      <Text fw={600} fz="0.81rem">
+                        {camera.name}
+                      </Text>
+                      {camera.index === 0 && (
+                        <Text
+                          fz="0.625rem"
+                          c="var(--rc-accent-bright)"
+                          style={{ whiteSpace: 'nowrap' }}
+                        >
+                          ★ anchor
+                        </Text>
+                      )}
+                    </Group>
+                    <Text
+                      fz="0.625rem"
+                      c="dark.3"
+                      className="rc-tnum"
+                      style={{ whiteSpace: 'nowrap' }}
+                    >
+                      {camera.width}×{camera.height} · {camera.fps} fps
+                    </Text>
+                  </Box>
+                </Box>
+              ))}
+            </Box>
+          </Box>
+
+          <Box
+            p={16}
+            style={{
+              borderRadius: 'var(--mantine-radius-xl)',
+              border: '1px solid var(--mantine-color-dark-4)',
+              background: '#101014',
+            }}
+          >
+            <SectionLabel>Imported configuration</SectionLabel>
+            <Text fz="0.78rem" c="dark.2" style={{ lineHeight: 1.55 }}>
+              Resolution and frame rate were read from the videos; capture and reordering are
+              disabled for imported sessions.
+            </Text>
+            {error && (
+              <Text fz="0.78rem" c="var(--rc-error)" mt={10}>
+                {error}
+              </Text>
+            )}
+            <Button
+              color="violet"
+              fullWidth
+              mt={13}
+              loading={confirming}
+              onClick={() => void confirm()}
+            >
+              Continue to Intrinsics
+            </Button>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
+  );
+}
+
+// Camera Setup: routes on the session mode (ADR-0031) — an imported session gets
+// the read-only variant (thumbnails, fixed order); a realtime one the live flow.
+export function CameraSetupScreen() {
+  const session = useAppSelector(selectSession);
+  if (session?.mode === 'load-from-files') {
+    return <ImportedCameraSetup session={session} />;
+  }
+  return <LiveCameraSetup />;
+}
+
+// Live Camera Setup: preview (left) + the shared capture configuration and index order
 // (right). The capture format is uniform across the array (spec camera-detection-config):
 // resolution / fps are intersected over all detected cameras, the resize factor derives
 // an even output size, and Apply persists the config + republishes (cascade).
-export function CameraSetupScreen() {
+function LiveCameraSetup() {
   const dispatch = useAppDispatch();
   const detected = useAppSelector(selectDetectedCameras);
   const detectStatus = useAppSelector(selectDetectStatus);
@@ -450,8 +742,8 @@ export function CameraSetupScreen() {
 
             {noCommon ? (
               <Text fz="0.78rem" c="var(--rc-warning)">
-                No resolution is supported by all detected cameras. Remove the incompatible camera or
-                re-detect.
+                No resolution is supported by all detected cameras. Remove the incompatible camera
+                or re-detect.
               </Text>
             ) : (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
@@ -516,8 +808,8 @@ export function CameraSetupScreen() {
                   />
                   {fpsOptions.length > 0 && (
                     <Text fz="0.625rem" c="dark.3" mt={6} style={{ lineHeight: 1.5 }}>
-                      Rates at or below the camera's native max for this resolution.
-                      Lower rates are paced by the service (fewer frames, less USB load).
+                      Rates at or below the camera's native max for this resolution. Lower rates are
+                      paced by the service (fewer frames, less USB load).
                     </Text>
                   )}
                 </Box>
@@ -543,14 +835,17 @@ export function CameraSetupScreen() {
               align="flex-start"
               style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}
             >
-              <IconInfoCircle size={13} color="var(--rc-accent)" style={{ flex: 'none', marginTop: 1 }} />
+              <IconInfoCircle
+                size={13}
+                color="var(--rc-accent)"
+                style={{ flex: 'none', marginTop: 1 }}
+              />
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
                 Calibrated in native; the factor applies on export (K_out = s·K). Applying a new
                 resolution invalidates all intrinsics (cascade).
               </Text>
             </Group>
           </Box>
-
         </Box>
       </Box>
     </Box>

@@ -6,22 +6,19 @@ import {
   computeExtrinsic,
   computeIntrinsic,
   configureCameras,
+  confirmCameraSetup,
   createSession,
   defineBoard,
   type ExtrinsicComputeParams,
   fetchSession,
   fetchSessions,
+  importSession,
   openSession,
   reorderCameras,
   validateExtrinsic,
   validateIntrinsic,
 } from '@/transport/httpClient';
-import type {
-  BoardConfigRequest,
-  ConfigRequest,
-  Session,
-  SessionSummary,
-} from '@/transport/types';
+import type { BoardConfigRequest, ConfigRequest, Session, SessionSummary } from '@/transport/types';
 
 type Status = 'idle' | 'loading' | 'ready' | 'error';
 
@@ -55,6 +52,19 @@ export const openSessionThunk = createAsyncThunk('session/open', (sessionId: str
   openSession(sessionId),
 );
 
+// Import a pre-recorded session ZIP (ADR-0031): the service ingests it and makes
+// it active; the rail then follows the persisted step to Target Config.
+export const importSessionThunk = createAsyncThunk(
+  'session/import',
+  ({ file, sessionId }: { file: File; sessionId: string }) => importSession(file, sessionId),
+);
+
+// Load-from-files "Continue" on Camera Setup: unlocks Intrinsics without
+// rebuilding the camera configs (they derive from the imported videos).
+export const confirmCameraSetupThunk = createAsyncThunk('session/confirmCameras', () =>
+  confirmCameraSetup(),
+);
+
 export const applyCameraConfig = createAsyncThunk('session/applyConfig', (request: ConfigRequest) =>
   configureCameras(request),
 );
@@ -76,13 +86,15 @@ export const validateExtrinsicThunk = createAsyncThunk('session/validateExtrinsi
   validateExtrinsic(),
 );
 
-export const applyBoardConfig = createAsyncThunk('session/applyBoard', (request: BoardConfigRequest) =>
-  defineBoard(request),
+export const applyBoardConfig = createAsyncThunk(
+  'session/applyBoard',
+  (request: BoardConfigRequest) => defineBoard(request),
 );
 
 export const computeIntrinsicThunk = createAsyncThunk(
   'session/computeIntrinsic',
-  ({ camera, params }: { camera: string; params?: ComputeParams }) => computeIntrinsic(camera, params),
+  ({ camera, params }: { camera: string; params?: ComputeParams }) =>
+    computeIntrinsic(camera, params),
 );
 
 export const computeExtrinsicThunk = createAsyncThunk(
@@ -112,6 +124,12 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(openSessionThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(importSessionThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(confirmCameraSetupThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(applyCameraConfig.fulfilled, (state, action) => {

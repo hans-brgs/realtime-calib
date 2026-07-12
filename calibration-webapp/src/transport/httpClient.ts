@@ -20,6 +20,23 @@ export interface TokenResponse {
 
 const API_URL = import.meta.env.VITE_API_URL;
 
+// Human message from ANY rejection. Redux Toolkit's unwrap() rejects with a
+// SerializedError — a plain {name, message} object, NOT an Error instance — so
+// an `instanceof Error` check alone silently masks the service's detail behind
+// generic fallbacks. Screens should funnel catch blocks through this.
+export function errorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error && err.message) {
+    return err.message;
+  }
+  if (typeof err === 'object' && err !== null && 'message' in err) {
+    const message = (err as { message?: unknown }).message;
+    if (typeof message === 'string' && message) {
+      return message;
+    }
+  }
+  return fallback;
+}
+
 // Surface the service's error `detail` (FastAPI) — "no camera pair shares >= 5
 // board views" is actionable, "POST /extrinsic/compute failed: 422" is not.
 async function errorFrom(response: Response, fallback: string): Promise<Error> {
@@ -55,6 +72,16 @@ async function postJson<T>(path: string, body?: unknown): Promise<T> {
   return (await response.json()) as T;
 }
 
+// Multipart POST (file upload). No manual Content-Type: the browser sets the
+// multipart boundary itself when handed a FormData body.
+async function postForm<T>(path: string, form: FormData): Promise<T> {
+  const response = await fetch(`${API_URL}${path}`, { method: 'POST', body: form });
+  if (!response.ok) {
+    throw await errorFrom(response, `POST ${path} failed: ${response.status}`);
+  }
+  return (await response.json()) as T;
+}
+
 // null = no active session (ADR-0028): the service returns 404, the webapp lands
 // on the dashboard with the wizard rail locked rather than treating it as an error.
 export const fetchSession = async (): Promise<Session | null> => {
@@ -83,6 +110,17 @@ export const openSession = (sessionId: string): Promise<Session> =>
 // Host-relative sessions root (e.g. "sessions"), shown live in the create popup.
 export const fetchSessionsLocation = (): Promise<string> =>
   getJson<{ root: string }>('/sessions/location').then((r) => r.root);
+
+// Import a pre-recorded session archive, ZIP or tar (ADR-0031): the service
+// ingests it into a fresh session folder (extract, validate, remux to the
+// canonical layout) and makes it the active session, landing on Target Config.
+// 409 if the name exists, 422 on a contract violation, 400 if not zip/tar.
+export const importSession = (file: File, sessionId: string): Promise<Session> => {
+  const form = new FormData();
+  form.append('file', file);
+  form.append('session_id', sessionId);
+  return postForm<Session>('/sessions/import', form);
+};
 
 export const detectCameras = (): Promise<DetectedCamera[]> =>
   postJson<DetectedCamera[]>('/cameras/detect');
@@ -120,8 +158,7 @@ export const computeIntrinsic = (camera: string, params?: ComputeParams): Promis
 
 // Operator sign-off once every camera has intrinsics: advances the wizard step to
 // extrinsic capture — the rail follows the persisted step, so this IS the navigation.
-export const validateIntrinsic = (): Promise<Session> =>
-  postJson<Session>('/intrinsic/validate');
+export const validateIntrinsic = (): Promise<Session> => postJson<Session>('/intrinsic/validate');
 
 // Preview transcodes (ADR-0027): each recording is transcoded ONCE in the
 // background to an H.264 mp4 re-timed CFR BY INDEX at PREVIEW_FPS — so
@@ -209,7 +246,8 @@ export const stopExtrinsic = (): Promise<{ frames: Record<string, number> }> =>
 
 // Prepare-step knobs forwarded to the extrinsic compute; omitted fields use defaults.
 export interface ExtrinsicComputeParams {
-  stride?: number;
+  // Sharpest groups kept for the solve (ADR-0033); omitted = board-type default.
+  max_groups?: number;
   max_spread_ms?: number;
   min_shared?: number;
 }
@@ -226,11 +264,9 @@ export interface ExtrinsicGroup {
 
 export const fetchExtrinsicGroups = (query?: {
   max_spread_ms?: number;
-  stride?: number;
 }): Promise<{ total: number; groups: ExtrinsicGroup[] }> => {
   const params = new URLSearchParams();
   if (query?.max_spread_ms !== undefined) params.set('max_spread_ms', String(query.max_spread_ms));
-  if (query?.stride !== undefined) params.set('stride', String(query.stride));
   const suffix = params.size > 0 ? `?${params.toString()}` : '';
   return getJson<{ total: number; groups: ExtrinsicGroup[] }>(`/extrinsic/groups${suffix}`);
 };
@@ -260,8 +296,7 @@ export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
 // set_frame puts the origin + axes on a group's board with its normal on the up axis
 // (the single framing gesture); rotate turns the frame ±90° about an axis.
 export type OrientRequest =
-  | { op: 'set_frame'; group: number }
-  | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number };
+  { op: 'set_frame'; group: number } | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number };
 
 export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/orient', body);
@@ -274,8 +309,7 @@ export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
 
 // Operator sign-off on the solved array: advances the wizard step to Export —
 // the rail follows the persisted step, so this transition IS the navigation.
-export const validateExtrinsic = (): Promise<Session> =>
-  postJson<Session>('/extrinsic/validate');
+export const validateExtrinsic = (): Promise<Session> => postJson<Session>('/extrinsic/validate');
 
 // Calibration export (spec calibration-export, ADR-0026). Targets are all optional
 // ('caliscope' TOML + platform JSONs); the backend owns the catalog and preview.
@@ -299,6 +333,10 @@ export interface ExportTarget {
 export const reorderCameras = (devicePaths: string[]): Promise<Session> =>
   postJson<Session>('/cameras/order', { device_paths: devicePaths });
 
+// Advance past Camera Setup WITHOUT rebuilding the configs (load-from-files:
+// the cameras derive from the imported videos — this just unlocks Intrinsics).
+export const confirmCameraSetup = (): Promise<Session> => postJson<Session>('/cameras/confirm');
+
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>
   getJson<{ targets: ExportTarget[] }>('/export/conventions').then((r) => r.targets);
 
@@ -309,10 +347,7 @@ export interface PreviewFile {
   content: string;
 }
 
-export const previewExport = (
-  formats: string[],
-  units: 'mm' | 'm',
-): Promise<PreviewFile[]> =>
+export const previewExport = (formats: string[], units: 'mm' | 'm'): Promise<PreviewFile[]> =>
   postJson<{ files: PreviewFile[] }>('/export/preview', { formats, units }).then((r) => r.files);
 
 // Persist the export config (units + targets) on the session (restored on reopen).

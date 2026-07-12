@@ -17,9 +17,8 @@ import { setCaptureView } from '@/transport/httpClient';
 
 // Top-level shell: persistent Topbar + FSM rail + scrollable main. The rail replaces
 // the horizontal Stepper. `view` is volatile UI state (free navigation between
-// non-locked stages, plus the transient 'load' entry); it syncs to the persisted FSM
-// step on load/transition but does not itself mutate server state (ADR-0010, spec
-// wizard-navigation).
+// non-locked stages); it syncs to the persisted FSM step on load/transition but
+// does not itself mutate server state (ADR-0010, spec wizard-navigation).
 export function WizardShell() {
   const status = useAppSelector(selectSessionStatus);
   const stages = useAppSelector(selectStages);
@@ -54,9 +53,7 @@ export function WizardShell() {
     closeDrawer();
   };
 
-  // The Load screen is a sub-flow of the session entry — no rail item of its own, so
-  // keep 'Session' highlighted while it is showing.
-  const railActiveView: ViewId = view === 'load' ? 'session' : view;
+  const railActiveView: ViewId = view;
 
   return (
     <Flex direction="column" style={{ height: '100dvh', overflow: 'hidden' }}>
@@ -87,8 +84,8 @@ export function WizardShell() {
             <Center h="100%">
               <Text c="red">Failed to load the session.</Text>
             </Center>
-          ) : status === 'ready' || view === 'session' || view === 'load' ? (
-            <StepContent view={view} onNavigate={navigate} />
+          ) : status === 'ready' || view === 'session' ? (
+            <StepContent view={view} />
           ) : (
             <Center h="100%">
               <Loader />
@@ -108,7 +105,12 @@ export function WizardShell() {
         styles={{ body: { height: '100%', padding: 0 }, content: { background: 'var(--rc-bar)' } }}
         zIndex={1000}
       >
-        <WizardRail items={items} activeView={railActiveView} onNavigate={navigate} collapsed={false} />
+        <WizardRail
+          items={items}
+          activeView={railActiveView}
+          onNavigate={navigate}
+          collapsed={false}
+        />
       </Drawer>
     </Flex>
   );

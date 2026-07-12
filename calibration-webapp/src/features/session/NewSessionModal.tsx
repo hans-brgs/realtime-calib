@@ -4,12 +4,13 @@ import { useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { createSessionThunk, selectRecentSessions } from '@/features/session/sessionSlice';
-import { fetchSessionsLocation } from '@/transport/httpClient';
+import { errorMessage, fetchSessionsLocation } from '@/transport/httpClient';
 
 // Mirror of the service-side rule (calibration_service.session.manager, ADR-0028):
 // the id becomes a folder name — first char alphanumeric, then [A-Za-z0-9._-],
 // max 64. Client-side validation is UX only; the service stays the source of truth.
-const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+// Shared with the import modal (ADR-0031), which prefills a name from the ZIP.
+export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 interface NewSessionModalProps {
   opened: boolean;
@@ -57,7 +58,7 @@ export function NewSessionModal({ opened, onClose }: NewSessionModalProps) {
       await dispatch(createSessionThunk(trimmed)).unwrap();
       onClose();
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'could not create the session');
+      setError(errorMessage(err, 'could not create the session'));
     } finally {
       setSubmitting(false);
     }
