@@ -110,3 +110,10 @@ photogrammetry — I'd love your feedback.
 - **Code & issues:** [GitHub](https://github.com/hans-brgs/realtime-calib)
 
 Tell me what would make it useful for *your* setup.
+
+:::note Transparency & acknowledgements
+
+- Inspired by [Caliscope](https://github.com/mprib/caliscope), created by Mac Prible.
+- I use Claude Code (Opus 4.8) to assist me in writing the code.
+
+:::

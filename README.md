@@ -46,6 +46,7 @@ Documentation (ADRs, entity and feature specs, roadmap) lives in the separate
 **spec-first / plan-review-implement / systematic-ADR** workflow described in the
 `CLAUDE.md` files (root and per service).
 
-## Development
+## Transparency & acknowledgements
 
-<!-- TODO (Hans): document the use of Claude Code as the coding agent here. -->
+- Inspired by [Caliscope](https://github.com/mprib/caliscope), created by Mac Prible.
+- I use Claude Code (Opus 4.8) to assist me in writing the code.
