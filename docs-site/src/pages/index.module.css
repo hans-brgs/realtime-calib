@@ -1,6 +1,6 @@
 .hero {
   position: relative;
-  padding: 7.5rem 0 6.5rem;
+  padding: 7.5rem 0 5rem;
   text-align: center;
   background:
     radial-gradient(60% 80% at 50% -10%, rgba(139, 92, 246, 0.22), transparent 70%),
@@ -61,6 +61,26 @@
   color: #ffffff;
 }
 
+/* Hero showcase video */
+.videoFrame {
+  position: relative;
+  max-width: 960px;
+  margin: 3.5rem auto 0;
+  border-radius: 16px;
+  overflow: hidden;
+  border: 1px solid var(--rc-border-strong, #2a2a32);
+  background: var(--rc-surface, #16161b);
+  box-shadow:
+    0 32px 64px -24px rgba(0, 0, 0, 0.75),
+    0 0 90px -32px rgba(139, 92, 246, 0.45);
+}
+
+.video {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
 /* Support callout */
 .support {
   padding: 4rem 0 5rem;
@@ -109,5 +129,10 @@
 
   .eyebrow {
     margin-bottom: 1.75rem;
+  }
+
+  .videoFrame {
+    margin-top: 2.5rem;
+    border-radius: 12px;
   }
 }
