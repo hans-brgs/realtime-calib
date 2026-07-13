@@ -2,7 +2,6 @@ import type {ReactNode} from 'react';
 import clsx from 'clsx';
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
-import HomepageFeatures from '@site/src/components/HomepageFeatures';
 import UsedBy from '@site/src/components/UsedBy';
 import Heading from '@theme/Heading';
 
@@ -35,6 +34,17 @@ function HomepageHero() {
             href="https://github.com/hans-brgs/realtime-calib">
             ★ Star on GitHub
           </Link>
+        </div>
+        <div className={styles.videoFrame}>
+          <video
+            className={styles.video}
+            src="/img/hero.mp4"
+            poster="/img/hero-poster.png"
+            autoPlay
+            muted
+            loop
+            playsInline
+          />
         </div>
       </div>
     </header>
@@ -85,7 +95,6 @@ export default function Home(): ReactNode {
       description="Real-time multi-camera intrinsic and extrinsic calibration with live feedback and Caliscope-compatible, engine-ready exports.">
       <HomepageHero />
       <main>
-        <HomepageFeatures />
         <UsedBy />
         <SupportCallout />
       </main>
