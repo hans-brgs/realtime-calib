@@ -14,6 +14,24 @@ This page is a scaffold. The detailed, screenshot-driven walkthrough will be
 filled in as the wizard steps reach their hi-fi passes.
 :::
 
+## First access from a tablet or phone {#first-access}
+
+The stack serves HTTPS over your LAN with a local **mkcert** certificate. The
+host machine trusts it, but other devices don't know that certificate authority
+yet — so the first time you open the app from a **tablet or phone**, the browser
+warns **"Your connection is not private"** (`NET::ERR_CERT_AUTHORITY_INVALID`).
+
+This is expected and safe on your own network: the connection is still
+encrypted; the warning is only about *who issued* the certificate, not a real
+interception. To continue:
+
+- **Chrome / Edge / Android:** tap **Advanced**, then **Proceed to `<HOST_IP>` (unsafe)**.
+- **Safari / iOS:** tap **Show Details**, then **visit this website**.
+
+To remove the warning permanently, install the mkcert root CA on the device.
+
+![Bypassing the browser TLS warning: tap Advanced, then Proceed](/img/cert-warning.gif)
+
 ## 1. Start or load a session
 
 Open the web app — you land on the **Dashboard** ("Welcome to the calibration
