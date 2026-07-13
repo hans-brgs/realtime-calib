@@ -61,14 +61,14 @@ around it:
 ## What realtime-calib does
 
 So I built **realtime-calib**. In one line: real-time, multi-camera calibration
-you drive from any device.
+you drive from your desktop or tablet.
 
 - **One pass, live.** Capture, board detection, quality feedback and the solve
   happen in a single flow — [what you see is what gets
   calibrated](/docs/guides/intrinsic-calibration), no pre-recording.
-- **Headless, any device.** The service runs in Docker on the machine the
+- **Headless, browser-driven.** The service runs in Docker on the machine the
   cameras are plugged into — no desktop on that host — and you drive everything
-  from a browser on any device on the local network. (Here's the
+  from a browser on a laptop or tablet on the local network. (Here's the
   [architecture](/docs/architecture/overview).)
 - **Local, private, CPU-only.** No cloud, no GPU; camera streams never leave
   your network.
