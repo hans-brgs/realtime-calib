@@ -24,13 +24,7 @@ landscape today — phone &amp; portrait coming soon) and follows a wizard: came
 config → board(s) → per-camera intrinsic calibration → extrinsic calibration →
 3D review → export.
 
-<p align="center">
-  <video
-    src="https://raw.githubusercontent.com/hans-brgs/realtime-calib/main/docs-site/static/img/hero.mp4"
-    poster="https://raw.githubusercontent.com/hans-brgs/realtime-calib/main/docs-site/static/img/hero-poster.png"
-    controls muted loop width="760">
-  </video>
-</p>
+https://github.com/user-attachments/assets/757728c1-5a39-4f21-b288-5ca7d26c1a18
 
 > If the video doesn't play inline on GitHub, watch it on the
 > [project site](https://realtime-calib.hans-brgs.dev).
