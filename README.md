@@ -1,8 +1,23 @@
-# realtime-calib
+<p align="center">
+  <img src="https://raw.githubusercontent.com/hans-brgs/realtime-calib/main/docs-site/static/img/logo.png" alt="realtime-calib logo" width="110">
+</p>
 
-A **local**, **real-time** multi-camera calibration application: intrinsics
-(focal length, distortion) + extrinsics (6-DoF position/orientation) for a set of
-USB cameras, with live feedback and export of **Caliscope-compatible** files.
+<h1 align="center">realtime-calib</h1>
+
+<p align="center">
+  <strong>Local, real-time multi-camera calibration</strong> — intrinsics (focal
+  length, distortion) and 6-DoF extrinsics for a rig of USB cameras, with live
+  feedback and Caliscope-compatible exports.
+</p>
+
+<p align="center">
+  <a href="LICENSE"><img alt="License: AGPL-3.0" src="https://img.shields.io/badge/license-AGPL--3.0-blue.svg"></a>
+  <a href="https://github.com/hans-brgs/realtime-calib/releases"><img alt="Latest release" src="https://img.shields.io/github/v/release/hans-brgs/realtime-calib?display_name=tag&color=8b5cf6"></a>
+  <img alt="Platform: Linux" src="https://img.shields.io/badge/platform-Linux-1793D1?logo=linux&logoColor=white">
+  <img alt="Runs in Docker" src="https://img.shields.io/badge/Docker-ready-2496ED?logo=docker&logoColor=white">
+  <a href="https://realtime-calib.hans-brgs.dev"><img alt="Documentation" src="https://img.shields.io/badge/docs-online-8b5cf6"></a>
+  <a href="https://github.com/hans-brgs/realtime-calib/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/hans-brgs/realtime-calib?style=social"></a>
+</p>
 
 An operator starts the project, opens the webapp (desktop or **tablet** in
 landscape) and follows a wizard: camera config → board(s) → per-camera intrinsic
@@ -67,7 +82,9 @@ interception. To continue:
 
 To remove the warning for good, install the mkcert root CA on the device.
 
-<!-- cert-warning walkthrough video: insert here when ready -->
+<p align="center">
+  <img src="https://raw.githubusercontent.com/hans-brgs/realtime-calib/main/docs-site/static/img/cert-warning.gif" alt="Bypassing the browser TLS warning: Advanced, then Proceed" width="480">
+</p>
 
 ## Documentation
 
