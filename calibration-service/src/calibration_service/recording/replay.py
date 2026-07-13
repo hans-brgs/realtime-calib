@@ -1,5 +1,5 @@
 """Recorded-capture introspection shared by the preview transcode (ADR-0027) and
-the pre-recorded session import (ADR-0031)."""
+the pre-recorded session import (ADR-0035)."""
 
 from __future__ import annotations
 
@@ -70,7 +70,7 @@ def video_properties(path: Path) -> VideoProperties:
     """Probe a video file for its native size, frame rate and frame count.
 
     Mirrors :func:`frame_count` (a single ``cv2.VideoCapture`` open). Used by the
-    import pipeline (ADR-0031) to derive a camera's config from an uploaded video —
+    import pipeline (ADR-0035) to derive a camera's config from an uploaded video —
     no live device involved. Raises ``ValueError`` if the file cannot be opened.
     """
     capture = cv2.VideoCapture(str(path))

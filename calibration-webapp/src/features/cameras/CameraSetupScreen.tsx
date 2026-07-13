@@ -238,7 +238,7 @@ function ImportThumbnail({ name }: { name: string }) {
   );
 }
 
-// Read-only Camera Setup for an imported session (ADR-0031): the cameras derive
+// Read-only Camera Setup for an imported session (ADR-0035): the cameras derive
 // from the uploaded videos — nothing to detect, reordering disabled (the camera
 // number in the file name fixes the order, cam_0 = anchor). Continue advances the
 // wizard without rebuilding the configs (/cameras/confirm).
@@ -442,7 +442,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
   );
 }
 
-// Camera Setup: routes on the session mode (ADR-0031) — an imported session gets
+// Camera Setup: routes on the session mode (ADR-0035) — an imported session gets
 // the read-only variant (thumbnails, fixed order); a realtime one the live flow.
 export function CameraSetupScreen() {
   const session = useAppSelector(selectSession);

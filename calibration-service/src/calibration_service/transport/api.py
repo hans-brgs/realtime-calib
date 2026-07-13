@@ -428,7 +428,7 @@ async def import_session_route(
     file: UploadFile,
     session_id: str = Form(),
 ) -> SessionOut:
-    """Import a pre-recorded session archive (ZIP or tar) and activate it (ADR-0031).
+    """Import a pre-recorded session archive (ZIP or tar) and activate it (ADR-0035).
 
     The archive is spooled to disk next to the sessions (same volume as the
     destination), then the synchronous ingest (extract + validate + remux +
@@ -501,7 +501,7 @@ async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut
 
 @router.post("/cameras/confirm", response_model=SessionOut)
 async def confirm_camera_setup_route(request: Request) -> SessionOut:
-    """Advance past Camera Setup without rebuilding the configs (ADR-0031).
+    """Advance past Camera Setup without rebuilding the configs (ADR-0035).
 
     Load-from-files flow: the cameras derive from the imported videos, so
     /cameras/config (which rebuilds and drops them) is not applicable — this

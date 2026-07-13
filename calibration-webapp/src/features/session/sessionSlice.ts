@@ -51,7 +51,7 @@ export const openSessionThunk = createAsyncThunk('session/open', (sessionId: str
   openSession(sessionId),
 );
 
-// Import a pre-recorded session ZIP (ADR-0031): the service ingests it and makes
+// Import a pre-recorded session ZIP (ADR-0035): the service ingests it and makes
 // it active; the rail then follows the persisted step to Target Config.
 export const importSessionThunk = createAsyncThunk(
   'session/import',

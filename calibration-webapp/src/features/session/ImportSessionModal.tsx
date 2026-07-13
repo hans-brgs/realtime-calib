@@ -47,7 +47,7 @@ interface ImportSessionModalProps {
   onClose: () => void;
 }
 
-// Expected archive layout (the ADR-0031 import contract), shown on hover.
+// Expected archive layout (the ADR-0035 import contract), shown on hover.
 const ARCHIVE_TREE = `my-session.zip
 ├── intrinsics/          required
 │   ├── cam_0.mp4
@@ -88,7 +88,7 @@ function infoTooltip() {
   );
 }
 
-// Second entry mode (ADR-0031, spec replay-recalibration): upload an archive
+// Second entry mode (ADR-0035, spec replay-recalibration): upload an archive
 // (ZIP or tar) of pre-recorded videos (intrinsics/cam_<n>.*, extrinsics/cam_<n>.*,
 // optional Caliscope timestamps.csv). The service ingests it into a canonical
 // session folder and makes it active; its step lands on intrinsic_board, so the
