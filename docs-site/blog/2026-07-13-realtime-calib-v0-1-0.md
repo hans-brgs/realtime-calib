@@ -76,11 +76,10 @@ Caliscope, the TOML output keeps its semantics — here's a
 ## This is early — that's the point
 
 v0.1.0 works end to end, but it's a **0.x** release: the config and export
-formats may still move before 1.0. It's also **desktop- and tablet-first for
-now** — phone and portrait layouts aren't there yet and are on the list for a
-later release; on a desktop or a landscape tablet, the full flow works end to
-end. What I want most right now is people running it on **their own rigs** and
-telling me what breaks or what's missing.
+formats may still move before 1.0. It runs on your **laptop or tablet (landscape)
+today, with phone and portrait support coming soon** — on a desktop or landscape
+tablet, the full flow works end to end. What I want most right now is people
+running it on **their own rigs** and telling me what breaks or what's missing.
 
 - **Get started:** [the docs](/docs/intro)
 - **Code & issues:** [GitHub](https://github.com/hans-brgs/realtime-calib)
