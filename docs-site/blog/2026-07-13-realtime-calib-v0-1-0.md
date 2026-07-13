@@ -67,7 +67,7 @@ Tap **Advanced → Proceed** (Chrome/Android) or **Show Details → visit this
 website** (Safari/iOS) to continue. Full steps in the
 [getting-started guide](/docs/getting-started/quickstart#first-access).
 
-{/* cert-warning walkthrough video: insert here when ready */}
+![Bypassing the browser TLS warning: Advanced, then Proceed](/img/cert-warning.gif)
 
 Then follow [the getting-started guide](/docs/intro). If you already use
 Caliscope, the TOML output keeps its semantics — here's a

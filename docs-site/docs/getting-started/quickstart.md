@@ -30,7 +30,7 @@ interception. To continue:
 
 To remove the warning permanently, install the mkcert root CA on the device.
 
-{/* cert-warning walkthrough video: insert here when ready */}
+![Bypassing the browser TLS warning: tap Advanced, then Proceed](/img/cert-warning.gif)
 
 ## 1. Start or load a session
 
