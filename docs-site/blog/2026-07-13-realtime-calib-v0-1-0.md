@@ -59,6 +59,16 @@ docker compose up --build
 # open https://localhost  ·  from a tablet: https://<HOST_IP>
 ```
 
+Opening the app from a tablet the first time, the browser warns **"Your
+connection is not private"** (`NET::ERR_CERT_AUTHORITY_INVALID`). That's
+expected: the stack serves HTTPS with a local mkcert certificate your tablet
+doesn't know yet — the connection is still encrypted and stays on your network.
+Tap **Advanced → Proceed** (Chrome/Android) or **Show Details → visit this
+website** (Safari/iOS) to continue. Full steps in the
+[getting-started guide](/docs/getting-started/quickstart#first-access).
+
+{/* cert-warning walkthrough video: insert here when ready */}
+
 Then follow [the getting-started guide](/docs/intro). If you already use
 Caliscope, the TOML output keeps its semantics — here's a
 [side-by-side comparison](/docs/realtime-calib-vs-caliscope).
