@@ -29,6 +29,9 @@ dist/
 # --- Calibration session folders (runtime data, kept out of the repo) ---
 sessions/
 
+# --- Design source (Claude Design exports, mockups, screenshots) — kept local ---
+design/
+
 # --- OS / editors ---
 .DS_Store
 Thumbs.db
