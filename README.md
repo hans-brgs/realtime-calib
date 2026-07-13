@@ -20,8 +20,9 @@
 </p>
 
 An operator starts the project, opens the webapp (desktop or **tablet** in
-landscape) and follows a wizard: camera config → board(s) → per-camera intrinsic
-calibration → extrinsic calibration → 3D review → export.
+landscape today — phone &amp; portrait coming soon) and follows a wizard: camera
+config → board(s) → per-camera intrinsic calibration → extrinsic calibration →
+3D review → export.
 
 <p align="center">
   <video
