@@ -5,6 +5,7 @@ import {
   type CaptureStep,
   initialCaptureWizardState,
 } from '@/features/capture/captureWizard';
+import { errorMessage } from '@/transport/httpClient';
 
 interface UseCaptureWizardOptions {
   initialStep: CaptureStep;
@@ -58,7 +59,7 @@ export function useCaptureWizard({
       await start();
       dispatch({ type: 'START' });
     } catch (err) {
-      dispatch({ type: 'START_FAILED', message: err instanceof Error ? err.message : 'start failed' });
+      dispatch({ type: 'START_FAILED', message: errorMessage(err, 'start failed') });
     }
   };
 
@@ -74,7 +75,7 @@ export function useCaptureWizard({
       await compute();
       dispatch({ type: 'COMPUTE_OK' });
     } catch (err) {
-      dispatch({ type: 'COMPUTE_FAILED', message: err instanceof Error ? err.message : 'compute failed' });
+      dispatch({ type: 'COMPUTE_FAILED', message: errorMessage(err, 'compute failed') });
     }
   };
 

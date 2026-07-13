@@ -130,11 +130,11 @@ Une décision architecturale (bibliothèque, pattern, trade-off de perf, format 
 
 ## 🧪 Référence Caliscope
 
-Caliscope (BSD-2-Clause) est la **référence conceptuelle** pour la logique de calibration. Points d'ancrage validés :
-- Intrinsèque : `cv2.aruco.calibrateCameraCharucoExtended`, flags `CALIB_USE_INTRINSIC_GUESS + CALIB_RATIONAL_MODEL + CALIB_FIX_ASPECT_RATIO`, `perViewErrors` exposés (utilisés pour l'outlier-rejection, ADR-0009).
+Caliscope (BSD-2-Clause) est la **référence conceptuelle** pour la logique de calibration. Points d'ancrage validés (**sur les sources**, main + v0.5.4, 2026-07-12) :
+- Intrinsèque : Caliscope appelle `cv2.calibrateCamera` **sans aucun flag de modèle** (ADR-0032) → 5 coefficients `[k1, k2, p1, p2, k3]`, aspect libre. Notre implémentation : `cv2.calibrateCameraExtended` + `CALIB_USE_INTRINSIC_GUESS` seul (le variant Extended expose `perViewErrors` pour l'outlier-rejection, ADR-0009).
 - Extrinsèque : PnP/`stereoCalibrate` pairwise, chaînage transitif depuis une ancre, bundle adjustment `scipy.least_squares` sur la capture volume.
 - OpenCV mainline ≥ 4.7 (ArUco/ChArUco intégrés), API `CharucoDetector` (≥ 4.8).
-- Format de sortie : TOML par caméra (`port`, `size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation`, `error`, `grid_count`) + export aniposelib. Cf. ADR-0002 et spec `camera-array-config`.
+- Format de sortie : TOML par caméra (`port`, `size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation` en **mètres**, `error`, `grid_count` = nombre de **vues**). Cf. ADR-0002 et spec `camera-array-config`.
 
 **Toujours grounder les claims sur la doc/le code Caliscope plutôt que sur des suppositions.**
 

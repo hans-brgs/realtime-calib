@@ -36,6 +36,7 @@ import {
 } from '@/features/session/sessionSlice';
 import { covisibilityCleared, selectCovisibility } from '@/features/telemetry/telemetrySlice';
 import {
+  errorMessage,
   type ExtrinsicGroup,
   type ExtrinsicResultPayload,
   extrinsicPreviewUrl,
@@ -203,7 +204,14 @@ function GroupScrubber({
           label={null}
           color="violet"
         />
-        <Text className="rc-tnum" fz="0.72rem" c="dark.2" w={150} ta="right" style={{ flex: 'none' }}>
+        <Text
+          className="rc-tnum"
+          fz="0.72rem"
+          c="dark.2"
+          w={150}
+          ta="right"
+          style={{ flex: 'none' }}
+        >
           group {Math.min(index, max)} / {max} · {current.spread_ms.toFixed(1)} ms
         </Text>
       </Group>
@@ -214,7 +222,14 @@ function GroupScrubber({
 function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
   return (
     <>
-      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
+      <Text
+        fz="0.66rem"
+        fw={600}
+        c="dark.3"
+        tt="uppercase"
+        mb="md"
+        style={{ letterSpacing: '0.07em' }}
+      >
         Array result
       </Text>
       <Text fz="0.72rem" c="dark.2">
@@ -274,6 +289,9 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
 function ExtrinsicInner() {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
+  // Imported session (ADR-0031): capture is neutralised — the sub-wizard starts
+  // on Prepare (the sweep came with the archive) and never offers recording.
+  const imported = session?.mode === 'load-from-files';
   const covisibility = useAppSelector(selectCovisibility);
   const cameras = session?.cameras ?? [];
   const cameraNames = cameras.map((c) => c.name);
@@ -284,17 +302,18 @@ function ExtrinsicInner() {
   const extrinsicBoard = session?.extrinsic_board ?? session?.intrinsic_board ?? null;
   const markerBoard = extrinsicBoard?.board_type === 'aruco';
 
-  // Prepare state: synchronized groups + the compute knobs (ADR-0023).
+  // Prepare state: synchronized groups + the compute knobs (ADR-0023/0033).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
   const [groupIndex, setGroupIndex] = useState(0);
-  const [stride, setStride] = useState(1);
+  // Sharpest groups kept by the solve (ADR-0033); default = board-type budget.
+  const [maxGroups, setMaxGroups] = useState(markerBoard ? 240 : 80);
   const [minShared, setMinShared] = useState(5);
   const [maxSpreadMs, setMaxSpreadMs] = useState<number | ''>('');
   const [result, setResult] = useState<ExtrinsicResultPayload | null>(null);
 
   // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
   const wizard = useCaptureWizard({
-    initialStep: allDone ? 'review' : 'capture',
+    initialStep: allDone ? 'review' : imported ? 'prepare' : 'capture',
     start: async () => {
       await startExtrinsic();
       dispatch(covisibilityCleared());
@@ -306,7 +325,7 @@ function ExtrinsicInner() {
     compute: async () => {
       await dispatch(
         computeExtrinsicThunk({
-          stride: stride > 1 ? stride : undefined,
+          max_groups: maxGroups,
           max_spread_ms: maxSpreadMs === '' ? undefined : maxSpreadMs,
           min_shared: minShared,
         }),
@@ -328,6 +347,16 @@ function ExtrinsicInner() {
   useEffect(() => {
     setCaptureView(wizard.step === 'capture' ? 'extrinsic' : 'idle').catch(() => {});
   }, [wizard.step]);
+
+  // Imported session landing on Prepare: open the sweep's previews right away
+  // (usually already transcoded, kicked at import). An intrinsics-only import
+  // resolves to 'missing' -> Prepare with zero groups and Compute disabled.
+  useEffect(() => {
+    if (imported && !allDone) {
+      void transcode.run();
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Refetch the group list when the spread threshold changes (server-side filter,
   // same semantics as the compute). Stride/min-shared are compute-only knobs.
@@ -365,7 +394,7 @@ function ExtrinsicInner() {
     try {
       await dispatch(validateExtrinsicThunk()).unwrap();
     } catch (err) {
-      wizard.setMessage(err instanceof Error ? err.message : 'validate failed');
+      wizard.setMessage(errorMessage(err, 'validate failed'));
     }
   };
 
@@ -374,7 +403,13 @@ function ExtrinsicInner() {
   return (
     <>
       <CaptureWizardLayout
-        stepper={<PhaseStepper phases={PHASES} current={wizard.step} />}
+        stepper={
+          <PhaseStepper
+            // Imported session: the capture phase does not exist (ADR-0031).
+            phases={imported ? PHASES.filter((p) => p.key !== 'capture') : PHASES}
+            current={wizard.step}
+          />
+        }
         main={
           wizard.step === 'review' ? (
             // The Review sub-step IS the 3D array review (spec 3d-extrinsic-review):
@@ -411,7 +446,13 @@ function ExtrinsicInner() {
                   gap={6}
                   px={10}
                   py={5}
-                  style={{ position: 'absolute', top: 12, left: 12, borderRadius: 20, background: 'rgba(9,9,11,0.7)' }}
+                  style={{
+                    position: 'absolute',
+                    top: 12,
+                    left: 12,
+                    borderRadius: 20,
+                    background: 'rgba(9,9,11,0.7)',
+                  }}
                 >
                   <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
                   <Text fz="0.72rem" fw={600}>
@@ -427,7 +468,14 @@ function ExtrinsicInner() {
             <ResultSummary result={result} />
           ) : scrubbing ? (
             <>
-              <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
+              <Text
+                fz="0.66rem"
+                fw={600}
+                c="dark.3"
+                tt="uppercase"
+                mb="md"
+                style={{ letterSpacing: '0.07em' }}
+              >
                 Prepare · from recording
               </Text>
               <Group justify="space-between" mb="md">
@@ -448,11 +496,12 @@ function ExtrinsicInner() {
                 mb="md"
               />
               <NumberInput
-                label="Sampling stride (1 group / N)"
-                value={stride}
-                onChange={(v) => setStride(Math.max(1, Number(v) || 1))}
-                min={1}
-                max={20}
+                label="Max groups (best kept)"
+                description="The solve keeps the sharpest groups, spread over time"
+                value={maxGroups}
+                onChange={(v) => setMaxGroups(Math.max(5, Number(v) || 5))}
+                min={5}
+                max={960}
                 mb="md"
               />
               <NumberInput
@@ -470,7 +519,13 @@ function ExtrinsicInner() {
           ) : (
             <>
               <Group justify="space-between" mb="md">
-                <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" style={{ letterSpacing: '0.07em' }}>
+                <Text
+                  fz="0.66rem"
+                  fw={600}
+                  c="dark.3"
+                  tt="uppercase"
+                  style={{ letterSpacing: '0.07em' }}
+                >
                   Co-visibility
                 </Text>
                 <Text fz="0.72rem" c="dark.2">
@@ -479,8 +534,8 @@ function ExtrinsicInner() {
               </Group>
               <CovisibilityMatrix data={covisibility} />
               <Text fz="0.66rem" c="dark.3" mt="md">
-                Move the board through the shared volume so every pair accumulates
-                joint views — especially pairs involving the anchor.
+                Move the board through the shared volume so every pair accumulates joint views —
+                especially pairs involving the anchor.
               </Text>
             </>
           )
@@ -500,23 +555,22 @@ function ExtrinsicInner() {
               </Button>
               {/* Back to Prepare on the SAME sweep: retune stride/spread/min-shared,
                   then Compute again (the preview mp4s are already there). */}
-              <Button
-                fullWidth
-                variant="light"
-                mb="sm"
-                onClick={() => void transcode.run()}
-              >
+              <Button fullWidth variant="light" mb="sm" onClick={() => void transcode.run()}>
                 Recompute (tune again)
               </Button>
-              <Button
-                fullWidth
-                variant="light"
-                color="gray"
-                leftSection={<IconPlayerRecordFilled size={15} />}
-                onClick={wizard.reRecord}
-              >
-                Re-record sweep
-              </Button>
+              {/* No re-record on an imported session (ADR-0031): there are no live
+                  cameras, and a sweep would overwrite the imported videos. */}
+              {!imported && (
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="gray"
+                  leftSection={<IconPlayerRecordFilled size={15} />}
+                  onClick={wizard.reRecord}
+                >
+                  Re-record sweep
+                </Button>
+              )}
             </>
           ) : scrubbing ? (
             <Button
@@ -559,8 +613,12 @@ function ExtrinsicInner() {
         centered
         title="Computing camera array"
       >
-        <Text fz="0.8rem" c="dark.2" mb="md">
+        <Text fz="0.8rem" c="dark.2">
           Pairwise stereo → chaining from {anchor} → bundle adjustment
+        </Text>
+        <Text fz="0.72rem" c="dark.3" mt={6} mb="md">
+          Board detection scans the recorded sweep first — this can take a while (tens of seconds on
+          long recordings).
         </Text>
         <Group justify="center">
           <Loader size="sm" />
@@ -576,13 +634,22 @@ function ExtrinsicInner() {
       />
 
       {/* Overwrite double-validation: re-recording replaces the sweep + the solve. */}
-      <Modal opened={wizard.overwriteOpen} onClose={wizard.cancelOverwrite} centered title="Overwrite array calibration?">
+      <Modal
+        opened={wizard.overwriteOpen}
+        onClose={wizard.cancelOverwrite}
+        centered
+        title="Overwrite array calibration?"
+      >
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
-          <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
+          <IconAlertTriangle
+            size={20}
+            color="var(--rc-error)"
+            style={{ flex: 'none', marginTop: 2 }}
+          />
           <Text fz="0.84rem" c="dark.1">
-            Re-recording will replace the synchronized sweep and the solved array
-            (error {result?.error.toFixed(3) ?? '—'} px). The existing result is
-            discarded and cannot be recovered.
+            Re-recording will replace the synchronized sweep and the solved array (error{' '}
+            {result?.error.toFixed(3) ?? '—'} px). The existing result is discarded and cannot be
+            recovered.
           </Text>
         </Group>
         <Group justify="flex-end">

@@ -171,7 +171,10 @@ export function WizardRail({
           >
             <IconChevronLeft
               size={16}
-              style={{ transform: collapsed ? 'rotate(180deg)' : 'none', transition: 'transform .18s' }}
+              style={{
+                transform: collapsed ? 'rotate(180deg)' : 'none',
+                transition: 'transform .18s',
+              }}
             />
           </UnstyledButton>
         )}

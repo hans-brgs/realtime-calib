@@ -60,10 +60,16 @@ _BOARDS_SAMPLED = 10
 _DEFAULT_MIN_SHARED = 5
 # Detection budget over the sweep: groups are subsampled evenly to this cap
 # (detection dominates compute cost, like the intrinsic _MAX_DETECT_FRAMES).
-# Single-marker detection is ~10x cheaper than ChArUco AND each view carries only
-# 4 corners, so markers get a much larger budget (more views = the redundancy).
-_MAX_DETECT_GROUPS = 80
-_MAX_DETECT_GROUPS_SINGLE_MARKER = 240
+# Observe first, choose after (ADR-0033): detection runs on a bounded POOL of
+# candidate instants (uniform in time — bounds COST, not quality), then the
+# sharpest groups are KEPT (min member sharpness, temporal bins). Single-marker
+# detection is ~10x cheaper than ChArUco AND each view carries only 4 corners,
+# so markers get much larger budgets (more views = the redundancy).
+_DETECT_POOL = 160
+_DETECT_POOL_SINGLE_MARKER = 960
+# Default keep budgets (the webapp's "Max groups" knob overrides them).
+_MAX_KEPT_GROUPS = 80
+_MAX_KEPT_GROUPS_SINGLE_MARKER = 240
 # Shared boards fed to stereoCalibrate per pair (see _BOARDS_SAMPLED); with only
 # 4 corners per marker view, average over more views.
 _BOARDS_SAMPLED_SINGLE_MARKER = 25
@@ -101,6 +107,9 @@ class GroupDetection:
     ids: NDArray[np.int32]  # (N,) charuco corner ids, ascending
     corners_px: NDArray[np.float64]  # (N, 2) pixel coords (native res)
     corners_norm: NDArray[np.float64]  # (N, 2) undistorted normalized coords
+    # Laplacian variance over the board ROI (BoardDetection.sharpness): drives the
+    # quality-based group selection (ADR-0033). 0.0 in synthetic tests.
+    sharpness: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -131,6 +140,10 @@ class ExtrinsicResult:
     # t-l in board frame) lets the webapp derive the board's local xyz triad.
     points: list[list[float]] = field(default_factory=list)
     point_groups: list[int] = field(default_factory=list)
+    # Group whose board received the operator's "set frame" gesture (ADR-0026):
+    # shown as a marker on the review scrubber. None until the gesture; a fresh
+    # solve resets it (new world), rotate/minimize preserve it (same world).
+    framed_group: int | None = None
     board_quads: list[list[list[float]] | None] = field(default_factory=list)
 
 
@@ -886,39 +899,80 @@ def _detect_group_frames(
         model = models[name]
         capture = cv2.VideoCapture(str(directory / f"{name}.mkv"))
         try:
-            for frame_index, position in sorted(entries):
-                capture.set(cv2.CAP_PROP_POS_FRAMES, frame_index)
+            # SEQUENTIAL walk — never CAP_PROP_POS_FRAMES. Index seeking on a VFR
+            # source (imported remuxes, ADR-0031) lands on the WRONG frame: OpenCV
+            # maps the index to a time via the AVERAGE fps, drifting by whole
+            # frames wherever the real cadence deviates (measured +1..+21 frames
+            # on a real Caliscope import — the sole cause of a 10 px vs 3.7 px
+            # extrinsic RMSE). Sidecar line i MUST mean decoded frame i.
+            wanted = sorted(entries)
+            cursor = 0
+            current = -1
+            while cursor < len(wanted):
                 ok, image = capture.read()
                 if not ok or image is None:
+                    break
+                current += 1
+                if current < wanted[cursor][0]:
                     continue
-                # cv2's stubs type read() loosely; decoded MJPG frames are uint8 BGR.
+                # cv2's stubs type read() loosely; decoded frames are uint8 BGR.
                 detection = detector.detect(image.astype(np.uint8, copy=False))
-                if (
-                    not detection.found
-                    or detection.ids is None
-                    or detection.corners is None
-                    or detection.count < min_corners
-                ):
-                    continue
-                if single_marker:
-                    ids = np.arange(detection.count, dtype=np.int32)  # corner index
-                    pixels = detection.corners.reshape(-1, 2).astype(np.float64)
-                else:
-                    ids = detection.ids.reshape(-1).astype(np.int32)
-                    order = np.argsort(ids)  # sorted: searchsorted in stereo_pairwise
-                    ids = ids[order]
-                    pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
-                normalized = cv2.undistortPoints(
-                    pixels.reshape(-1, 1, 2), model.matrix, model.distortions
-                ).reshape(-1, 2)
-                detections[position][name] = GroupDetection(
-                    ids=ids,
-                    corners_px=pixels,
-                    corners_norm=np.asarray(normalized, np.float64),
+                usable = (
+                    detection.found
+                    and detection.ids is not None
+                    and detection.corners is not None
+                    and detection.count >= min_corners
                 )
+                while cursor < len(wanted) and wanted[cursor][0] == current:
+                    position = wanted[cursor][1]
+                    cursor += 1
+                    if not usable:
+                        continue
+                    assert detection.ids is not None and detection.corners is not None
+                    if single_marker:
+                        ids = np.arange(detection.count, dtype=np.int32)  # corner index
+                        pixels = detection.corners.reshape(-1, 2).astype(np.float64)
+                    else:
+                        ids = detection.ids.reshape(-1).astype(np.int32)
+                        order = np.argsort(ids)  # sorted: searchsorted in stereo_pairwise
+                        ids = ids[order]
+                        pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
+                    normalized = cv2.undistortPoints(
+                        pixels.reshape(-1, 1, 2), model.matrix, model.distortions
+                    ).reshape(-1, 2)
+                    detections[position][name] = GroupDetection(
+                        ids=ids,
+                        corners_px=pixels,
+                        corners_norm=np.asarray(normalized, np.float64),
+                        sharpness=detection.sharpness,
+                    )
         finally:
             capture.release()
     return [group for group in detections if len(group) >= 2]
+
+
+def _select_quality_groups(
+    detections: list[dict[str, GroupDetection]], cap: int
+) -> list[dict[str, GroupDetection]]:
+    """Keep the ~``cap`` sharpest groups, spread over time (ADR-0033).
+
+    A group is only as good as its blurriest member (min sharpness across
+    cameras): motion blur puts corners off by pixels, and one bad view poisons
+    the pair. Temporal bins (like ``_diverse_group_indices``) keep the sweep's
+    spatial diversity; within each bin the sharpest group wins.
+    """
+    if len(detections) <= cap:
+        return detections
+    bins: dict[int, tuple[int, float]] = {}
+    span = len(detections)
+    for position, group in enumerate(detections):
+        score = min(member.sharpness for member in group.values())
+        bin_id = min(cap - 1, position * cap // span)
+        best = bins.get(bin_id)
+        if best is None or score > best[1]:
+            bins[bin_id] = (position, score)
+    keep = sorted(position for position, _ in bins.values())
+    return [detections[position] for position in keep]
 
 
 def sweep_groups(
@@ -984,18 +1038,19 @@ def compute_extrinsic_from_sweep(
     *,
     anchor: str,
     window_s: float,
-    stride: int | None = None,
+    max_groups: int | None = None,
     max_spread_s: float | None = None,
     min_shared: int = _DEFAULT_MIN_SHARED,
 ) -> tuple[ExtrinsicResult, BAInputs]:
-    """Solve the camera array from a recorded synchronized sweep (ADR-0023).
+    """Solve the camera array from a recorded synchronized sweep (ADR-0023/0033).
 
-    Synchronizes on the timestamp **sidecars only** (cheap), applies the Prepare
-    knobs (``stride`` = every Nth group, ``max_spread_s`` = drop loosely-synced
-    groups), evens the detection budget over the sweep, then detects only the
-    selected frames and runs pairwise -> chaining -> triangulation -> BA. Also
-    returns the BA observations so 'Minimize' can refine later without redetecting.
-    Supports ChArUco boards and single-ArUco-marker targets (see board_object_points).
+    Synchronizes on the timestamp **sidecars only** (cheap), drops loosely-synced
+    groups (``max_spread_s``), detects on a bounded POOL of candidate instants,
+    then keeps the ~``max_groups`` SHARPEST groups (observe first, choose after,
+    ADR-0033 — blind uniform sampling injected motion-blurred corners into the
+    BA) and runs pairwise -> chaining -> triangulation -> BA. Also returns the
+    BA observations so 'Minimize' can refine later without redetecting. Supports
+    ChArUco boards and single-ArUco-marker targets (see board_object_points).
     """
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
@@ -1005,19 +1060,14 @@ def compute_extrinsic_from_sweep(
 
     if max_spread_s is not None:
         groups = [group for group in groups if group.spread <= max_spread_s]
-    if stride is not None and stride > 1:
-        groups = groups[::stride]
-    budget = (
-        _MAX_DETECT_GROUPS
-        if board.board_type is BoardType.CHARUCO
-        else _MAX_DETECT_GROUPS_SINGLE_MARKER
-    )
-    if len(groups) > budget:
-        step = len(groups) / budget
-        groups = [groups[int(i * step)] for i in range(budget)]
+    charuco = board.board_type is BoardType.CHARUCO
+    pool = _DETECT_POOL if charuco else _DETECT_POOL_SINGLE_MARKER
+    if len(groups) > pool:
+        step = len(groups) / pool
+        groups = [groups[int(i * step)] for i in range(pool)]
     if not groups:
-        raise ValueError("no synchronized groups in the sweep (check spread/stride)")
-    logger.info("extrinsic compute: %d synchronized groups selected", len(groups))
+        raise ValueError("no synchronized groups in the sweep (check the spread threshold)")
+    logger.info("extrinsic compute: detecting on %d candidate groups", len(groups))
 
     groups_frames = [
         {name: frame.payload for name, frame in group.frames.items()} for group in groups
@@ -1025,6 +1075,17 @@ def compute_extrinsic_from_sweep(
     detections = _detect_group_frames(directory, groups_frames, by_name, board)
     if not detections:
         raise ValueError("no synchronized board views across >= 2 cameras")
+    keep = max_groups if max_groups is not None else (
+        _MAX_KEPT_GROUPS if charuco else _MAX_KEPT_GROUPS_SINGLE_MARKER
+    )
+    selected = _select_quality_groups(detections, max(1, keep))
+    logger.info(
+        "extrinsic compute: kept %d/%d detected groups by sharpness (cap %d)",
+        len(selected),
+        len(detections),
+        keep,
+    )
+    detections = selected
 
     pairs = stereo_pairwise(detections, board, min_shared=min_shared)
     if not pairs:

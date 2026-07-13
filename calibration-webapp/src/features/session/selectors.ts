@@ -97,10 +97,9 @@ export function selectStages(state: RootState): Stage[] {
 // spec wizard-navigation); it does not mutate the persisted FSM step.
 export type ViewId = StageId | 'session';
 
-// Navigation targets include the rail views plus transient screens reached outside
-// the rail (e.g. the Load-from-files entry from the dashboard). 'load' is never
-// derived from a persisted step — it is a volatile sub-flow of the session entry.
-export type NavTarget = ViewId | 'load';
+// Navigation targets are exactly the rail views: session entry sub-flows (create /
+// import-from-files) are dashboard modals (ADR-0031), not views of their own.
+export type NavTarget = ViewId;
 
 function stepToView(step: WizardStep): ViewId {
   if (step === 'entry') {

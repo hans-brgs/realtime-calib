@@ -27,6 +27,7 @@ from calibration_service.capture.enumeration import enumerate_cameras
 from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
+from calibration_service.models.session import SessionMode
 from calibration_service.overlays import draw_overlay
 from calibration_service.recording import (
     CameraSpec,
@@ -431,6 +432,11 @@ class CameraPublishService:
         session = self._sessions.current_or_none()
         if session is None:
             return []  # no active session (dashboard): idle, don't touch V4L2 (ADR-0028)
+        if session.mode is SessionMode.LOAD_FROM_FILES:
+            # Imported session (ADR-0031): sources are files on disk and capture is
+            # neutralised — never open a device, never publish a live track.
+            logger.debug("load-from-files session: publisher idle")
+            return []
         if session.cameras:
             return [
                 _PublishTarget(c.name, c.index, c.device_node, c.width, c.height, c.fps)

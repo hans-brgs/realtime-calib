@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from calibration_service.board import render_board_png
 from calibration_service.detection import BoardDetection, BoardDetector
@@ -26,7 +29,9 @@ def test_fill_color_bands() -> None:
 
 def test_overlay_downscales_and_draws() -> None:
     board = _charuco()
-    gray = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    decoded = cv2.imdecode(np.frombuffer(render_board_png(board), np.uint8), cv2.IMREAD_COLOR)
+    assert decoded is not None
+    gray = cast("NDArray[np.uint8]", decoded)
     detection = BoardDetector(board).detect(gray)
     assert detection.found
 

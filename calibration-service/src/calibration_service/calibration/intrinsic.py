@@ -8,8 +8,8 @@ solver:
   ADR-0008) and pick a diverse, capped subset (farthest-point sampling over
   tilt + image-position) so coverage/diversity is maximised, not the frame count.
 - ``calibrate_intrinsic`` — run ``cv2.calibrateCameraExtended`` on the retained
-  views (rational model, intrinsic guess, fixed aspect ratio — Caliscope flags),
-  exposing ``perViewErrors`` for outlier rejection.
+  views (classic 5-coefficient model, seeded guess — real Caliscope parity,
+  ADR-0032), exposing ``perViewErrors`` for outlier rejection.
 
 Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 ``board.matchImagePoints`` (ChArUco corners → object/image points) then
@@ -31,10 +31,13 @@ from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.telemetry import SHARPNESS_MIN
 
-# Caliscope intrinsic flags: seed with a guess, rational (8-coef) distortion, fix aspect.
-_CALIB_FLAGS = (
-    cv2.CALIB_USE_INTRINSIC_GUESS | cv2.CALIB_RATIONAL_MODEL | cv2.CALIB_FIX_ASPECT_RATIO
-)
+# Real Caliscope parity (ADR-0032, verified against caliscope source): plain
+# cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
+# [k1,k2,p1,p2,k3], free aspect ratio. Only the guess seed is kept (validated on
+# the home_calib dataset: per-camera coefficients become consistent, extrinsic
+# RMSE unchanged). The former RATIONAL_MODEL+FIX_ASPECT anchor was not grounded
+# in caliscope code and produced degenerate per-camera coefficients.
+_CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
 _DEFAULT_CAP = 25  # keyframes kept for the solve (MATLAB recommends 10-20)
 _MAX_DETECT_FRAMES = 400  # cap detection cost on long sweeps (spread across the video)
 _MIN_VIEWS = 6  # calib.io: at least ~6 observations
@@ -52,7 +55,7 @@ class IntrinsicResult:
     """Outcome of an intrinsic calibration (camera-array-config fields)."""
 
     matrix: list[list[float]]  # 3x3 K
-    distortions: list[float]  # rational model coefficients
+    distortions: list[float]  # classic 5 coefficients [k1, k2, p1, p2, k3] (ADR-0032)
     error: float  # RMS reprojection error (px)
     per_view_errors: list[float]  # per-keyframe reprojection error
     grid_count: int  # total corners used across keyframes

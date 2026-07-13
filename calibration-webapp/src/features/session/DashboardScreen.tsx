@@ -1,21 +1,17 @@
 import { Box, Group, SimpleGrid, Table, Text, Title, UnstyledButton } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
-import {
-  IconChevronRight,
-  IconFolder,
-  IconVideo,
-  type IconProps,
-} from '@tabler/icons-react';
+import { IconChevronRight, IconFolder, IconVideo, type IconProps } from '@tabler/icons-react';
 import { type ComponentType, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { ImportSessionModal } from '@/features/session/ImportSessionModal';
 import { NewSessionModal } from '@/features/session/NewSessionModal';
 import {
   fetchRecentSessions,
   openSessionThunk,
   selectRecentSessions,
 } from '@/features/session/sessionSlice';
-import type { NavTarget } from '@/features/session/selectors';
+import { errorMessage } from '@/transport/httpClient';
 import type { SessionSummary } from '@/transport/types';
 
 interface EntryCard {
@@ -92,7 +88,11 @@ function EntryCardTile({ card }: { card: EntryCard }) {
 
 const STATUS_CHIP: Record<SessionSummary['status'], { label: string; fg: string; bg: string }> = {
   complete: { label: 'complete', fg: 'var(--rc-success)', bg: 'rgba(52,211,153,0.1)' },
-  in_progress: { label: 'in progress', fg: 'var(--rc-accent-bright)', bg: 'rgba(167,139,250,0.12)' },
+  in_progress: {
+    label: 'in progress',
+    fg: 'var(--rc-accent-bright)',
+    bg: 'rgba(167,139,250,0.12)',
+  },
   empty: { label: 'empty', fg: 'var(--mantine-color-dark-2)', bg: '#1a1a20' },
 };
 
@@ -149,17 +149,14 @@ function StatusChip({ status }: { status: SessionSummary['status'] }) {
   );
 }
 
-interface DashboardScreenProps {
-  onNavigate: (id: NavTarget) => void;
-}
-
-// Session entry (dashboard): the two FSM entry modes (ADR-0019) as workflow cards +
-// recent sessions. The sessions list endpoint is not wired yet, so the table shows an
-// honest empty state rather than fixtures.
-export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
+// Session entry (dashboard): the two FSM entry modes (ADR-0019/0031) as workflow
+// cards — each opens its modal (create realtime / import a ZIP) — plus the recent
+// sessions table.
+export function DashboardScreen() {
   const dispatch = useAppDispatch();
   const recent = useAppSelector(selectRecentSessions);
   const [newOpened, { open: openNew, close: closeNew }] = useDisclosure(false);
+  const [importOpened, { open: openImport, close: closeImport }] = useDisclosure(false);
   const [openError, setOpenError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -174,7 +171,7 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
     dispatch(openSessionThunk(session.session_id))
       .unwrap()
       .catch((err: unknown) => {
-        setOpenError(err instanceof Error ? err.message : 'could not open the session');
+        setOpenError(errorMessage(err, 'could not open the session'));
         void dispatch(fetchRecentSessions());
       });
   };
@@ -192,17 +189,18 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
     {
       icon: IconFolder,
       title: 'Load from files',
-      subtitle: 'Open a session folder · replay & resume',
-      desc: 'Pick a folder and see which artifacts are present — videos, board, results — and the derived wizard state. Recompute or resume where you left off.',
-      cta: 'CHOOSE FOLDER',
+      subtitle: 'Import pre-recorded videos · calibrate offline',
+      desc: 'Upload an archive (ZIP or tar) of already-captured videos (intrinsics/cam_0…, extrinsics/cam_0…). The wizard runs on the recordings — no cameras needed.',
+      cta: 'IMPORT ARCHIVE',
       accent: false,
-      onClick: () => onNavigate('load'),
+      onClick: openImport,
     },
   ];
 
   return (
     <Box p={{ base: 'md', sm: 'xl' }} maw={1180}>
       <NewSessionModal opened={newOpened} onClose={closeNew} />
+      <ImportSessionModal opened={importOpened} onClose={closeImport} />
       <Title order={1}>Welcome to the calibration bench</Title>
       <Text c="dark.2" mt={9} maw={600} fz="0.9rem">
         Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow
@@ -285,7 +283,11 @@ export function DashboardScreen({ onNavigate }: DashboardScreenProps) {
       </Box>
 
       <Text mt="lg" fz="0.72rem" c="dark.3" className="rc-tnum" style={{ letterSpacing: '0.04em' }}>
-        ENGINE STATUS: <Text span c="var(--rc-success)" inherit>OPTIMIZED</Text> · CPU-ONLY · LIVEKIT
+        ENGINE STATUS:{' '}
+        <Text span c="var(--rc-success)" inherit>
+          OPTIMIZED
+        </Text>{' '}
+        · CPU-ONLY · LIVEKIT
       </Text>
     </Box>
   );

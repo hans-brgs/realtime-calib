@@ -18,6 +18,7 @@ dependencies = [
     # TOML read/write for the session folder (Caliscope-compatible, ADR-0002/0016).
     "rtoml>=0.12",
     "scipy>=1.14",
+    "python-multipart>=0.0.32",
 ]
 
 [dependency-groups]

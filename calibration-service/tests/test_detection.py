@@ -2,8 +2,11 @@
 
 from __future__ import annotations
 
+from typing import cast
+
 import cv2
 import numpy as np
+from numpy.typing import NDArray
 
 from calibration_service.board import render_board_png
 from calibration_service.detection import BoardDetector
@@ -11,8 +14,10 @@ from calibration_service.detection.detector import _tilt_deg
 from calibration_service.models.board import BoardType, CalibrationBoard
 
 
-def _decode(png: bytes) -> np.ndarray:
-    return cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+def _decode(png: bytes) -> NDArray[np.uint8]:
+    image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert image is not None
+    return cast("NDArray[np.uint8]", image)
 
 
 def _charuco(**overrides: object) -> CalibrationBoard:

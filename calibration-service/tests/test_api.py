@@ -2,6 +2,10 @@
 
 from __future__ import annotations
 
+import io
+import json
+import shutil
+import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -12,11 +16,32 @@ from calibration_service.app import create_app
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
 from calibration_service.recording import VideoRecorder, preview_path
 from calibration_service.session.manager import SessionManager
-from calibration_service.session.store import load_session
+from calibration_service.session.store import create_session, load_session
+
+requires_ffmpeg = pytest.mark.skipif(
+    shutil.which("ffmpeg") is None, reason="ffmpeg not installed"
+)
 
 
 def _client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(SessionManager(tmp_path, "default")))
+
+
+def _import_zip(tmp_path: Path, tree: dict[str, int]) -> bytes:
+    """An in-memory upload archive: {relpath: frame count} rendered via VideoRecorder."""
+    stage = tmp_path / "zip-stage"
+    for rel, frames in tree.items():
+        target = stage / rel
+        target.parent.mkdir(parents=True, exist_ok=True)
+        with VideoRecorder(target, 64, 48, fps=30) as rec:
+            for _ in range(frames):
+                rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        for file in sorted(stage.rglob("*")):
+            if file.is_file():
+                bundle.write(file, str(file.relative_to(stage)))
+    return buffer.getvalue()
 
 
 def test_get_session_returns_fresh_session(tmp_path: Path) -> None:
@@ -73,6 +98,83 @@ def test_open_session_switches_the_active_one(tmp_path: Path) -> None:
 def test_sessions_location_returns_the_root(tmp_path: Path) -> None:
     client = TestClient(create_app(SessionManager(tmp_path)))
     assert client.get("/sessions/location").json() == {"root": tmp_path.name}
+
+
+@requires_ffmpeg
+def test_import_session_ingests_and_activates(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    client = TestClient(create_app(SessionManager(sessions)))
+    payload = _import_zip(
+        tmp_path,
+        {
+            "intrinsics/cam_00.mkv": 6,
+            "intrinsics/cam_01.mkv": 6,
+            "extrinsics/cam_00.mkv": 5,
+            "extrinsics/cam_01.mkv": 5,
+        },
+    )
+
+    response = client.post(
+        "/sessions/import",
+        files={"file": ("myset.zip", payload, "application/zip")},
+        data={"session_id": "myset"},
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["mode"] == "load-from-files"
+    assert body["step"] == "intrinsic_board"  # lands on Target Config
+    assert [c["name"] for c in body["cameras"]] == ["cam_0", "cam_1"]
+    # Imported session is now the active one; canonical artifacts are on disk.
+    assert client.get("/session").json()["session_id"] == "myset"
+    assert (sessions / "myset/intrinsic/cam_0/capture.mkv").is_file()
+    assert (sessions / "myset/extrinsic/manifest.json").is_file()
+    # The upload spool is cleaned up (dot-prefixed temp next to the sessions).
+    assert not [p for p in sessions.iterdir() if p.name.startswith(".import-")]
+
+
+def test_import_session_duplicate_name_is_409(tmp_path: Path) -> None:
+    sessions = tmp_path / "sessions"
+    create_session(sessions, "taken")
+    client = TestClient(create_app(SessionManager(sessions)))
+    response = client.post(
+        "/sessions/import",
+        files={"file": ("x.zip", b"irrelevant", "application/zip")},
+        data={"session_id": "taken"},
+    )
+    assert response.status_code == 409
+
+
+def test_import_session_bad_naming_is_422(tmp_path: Path) -> None:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as bundle:
+        bundle.writestr("intrinsics/webcam.mkv", "fake")
+    client = TestClient(create_app(SessionManager(tmp_path / "sessions")))
+    response = client.post(
+        "/sessions/import",
+        files={"file": ("b.zip", buffer.getvalue(), "application/zip")},
+        data={"session_id": "bad-name-set"},
+    )
+    assert response.status_code == 422
+    assert "cam_<number>" in response.json()["detail"]
+
+
+def test_import_session_unreadable_archive_is_400(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path / "sessions")))
+    response = client.post(
+        "/sessions/import",
+        files={"file": ("n.zip", b"not a zip at all", "application/zip")},
+        data={"session_id": "notzip"},
+    )
+    assert response.status_code == 400
+
+
+def test_confirm_camera_setup_route_maps_errors(tmp_path: Path) -> None:
+    # No active session -> uniform 409 (ADR-0028); active but no cameras -> 422.
+    bare = TestClient(create_app(SessionManager(tmp_path / "a")))
+    assert bare.post("/cameras/confirm").status_code == 409
+    fresh = _client(tmp_path / "b")
+    assert fresh.post("/cameras/confirm").status_code == 422
 
 
 def test_detect_returns_cameras_with_modes(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -579,7 +681,7 @@ def test_extrinsic_compute_stores_result_and_persists_json(
         api_module, "compute_extrinsic_from_sweep", lambda *a, **k: (fixture, ba_fixture)
     )
 
-    response = client.post("/extrinsic/compute", json={"stride": 2, "max_spread_ms": 12.0})
+    response = client.post("/extrinsic/compute", json={"max_groups": 120, "max_spread_ms": 12.0})
     assert response.status_code == 200
     cameras = {c["name"]: c for c in response.json()["cameras"]}
     assert cameras["cam_1"]["rotation"] == [0.01, -0.02, 0.3]
@@ -597,6 +699,43 @@ def test_extrinsic_compute_stores_result_and_persists_json(
 
 def test_extrinsic_result_404_before_compute(tmp_path: Path) -> None:
     assert _client(tmp_path).get("/extrinsic/result").status_code == 404
+
+
+def test_orient_persists_the_framed_group_marker(tmp_path: Path) -> None:
+    # "Set frame on board" records WHICH group carried the gesture (the review
+    # scrubber marker): set by set_frame, kept through rotate, served on reload.
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 8, "rows": 5}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    fixture = {
+        "cameras": ["cam_0", "cam_1"],
+        "rotations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.0, 0.1, 0.0]},
+        "translations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [1.0, 0.0, 0.0]},
+        "per_camera_error": {"cam_0": 0.1, "cam_1": 0.2},
+        "error": 0.15,
+        "pair_errors": {"cam_0|cam_1": 0.01},
+        "group_count": 1,
+        "point_count": 4,
+        "points": [[0.0, 0.0, 5.0]],
+        "point_groups": [0],
+        "board_quads": [[[0.0, 0.0, 5.0], [1.0, 0.0, 5.0], [1.0, 1.0, 5.0], [0.0, 1.0, 5.0]]],
+    }
+    (directory / "result.json").write_text(json.dumps(fixture))
+
+    rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "x", "degrees": 90})
+    assert rotated.status_code == 200
+    assert rotated.json()["framed_group"] is None  # no gesture yet
+
+    framed = client.post("/extrinsic/orient", json={"op": "set_frame", "group": 0})
+    assert framed.status_code == 200
+    assert framed.json()["framed_group"] == 0
+
+    rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "y", "degrees": -90})
+    assert rotated.json()["framed_group"] == 0  # rotate keeps the marker
+    assert client.get("/extrinsic/result").json()["framed_group"] == 0  # survives reload
 
 
 def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
@@ -622,9 +761,7 @@ def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
     assert first["frames"] == {"cam_0": 0, "cam_1": 0}
     assert first["spread_ms"] == 2.0
 
-    # Stride keeps every other group; a tight spread filter keeps them all (2 ms).
-    strided = client.get("/extrinsic/groups", params={"stride": 2}).json()
-    assert len(strided["groups"]) == 2
+    # A tight spread filter drops every group (2 ms recorded spread > 1 ms cap).
     filtered = client.get("/extrinsic/groups", params={"max_spread_ms": 1.0}).json()
     assert filtered["groups"] == []
 

@@ -7,6 +7,7 @@ import contextlib
 from pathlib import Path
 
 from calibration_service.config import LiveKitConfig
+from calibration_service.models.session import CameraConfig, SessionMode
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.camera_publish_service import (
     CameraPublishService,
@@ -16,6 +17,35 @@ from calibration_service.transport.camera_publish_service import (
 
 def _service(tmp_path: Path) -> CameraPublishService:
     return CameraPublishService(LiveKitConfig(), SessionManager(tmp_path, "default"))
+
+
+def test_load_from_files_session_resolves_no_targets(tmp_path: Path) -> None:
+    # Imported session (ADR-0031): capture is neutralised — even with cameras
+    # configured, the publisher must resolve ZERO targets (no V4L2, no tracks).
+    manager = SessionManager(tmp_path, "imported")
+    session = manager.current()
+    session.cameras = [
+        CameraConfig(
+            index=0,
+            name="cam_0",
+            prefix="cam",
+            device_path="import:cam_0.mkv",
+            device_node="",
+            width=64,
+            height=48,
+            resize_factor=1.0,
+            fps=30,
+        )
+    ]
+    session.mode = SessionMode.LOAD_FROM_FILES
+    service = CameraPublishService(LiveKitConfig(), manager)
+
+    assert service._resolve_targets() == []
+
+    # Sanity: the SAME session in realtime mode would publish — the guard is
+    # what empties the set, not the empty device node.
+    session.mode = SessionMode.NEW_REALTIME
+    assert len(service._resolve_targets()) == 1
 
 
 class _FakePublisher:
@@ -143,7 +173,8 @@ def test_leaving_a_non_recording_camera_keeps_the_recorder(tmp_path: Path) -> No
         task = await _done_task()
         await service._stop_capture(_FakePublisher(), "cam_1", task)  # type: ignore[arg-type]
         assert recorder.closed is False
-        assert service._recorder is recorder
+        # The fake was force-assigned above; identity is the point of the check.
+        assert service._recorder is recorder  # type: ignore[comparison-overlap]
         assert service._recording_camera == "cam_0"
 
     asyncio.run(scenario())
@@ -159,7 +190,7 @@ def test_capture_loop_releases_the_camera_in_its_finally(tmp_path: Path) -> None
         async def hang(*_args: object) -> None:
             await asyncio.sleep(3600)
 
-        service._capture_frames = hang  # type: ignore[method-assign]
+        service._capture_frames = hang  # type: ignore[method-assign, assignment]
         target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30)
         task = asyncio.create_task(
             service._capture_loop(asyncio.get_running_loop(), None, target, camera)  # type: ignore[arg-type]
@@ -215,8 +246,11 @@ def test_reconfigure_reconciles_tracks_in_place(tmp_path: Path) -> None:
         by_name: dict[str, _PublishTarget] = {}
 
         # Initial config: cam_0, cam_1 -> both tracks published.
-        needs = await service._reconcile_tracks(  # type: ignore[arg-type]
-            publisher, list(_targets("cam_0", "cam_1").values()), published, by_name
+        needs = await service._reconcile_tracks(
+            publisher,  # type: ignore[arg-type]
+            list(_targets("cam_0", "cam_1").values()),
+            published,
+            by_name,
         )
         assert needs is False
         assert publisher.published == ["cam_0", "cam_1"]

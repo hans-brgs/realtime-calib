@@ -79,6 +79,13 @@ def test_caliscope_document_round_trips_with_mm_translation() -> None:
     assert parsed["cam_0"]["rotation"] == [0.0, 0.0, 0.0]  # anchor identity
 
 
+def test_caliscope_document_honours_metre_units() -> None:
+    # Caliscope's own arrays are metre-scaled: units="m" makes the TOML a true
+    # drop-in (the units knob applies to every artifact, not just the JSONs).
+    document = caliscope_document(_session(), SQUARE_MM, units="m")
+    assert document["cam_1"]["translation"] == pytest.approx([0.08, 0.0, 0.0])
+
+
 def test_export_targets_catalog_lists_caliscope_plus_platforms() -> None:
     # Backend = single source for the export catalog (ADR-0026): caliscope (TOML,
     # OpenCV axes) + the four platform JSONs, with display metadata.

@@ -3,11 +3,13 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import cast
 
 import cv2
 import numpy as np
 import pytest
 from fastapi.testclient import TestClient
+from numpy.typing import NDArray
 
 from calibration_service.app import create_app
 from calibration_service.board import render_board_png
@@ -33,9 +35,16 @@ def _client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(SessionManager(tmp_path, "default")))
 
 
+def _decode(png: bytes) -> NDArray[np.uint8]:
+    """Decode a rendered PNG; narrow the Optional + dtype at the cv2 boundary."""
+    image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    assert image is not None
+    return cast("NDArray[np.uint8]", image)
+
+
 def test_render_charuco_png_dimensions() -> None:
     png = render_board_png(_charuco(), px_per_square=PX_PER_SQUARE)
-    image = cv2.imdecode(np.frombuffer(png, dtype=np.uint8), cv2.IMREAD_GRAYSCALE)
+    image = _decode(png)
     # width ~= columns * px + 2 * margin (margin = px/2 per side).
     assert image.shape[1] == 8 * PX_PER_SQUARE + PX_PER_SQUARE
     assert image.shape[0] == 5 * PX_PER_SQUARE + PX_PER_SQUARE
@@ -46,7 +55,7 @@ def test_render_aruco_single_marker() -> None:
         board_type=BoardType.ARUCO, dictionary="DICT_5X5_100", columns=1, rows=1, marker_id=7
     )
     png = render_board_png(board)
-    image = cv2.imdecode(np.frombuffer(png, np.uint8), cv2.IMREAD_GRAYSCALE)
+    image = _decode(png)
     # Square single marker + symmetric quiet zone.
     assert image.shape[0] == image.shape[1]
 
@@ -67,8 +76,8 @@ def test_validate_rejects_marker_id_out_of_range() -> None:
 def test_render_inverted_is_negative() -> None:
     normal = render_board_png(_charuco())
     inverted = render_board_png(_charuco(inverted=True))
-    a = cv2.imdecode(np.frombuffer(normal, np.uint8), cv2.IMREAD_GRAYSCALE)
-    b = cv2.imdecode(np.frombuffer(inverted, np.uint8), cv2.IMREAD_GRAYSCALE)
+    a = _decode(normal)
+    b = _decode(inverted)
     assert np.array_equal(b, 255 - a)
 
 
@@ -89,6 +98,29 @@ def test_board_config_round_trip(tmp_path: Path) -> None:
     intrinsic, extrinsic = load_board_config(tmp_path, "demo")
     assert intrinsic == board
     assert extrinsic is None
+
+
+def test_board_config_omits_square_fields_for_aruco(tmp_path: Path) -> None:
+    # A single-marker target has no squares: square_size_mm / marker_ratio are
+    # omitted from its config.toml block (misleading otherwise) and the reload
+    # falls back to the model defaults for those unused fields.
+    aruco = CalibrationBoard(
+        board_type=BoardType.ARUCO,
+        dictionary="DICT_4X4_100",
+        columns=1,
+        rows=1,
+        marker_id=8,
+        marker_size_mm=297.6,
+    )
+    save_board_config(tmp_path, "demo", _charuco(), aruco)
+    text = (tmp_path / "demo" / "config.toml").read_text()
+    block = text.split("[extrinsic_board]")[1]
+    assert "square_size_mm" not in block
+    assert "marker_ratio" not in block
+    _intrinsic, extrinsic = load_board_config(tmp_path, "demo")
+    assert extrinsic is not None
+    assert extrinsic.marker_size_mm == 297.6
+    assert extrinsic.marker_id == 8
 
 
 def test_define_board_advances_and_persists(tmp_path: Path) -> None:

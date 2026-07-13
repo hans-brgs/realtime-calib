@@ -46,7 +46,12 @@ class NoActiveSessionError(RuntimeError):
     """Raised by session-scoped operations when no session is active (ADR-0028)."""
 
 
-def _validate_session_id(session_id: str) -> str:
+def validate_session_id(session_id: str) -> str:
+    """Validate a session id destined to become a folder name (ADR-0028).
+
+    Public: the pre-recorded session import (ADR-0031) reuses this exact
+    security boundary instead of duplicating it.
+    """
     sid = session_id.strip()
     if not _SESSION_ID_RE.fullmatch(sid):
         raise ValueError(
@@ -108,7 +113,7 @@ class SessionManager:
         Refuses an already-existing folder (the name must be unique) so the
         operator never silently reopens a prior session under 'new'.
         """
-        sid = _validate_session_id(session_id)
+        sid = validate_session_id(session_id)
         if (session_dir(self._sessions_dir, sid) / SESSION_FILE).is_file():
             raise FileExistsError(f"session {sid!r} already exists")
         session = create_session(self._sessions_dir, sid)
@@ -119,7 +124,7 @@ class SessionManager:
 
     def open(self, session_id: str) -> CalibrationSession:
         """Make an existing session the active one (ADR-0028); refuses if absent."""
-        sid = _validate_session_id(session_id)
+        sid = validate_session_id(session_id)
         if not (session_dir(self._sessions_dir, sid) / SESSION_FILE).is_file():
             raise FileNotFoundError(f"session {sid!r} not found")
         self._session_id = sid
@@ -297,7 +302,9 @@ class SessionManager:
         camera.matrix = result.matrix
         camera.distortions = result.distortions
         camera.calibration_error = result.error
-        camera.grid_count = result.grid_count
+        # Caliscope semantics (ADR-0002): grid_count = number of boards/views
+        # used by the solve, not the corner total (which stays on the result).
+        camera.grid_count = result.view_count
         camera.status = CameraStatus.INTRINSIC_DONE
         save_session(self._sessions_dir, session)
         logger.info("intrinsic result stored for %s (rms=%.3f)", camera_name, result.error)
@@ -310,4 +317,27 @@ class SessionManager:
         session.step = WizardStep.INTRINSIC_CAPTURE
         save_session(self._sessions_dir, session)
         logger.info("configured %d camera(s); step -> %s", len(cameras), session.step)
+        return session
+
+    def confirm_camera_setup(self) -> CalibrationSession:
+        """Advance past Camera Setup WITHOUT rebuilding the camera configs.
+
+        Load-from-files flow (ADR-0031): the cameras derive from the imported
+        videos — there is nothing to re-detect, and ``configure_cameras`` would
+        drop them. Confirming just unlocks Intrinsics. Idempotent once past;
+        refuses to skip the board steps (wizard order, spec wizard-navigation).
+        """
+        session = self.current()
+        if not session.cameras:
+            raise ValueError("no cameras to confirm")
+        if session.step in (
+            WizardStep.ENTRY,
+            WizardStep.INTRINSIC_BOARD,
+            WizardStep.EXTRINSIC_BOARD_CHOICE,
+        ):
+            raise ValueError("define the calibration boards first")
+        if session.step == WizardStep.CAMERA_SETUP:
+            session.step = WizardStep.INTRINSIC_CAPTURE
+            save_session(self._sessions_dir, session)
+            logger.info("camera setup confirmed; step -> %s", session.step)
         return session

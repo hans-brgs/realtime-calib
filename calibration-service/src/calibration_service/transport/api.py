@@ -9,14 +9,17 @@ import asyncio
 import io
 import json
 import logging
+import shutil
+import tempfile
 import zipfile
-from dataclasses import asdict
+from dataclasses import asdict, replace
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import Literal
 
 import numpy as np
 import rtoml
-from fastapi import APIRouter, HTTPException, Request, Response
+from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
 from fastapi.responses import FileResponse
 from pydantic import BaseModel
 
@@ -54,6 +57,8 @@ from calibration_service.recording import (
     PreviewStatus,
     preview_path,
 )
+from calibration_service.recording.ffmpeg import FfmpegError
+from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -346,6 +351,64 @@ async def open_session_route(request: Request, body: SessionRef) -> SessionOut:
     return _session_out(session, manager)
 
 
+@router.post("/sessions/import", response_model=SessionOut)
+async def import_session_route(
+    request: Request,
+    file: UploadFile,
+    session_id: str = Form(),
+) -> SessionOut:
+    """Import a pre-recorded session archive (ZIP or tar) and activate it (ADR-0031).
+
+    The archive is spooled to disk next to the sessions (same volume as the
+    destination), then the synchronous ingest (extract + validate + remux +
+    sidecars) runs in an executor — the event loop keeps serving. 409 if the
+    session name exists, 422 on a contract violation (naming/format/sync/media),
+    400 on an unreadable archive. On success the imported session becomes the
+    active one and its preview transcodes are kicked off in the background.
+    """
+    manager = get_manager(request)
+    sessions_dir = manager.sessions_dir
+    loop = asyncio.get_running_loop()
+
+    def _spool_to_disk() -> Path:
+        sessions_dir.mkdir(parents=True, exist_ok=True)
+        with tempfile.NamedTemporaryFile(
+            dir=sessions_dir, prefix=".import-upload-", suffix=".archive", delete=False
+        ) as spool:
+            shutil.copyfileobj(file.file, spool)
+        return Path(spool.name)
+
+    await file.seek(0)
+    archive = await loop.run_in_executor(None, _spool_to_disk)
+    try:
+        try:
+            imported = await loop.run_in_executor(
+                None, lambda: ingest(archive, session_id, sessions_dir)
+            )
+        except FileExistsError as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
+        except UnreadableArchiveError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+        except (ValueError, FfmpegError) as exc:
+            # ImportValidationError, bad session name, or media ffmpeg can't process.
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+    finally:
+        await loop.run_in_executor(None, lambda: archive.unlink(missing_ok=True))
+
+    session = manager.open(imported.session_id)  # activate (ADR-0028 switch semantics)
+    jobs = get_preview_jobs(request)
+    for camera in session.cameras:
+        # Kick the background preview transcodes NOW (ADR-0027) so the Prepare
+        # scrubber is usually ready by the time the operator reaches it; ensure()
+        # is a no-op for a phase whose recording is absent.
+        jobs.ensure(manager.intrinsic_video_path(camera.name))
+        jobs.ensure(manager.extrinsic_dir() / f"{camera.name}.mkv")
+    service = get_publish_service(request)
+    if service is not None:
+        await service.refresh()
+    return _session_out(session, manager)
+
+
 @router.post("/cameras/detect", response_model=list[DetectedCameraOut])
 async def detect_cameras(request: Request) -> list[DetectedCameraOut]:
     return [_device_out(d) for d in get_manager(request).detect()]
@@ -362,6 +425,22 @@ async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut
     if publish_service is not None:
         await publish_service.refresh()
 
+    return _session_out(session, manager)
+
+
+@router.post("/cameras/confirm", response_model=SessionOut)
+async def confirm_camera_setup_route(request: Request) -> SessionOut:
+    """Advance past Camera Setup without rebuilding the configs (ADR-0031).
+
+    Load-from-files flow: the cameras derive from the imported videos, so
+    /cameras/config (which rebuilds and drops them) is not applicable — this
+    just unlocks Intrinsics. 422 with no cameras or before the boards are set.
+    """
+    manager = get_manager(request)
+    try:
+        session = manager.confirm_camera_setup()
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _session_out(session, manager)
 
 
@@ -618,9 +697,11 @@ async def stop_extrinsic(request: Request) -> dict[str, object]:
 
 
 class ExtrinsicComputeRequest(BaseModel):
-    """Prepare-step knobs (ADR-0023); omitted fields use defaults."""
+    """Prepare-step knobs (ADR-0023/0033); omitted fields use defaults."""
 
-    stride: int | None = None  # process every Nth synchronized group
+    # Sharpest groups kept for the solve (ADR-0033); None = board-type default
+    # (240 single-marker / 80 ChArUco), clamped to what the sweep provides.
+    max_groups: int | None = None
     max_spread_ms: float | None = None  # drop groups with a larger timestamp spread
     min_shared: int | None = None  # minimum shared board views per camera pair
 
@@ -690,7 +771,7 @@ async def compute_extrinsic(
                 models,
                 anchor=anchor.name,
                 window_s=window_s,
-                stride=params.stride,
+                max_groups=params.max_groups,
                 max_spread_s=max_spread_s,
                 min_shared=params.min_shared or 5,
             ),
@@ -771,6 +852,10 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
             raise HTTPException(status_code=422, detail="rotate needs axis + degrees")
         transform = axis_rotation_transform(body.axis, body.degrees)
     reoriented = reorient_result(result, transform)
+    # Remember which group carried the framing gesture (review-scrubber marker);
+    # a rotate keeps the existing marker — the world reference did not move.
+    framed = body.group if body.op == "set_frame" else result.framed_group
+    reoriented = replace(reoriented, framed_group=framed)
     _store_extrinsic_result(manager, reoriented)
     payload: dict[str, object] = asdict(reoriented)
     return payload
@@ -806,6 +891,8 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Minimize keeps the anchor pose, so the framing marker stays meaningful.
+    refined = replace(refined, framed_group=result.framed_group)
     _store_extrinsic_result(manager, refined)
     payload: dict[str, object] = asdict(refined)
     return payload
@@ -815,13 +902,13 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
 async def extrinsic_groups(
     request: Request,
     max_spread_ms: float | None = None,
-    stride: int | None = None,
 ) -> dict[str, object]:
     """Synchronized groups of the recorded sweep, for the Prepare scrubber (ADR-0023).
 
-    Synchronizes the timestamp sidecars only (no video decoding); what this lists
-    is exactly what the compute consumes under the same knobs. The window derives
-    from the RECORDED cadence (sidecar median inter-frame delta), not the config fps.
+    Synchronizes the timestamp sidecars only (no video decoding). This lists the
+    spread-filtered CANDIDATES; the compute keeps the sharpest ~max_groups of them
+    (ADR-0033 — result.group_count reports how many). The window derives from the
+    RECORDED cadence (sidecar median inter-frame delta), not the config fps.
     """
     manager = get_manager(request)
     session = manager.current()
@@ -838,8 +925,6 @@ async def extrinsic_groups(
     total = len(groups)
     if max_spread_ms is not None:
         groups = [g for g in groups if g.spread * 1000.0 <= max_spread_ms]
-    if stride is not None and stride > 1:
-        groups = groups[::stride]
     return {
         "total": total,
         "groups": [
@@ -949,7 +1034,7 @@ def _render_target(
 ) -> tuple[str, str]:
     """Serialized content of one export target — no disk write (dry-run + write)."""
     if target_id == "caliscope":
-        return "toml", rtoml.dumps(caliscope_document(session, square))
+        return "toml", rtoml.dumps(caliscope_document(session, square, units=units))
     variant = platform_variant(session, target_id, square, units=units)
     return "json", json.dumps(variant, indent=2)
 

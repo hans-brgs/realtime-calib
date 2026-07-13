@@ -1,5 +1,6 @@
 import '@mantine/core/styles.css';
 import '@mantine/code-highlight/styles.css'; // after core styles (Export preview)
+import '@mantine/dropzone/styles.css'; // after core styles (import-ZIP modal)
 import '@livekit/components-styles';
 
 import { MantineProvider } from '@mantine/core';

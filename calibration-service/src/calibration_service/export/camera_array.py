@@ -138,13 +138,18 @@ def _translation_mm(camera: CameraConfig, square_size_mm: float) -> list[float]:
     return [float(v) * square_size_mm for v in camera.translation or [0.0, 0.0, 0.0]]
 
 
-def caliscope_document(session: CalibrationSession, square_size_mm: float) -> dict[str, Any]:
+def caliscope_document(
+    session: CalibrationSession, square_size_mm: float, units: str = "mm"
+) -> dict[str, Any]:
     """The canonical ``camera_array.toml`` content (Caliscope semantics, ADR-0002).
 
-    ``distortions`` is written exactly as calibrated — 8 rational-model
-    coefficients under ``CALIB_RATIONAL_MODEL`` (Caliscope's own flags), which
-    OpenCV consumers accept like the classic 5.
+    ``distortions`` is written exactly as calibrated — the classic 5 coefficients
+    [k1,k2,p1,p2,k3] since ADR-0032 (real Caliscope parity); sessions calibrated
+    before that carry longer arrays, which OpenCV consumers accept by length.
+    ``units`` scales the extrinsic translations ("mm" or "m") like the platform
+    variants — Caliscope's own arrays are metre-scaled, so a drop-in export uses "m".
     """
+    scale = 0.001 if units == "m" else 1.0
     document: dict[str, Any] = {}
     for camera in session.cameras:
         entry: dict[str, Any] = {
@@ -161,7 +166,9 @@ def caliscope_document(session: CalibrationSession, square_size_mm: float) -> di
         }
         if camera.rotation is not None:
             entry["rotation"] = camera.rotation
-            entry["translation"] = _translation_mm(camera, square_size_mm)
+            entry["translation"] = [
+                scale * v for v in _translation_mm(camera, square_size_mm)
+            ]
         document[f"cam_{camera.index}"] = {k: v for k, v in entry.items() if v is not None}
     return document
 

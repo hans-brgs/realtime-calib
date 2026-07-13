@@ -22,6 +22,7 @@ from calibration_service.calibration.extrinsic import (
     ExtrinsicResult,
     GroupDetection,
     PairEstimate,
+    _select_quality_groups,
     _transform,
     bundle_adjust,
     chain_from_anchor,
@@ -36,7 +37,9 @@ from calibration_service.models.board import BoardType, CalibrationBoard
 BOARD = CalibrationBoard(
     board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
 )
-CHESS = np.asarray(_cv_charuco_board(BOARD).getChessboardCorners(), np.float64)
+CHESS: NDArray[np.float64] = np.asarray(
+    _cv_charuco_board(BOARD).getChessboardCorners(), np.float64
+)
 K = np.array([[800.0, 0.0, 320.0], [0.0, 800.0, 240.0], [0.0, 0.0, 1.0]])
 DIST = np.zeros(5)
 
@@ -62,7 +65,7 @@ POSES = {
 def _board_world(group: int) -> NDArray[np.float64]:
     """Board corners in world coords for one group (board moved + tilted per group)."""
     tilt = _rot("x", 8.0 * np.sin(group * 1.3)) @ _rot("y", 10.0 * np.cos(group * 0.9))
-    offset = np.array([-3.0 + 0.9 * group, -2.6 + 0.3 * group, 9.0 + 0.5 * group])
+    offset = np.array([-3.0 + 0.9 * group, -2.6 + 0.3 * group, 9.0 + 0.5 * group], np.float64)
     return CHESS @ tilt.T + offset
 
 
@@ -87,6 +90,31 @@ def _groups(count: int = 6) -> list[dict[str, GroupDetection]]:
             group[name] = GroupDetection(ids=ids, corners_px=px, corners_norm=norm)
         groups.append(group)
     return groups
+
+
+def test_select_quality_groups_keeps_sharpest_per_time_bin() -> None:
+    # ADR-0033: a group is only as good as its blurriest member (min sharpness);
+    # temporal bins keep the sweep diversity while the sharpest of each bin wins.
+    def group(sharp_a: float, sharp_b: float) -> dict[str, GroupDetection]:
+        ids = np.arange(4, dtype=np.int32)
+        px = np.zeros((4, 2))
+        return {
+            "cam_0": GroupDetection(ids, px, px, sharpness=sharp_a),
+            "cam_1": GroupDetection(ids, px, px, sharpness=sharp_b),
+        }
+
+    groups = [
+        group(10, 1),  # bin 0: min = 1
+        group(5, 5),  # bin 0: min = 5  -> wins
+        group(9, 2),  # bin 1: min = 2
+        group(8, 8),  # bin 1: min = 8  -> wins
+        group(3, 3),  # bin 2: min = 3  -> wins
+        group(0.5, 100),  # bin 2: min = 0.5 (one blurry view poisons the pair)
+    ]
+    kept = _select_quality_groups(groups, 3)
+    assert kept == [groups[1], groups[3], groups[4]]
+    # At or under the cap: everything is kept, order preserved.
+    assert _select_quality_groups(groups, 10) == groups
 
 
 def test_stereo_pairwise_recovers_relative_poses() -> None:
@@ -239,7 +267,12 @@ def test_sweep_orchestration_solves_from_sidecars(
     assert np.allclose(np.asarray(quad), expected, atol=5e-3)
 
 
-def _relative(result_rotations, result_translations, a: str, b: str) -> np.ndarray:
+def _relative(
+    result_rotations: dict[str, list[float]],
+    result_translations: dict[str, list[float]],
+    a: str,
+    b: str,
+) -> np.ndarray:
     """4x4 transform a->b from a result's per-camera world->cam poses."""
     ra = cv2.Rodrigues(np.asarray(result_rotations[a]))[0]
     rb = cv2.Rodrigues(np.asarray(result_rotations[b]))[0]

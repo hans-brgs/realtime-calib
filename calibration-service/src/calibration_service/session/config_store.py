@@ -22,7 +22,7 @@ CONFIG_FILE = "config.toml"
 
 
 def _board_to_dict(board: CalibrationBoard) -> dict[str, object]:
-    return {
+    data: dict[str, object] = {
         "board_type": board.board_type.value,
         "dictionary": board.dictionary,
         "columns": board.columns,
@@ -33,6 +33,13 @@ def _board_to_dict(board: CalibrationBoard) -> dict[str, object]:
         "marker_size_mm": board.marker_size_mm,
         "inverted": board.inverted,
     }
+    if board.board_type is BoardType.ARUCO:
+        # A single-marker target has no squares: the scale is marker_size_mm and
+        # marker_ratio is render-only for ChArUco. Serializing them here would
+        # read as "square smaller than the marker" nonsense in config.toml.
+        del data["square_size_mm"]
+        del data["marker_ratio"]
+    return data
 
 
 def _board_from_dict(data: Mapping[str, Any]) -> CalibrationBoard:
@@ -43,7 +50,8 @@ def _board_from_dict(data: Mapping[str, Any]) -> CalibrationBoard:
         rows=int(data["rows"]),
         marker_ratio=float(data.get("marker_ratio", 0.75)),
         marker_id=int(data.get("marker_id", 0)),
-        square_size_mm=float(data["square_size_mm"]),
+        # Absent for ArUco blocks (no squares on a single-marker target).
+        square_size_mm=float(data.get("square_size_mm", 40.0)),
         marker_size_mm=float(data["marker_size_mm"]),
         inverted=bool(data.get("inverted", False)),
     )

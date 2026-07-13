@@ -37,6 +37,7 @@ import {
 } from '@/features/session/sessionSlice';
 import { type CoverageMetrics, selectCoverage } from '@/features/telemetry/telemetrySlice';
 import {
+  errorMessage,
   fetchIntrinsicPreviewStatus,
   retryIntrinsicPreview,
   fetchIntrinsicMetrics,
@@ -62,7 +63,17 @@ function fillColor(coverage: number): string {
   return 'var(--rc-success)';
 }
 
-function Gauge({ label, value, pct, color }: { label: string; value: string; pct: number; color: string }) {
+function Gauge({
+  label,
+  value,
+  pct,
+  color,
+}: {
+  label: string;
+  value: string;
+  pct: number;
+  color: string;
+}) {
   return (
     <Box mb="md">
       <Group justify="space-between" mb={5}>
@@ -73,7 +84,9 @@ function Gauge({ label, value, pct, color }: { label: string; value: string; pct
           {value}
         </Text>
       </Group>
-      <Box style={{ height: 8, borderRadius: 6, background: 'var(--rc-input)', overflow: 'hidden' }}>
+      <Box
+        style={{ height: 8, borderRadius: 6, background: 'var(--rc-input)', overflow: 'hidden' }}
+      >
         <Box style={{ width: `${Math.round(pct * 100)}%`, height: '100%', background: color }} />
       </Box>
     </Box>
@@ -93,7 +106,11 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
           fz="0.62rem"
           px={8}
           py={2}
-          style={{ borderRadius: 20, background: 'rgba(251,191,36,0.14)', color: 'var(--rc-warning)' }}
+          style={{
+            borderRadius: 20,
+            background: 'rgba(251,191,36,0.14)',
+            color: 'var(--rc-warning)',
+          }}
         >
           indicative
         </Text>
@@ -110,7 +127,10 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
         <Text fz="0.72rem" c="dark.2">
           Sharpness gate
         </Text>
-        <Text fz="0.76rem" style={{ color: coverage?.sharpness_ok ? 'var(--rc-success)' : 'var(--rc-error)' }}>
+        <Text
+          fz="0.76rem"
+          style={{ color: coverage?.sharpness_ok ? 'var(--rc-success)' : 'var(--rc-error)' }}
+        >
           {coverage?.sharpness_ok ? 'sharp' : 'too blurry'}
         </Text>
       </Group>
@@ -139,12 +159,25 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
   );
 }
 
-function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: IntrinsicMetrics | null }) {
+function ResultPanel({
+  camera,
+  metrics,
+}: {
+  camera: CameraConfig;
+  metrics: IntrinsicMetrics | null;
+}) {
   const coveragePct = metrics ? Math.round(metrics.image_coverage * 100) : null;
   const bins = metrics?.orientation_bins ?? null;
   return (
     <>
-      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
+      <Text
+        fz="0.66rem"
+        fw={600}
+        c="dark.3"
+        tt="uppercase"
+        mb="md"
+        style={{ letterSpacing: '0.07em' }}
+      >
         Result
       </Text>
       <Text fz="0.72rem" c="dark.2">
@@ -165,7 +198,13 @@ function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: Intri
           fz="0.78rem"
           fw={600}
           className="rc-tnum"
-          c={coveragePct == null ? undefined : coveragePct >= 80 ? 'var(--rc-success)' : 'var(--rc-warning)'}
+          c={
+            coveragePct == null
+              ? undefined
+              : coveragePct >= 80
+                ? 'var(--rc-success)'
+                : 'var(--rc-warning)'
+          }
         >
           {coveragePct == null ? '—' : `${coveragePct}%`}
         </Text>
@@ -185,7 +224,7 @@ function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: Intri
       </Group>
       <Group justify="space-between" mt="sm">
         <Text fz="0.72rem" c="dark.2">
-          Corners used
+          Keyframes used
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
           {camera.grid_count ?? '—'}
@@ -196,7 +235,9 @@ function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: Intri
           Focal (fx, fy)
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
-          {camera.matrix ? `${camera.matrix[0][0].toFixed(1)}, ${camera.matrix[1][1].toFixed(1)}` : '—'}
+          {camera.matrix
+            ? `${camera.matrix[0][0].toFixed(1)}, ${camera.matrix[1][1].toFixed(1)}`
+            : '—'}
         </Text>
       </Group>
       <Group justify="space-between" mt="sm">
@@ -204,7 +245,9 @@ function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: Intri
           Principal point (cx, cy)
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
-          {camera.matrix ? `${camera.matrix[0][2].toFixed(1)}, ${camera.matrix[1][2].toFixed(1)}` : '—'}
+          {camera.matrix
+            ? `${camera.matrix[0][2].toFixed(1)}, ${camera.matrix[1][2].toFixed(1)}`
+            : '—'}
         </Text>
       </Group>
       <Group justify="space-between" mt="sm">
@@ -212,12 +255,16 @@ function ResultPanel({ camera, metrics }: { camera: CameraConfig; metrics: Intri
           Distortion (k1, k2)
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
-          {camera.distortions ? `${camera.distortions[0].toFixed(3)}, ${camera.distortions[1].toFixed(3)}` : '—'}
+          {camera.distortions
+            ? `${camera.distortions[0].toFixed(3)}, ${camera.distortions[1].toFixed(3)}`
+            : '—'}
         </Text>
       </Group>
       <Text fz="0.66rem" c="dark.3" mt="md">
         Calibrated at {camera.width * camera.resize_factor}×{camera.height * camera.resize_factor}
-        {camera.resize_factor !== 1 ? ` (native ${camera.width}×${camera.height}, ×${camera.resize_factor})` : ''}
+        {camera.resize_factor !== 1
+          ? ` (native ${camera.width}×${camera.height}, ×${camera.resize_factor})`
+          : ''}
       </Text>
     </>
   );
@@ -250,7 +297,14 @@ function PreparePanel({
 }: PreparePanelProps) {
   return (
     <>
-      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="md" style={{ letterSpacing: '0.07em' }}>
+      <Text
+        fz="0.66rem"
+        fw={600}
+        c="dark.3"
+        tt="uppercase"
+        mb="md"
+        style={{ letterSpacing: '0.07em' }}
+      >
         Prepare · from recording
       </Text>
 
@@ -304,6 +358,9 @@ const PHASES = [
 function IntrinsicsInner() {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
+  // Imported session (ADR-0031): capture is neutralised — the sub-wizard starts
+  // on Prepare (the recordings came with the archive) and never offers recording.
+  const imported = session?.mode === 'load-from-files';
   const cameras = session?.cameras ?? [];
   const [active, setActive] = useState<string | null>(cameras[0]?.name ?? null);
   const coverage = useAppSelector(selectCoverage(active));
@@ -332,7 +389,7 @@ function IntrinsicsInner() {
 
   // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
   const wizard = useCaptureWizard({
-    initialStep: 'capture',
+    initialStep: imported ? 'prepare' : 'capture',
     start: async () => {
       if (!active) throw new Error('no active camera');
       await startIntrinsic(active);
@@ -379,19 +436,26 @@ function IntrinsicsInner() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cameraNames]);
 
-  // On camera switch: reset to the right sub-step for that camera's status.
+  // On camera switch (and first mount): reset to the right sub-step for that
+  // camera's status. This runs after the initialStep, so it is THE authority.
   useEffect(() => {
     if (!active) return;
     // Land on Review whenever intrinsics EXIST (matrix present) — the status moves on
     // to 'extrinsic_done' later, but the calibration is not lost. reset also stops REC.
-    wizard.reset(camera?.matrix != null ? 'review' : 'capture');
+    // Imported session: no capture sub-step — land on Prepare and open the recording
+    // (the transcode poll fills the scrubber; usually already done, kicked at import).
+    const review = camera?.matrix != null;
+    wizard.reset(review ? 'review' : imported ? 'prepare' : 'capture');
+    if (!review && imported) {
+      void transcode.run();
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [active]);
 
   // The live camera is only needed while capturing; Prepare/Review scrub the file.
   useEffect(() => {
     if (!active) return;
-    setActiveIntrinsic(wizard.step === 'capture' ? active : null).catch(() => { });
+    setActiveIntrinsic(wizard.step === 'capture' ? active : null).catch(() => {});
   }, [active, wizard.step]);
 
   // On the Review step, load the persisted review metrics for the active camera.
@@ -409,7 +473,7 @@ function IntrinsicsInner() {
     };
   }, [wizard.step, active]);
 
-  useEffect(() => () => void setActiveIntrinsic(null).catch(() => { }), []);
+  useEffect(() => () => void setActiveIntrinsic(null).catch(() => {}), []);
 
   const trackRefs = useTracks([Track.Source.Camera], { onlySubscribed: true }).filter(
     isTrackReference,
@@ -435,7 +499,7 @@ function IntrinsicsInner() {
     try {
       await dispatch(validateIntrinsicThunk()).unwrap();
     } catch (err) {
-      wizard.setMessage(err instanceof Error ? err.message : 'validate failed');
+      wizard.setMessage(errorMessage(err, 'validate failed'));
     }
   };
 
@@ -457,7 +521,13 @@ function IntrinsicsInner() {
             mb="md"
           />
         }
-        stepper={<PhaseStepper phases={PHASES} current={wizard.step} />}
+        stepper={
+          <PhaseStepper
+            // Imported session: the capture phase does not exist (ADR-0031).
+            phases={imported ? PHASES.filter((p) => p.key !== 'capture') : PHASES}
+            current={wizard.step}
+          />
+        }
         main={
           <>
             {wizard.step === 'review' ? (
@@ -584,16 +654,20 @@ function IntrinsicsInner() {
               <Button fullWidth variant="light" mt="sm" onClick={() => void transcode.run()}>
                 Recompute (tune again)
               </Button>
-              <Button
-                fullWidth
-                variant="light"
-                color="gray"
-                mt="sm"
-                leftSection={<IconPlayerRecordFilled size={15} />}
-                onClick={wizard.reRecord}
-              >
-                Re-record
-              </Button>
+              {/* No re-record on an imported session (ADR-0031): there is no live
+                  camera, and starting a recording would overwrite the imported video. */}
+              {!imported && (
+                <Button
+                  fullWidth
+                  variant="light"
+                  color="gray"
+                  mt="sm"
+                  leftSection={<IconPlayerRecordFilled size={15} />}
+                  onClick={wizard.reRecord}
+                >
+                  Re-record
+                </Button>
+              )}
             </>
           ) : scrubbing ? (
             <Button
@@ -628,7 +702,7 @@ function IntrinsicsInner() {
       {/* Blocking compute modal (ADR-0019: capture released, solver runs). */}
       <Modal
         opened={wizard.step === 'computing'}
-        onClose={() => { }}
+        onClose={() => {}}
         withCloseButton={false}
         closeOnClickOutside={false}
         closeOnEscape={false}
@@ -652,9 +726,18 @@ function IntrinsicsInner() {
       />
 
       {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}
-      <Modal opened={wizard.overwriteOpen} onClose={wizard.cancelOverwrite} centered title={`Overwrite ${active} calibration?`}>
+      <Modal
+        opened={wizard.overwriteOpen}
+        onClose={wizard.cancelOverwrite}
+        centered
+        title={`Overwrite ${active} calibration?`}
+      >
         <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
-          <IconAlertTriangle size={20} color="var(--rc-error)" style={{ flex: 'none', marginTop: 2 }} />
+          <IconAlertTriangle
+            size={20}
+            color="var(--rc-error)"
+            style={{ flex: 'none', marginTop: 2 }}
+          />
           <Text fz="0.84rem" c="dark.1">
             Re-recording {active} will replace the current intrinsics (error{' '}
             {camera?.calibration_error?.toFixed(2) ?? '—'} px) and overwrite the recorded video. The

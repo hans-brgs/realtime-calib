@@ -175,7 +175,8 @@ Quand un changement structurant est demandé, consulter `realtime-calib-doc/` :
 ## 🧪 Ancrage Caliscope (rappel)
 
 Grounder sur le code/la doc Caliscope, pas sur des suppositions :
-- Intrinsèque : `cv2.aruco.calibrateCameraCharucoExtended`, flags `CALIB_USE_INTRINSIC_GUESS + CALIB_RATIONAL_MODEL + CALIB_FIX_ASPECT_RATIO`, `perViewErrors` exposés.
+- Intrinsèque : Caliscope appelle `cv2.calibrateCamera` **sans aucun flag de modèle** (vérifié sources, ADR-0032). Notre implé : `cv2.calibrateCameraExtended` + `CALIB_USE_INTRINSIC_GUESS` seul (expose `perViewErrors`).
 - Distorsion : modèle 5 coefficients `[k1, k2, p1, p2, k3]`.
+- Unités Caliscope : boards saisis en cm, **monde en mètres** (translations TOML en m) ; `grid_count` = nombre de **vues**, pas de coins.
 - Rotation stockée en Rodrigues 3-vecteur par caméra ; `cv2.Rodrigues` pour passer en 3×3.
 - Extrinsèque : pairwise PnP/`stereoCalibrate`, chaînage transitif, bundle adjustment scipy sur la capture volume {caméras + points 3D}.

@@ -30,11 +30,11 @@ def test_record_round_trip(tmp_path: Path) -> None:
     read = 0
     dims = None
     while True:
-        ok, frame = cap.read()
-        if not ok:
+        ok, decoded = cap.read()
+        if not ok or decoded is None:
             break
         read += 1
-        dims = frame.shape
+        dims = decoded.shape
     cap.release()
     assert read == n
     assert dims == (h, w, 3)

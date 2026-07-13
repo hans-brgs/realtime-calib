@@ -11,6 +11,7 @@ set without the session object.
 
 from __future__ import annotations
 
+import csv
 import json
 import logging
 from dataclasses import dataclass
@@ -107,3 +108,37 @@ class ExtrinsicRecorder:
 def read_timestamps(path: Path) -> list[float]:
     """Read a sidecar back into per-frame timestamps (compute/replay side)."""
     return [float(line) for line in path.read_text(encoding="ascii").split() if line]
+
+
+def parse_caliscope_timestamps(path: Path) -> dict[str, list[float]]:
+    """Parse a Caliscope ``timestamps.csv`` into per-camera frame times (ADR-0031).
+
+    Format (Caliscope import contract): two named columns ``cam_id,frame_time`` — one
+    row per recorded frame, in ANY order; ``cam_id`` is the numeric part of ``cam_<n>``
+    and ``frame_time`` a capture instant in seconds. Rows are grouped by ``cam_id`` and
+    sorted ascending by ``frame_time`` so each list lines up with the video's frame
+    index — ready to write as a ``<cam>.timestamps`` sidecar. Read by column NAME
+    (``DictReader``) so extra columns / column order don't matter. Raises
+    ``ValueError`` on a missing header or a non-numeric ``frame_time``.
+    """
+    by_camera: dict[str, list[float]] = {}
+    with path.open(encoding="utf-8-sig", newline="") as handle:
+        reader = csv.DictReader(handle)
+        fields = reader.fieldnames or []
+        if "cam_id" not in fields or "frame_time" not in fields:
+            raise ValueError("timestamps.csv must have 'cam_id' and 'frame_time' columns")
+        for line_no, row in enumerate(reader, start=2):  # line 1 is the header
+            cam_id = (row.get("cam_id") or "").strip()
+            raw = (row.get("frame_time") or "").strip()
+            if not cam_id and not raw:
+                continue  # tolerate blank trailing lines
+            try:
+                frame_time = float(raw)
+            except ValueError as exc:
+                raise ValueError(
+                    f"timestamps.csv line {line_no}: invalid frame_time {raw!r}"
+                ) from exc
+            by_camera.setdefault(cam_id, []).append(frame_time)
+    for times in by_camera.values():
+        times.sort()
+    return by_camera
