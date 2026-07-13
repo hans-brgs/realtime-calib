@@ -13,10 +13,10 @@ keywords: [multi-camera calibration, real-time camera calibration, open-source c
 calibration application. It recovers both the **intrinsics** (focal length,
 distortion) and the **extrinsics** (6-DoF position and orientation) of a rig of
 USB cameras, with live feedback, and exports calibration files ready for
-**Caliscope** and the major 3D engines. The whole calibration is driven from a
-web app, so you can run it from **any device on the same local network as the
-server the cameras are plugged into** — the smartphone in your pocket, a tablet,
-or a laptop.
+**Caliscope** and the major 3D engines. The whole calibration is accessible via a
+web app, so you can use it on **any device on the same local network as the
+server the cameras are plugged into** — available now on your laptop or tablet,
+and coming soon to the smartphone in your pocket.
 
 ## Why it exists
 
@@ -42,11 +42,12 @@ removes those three frictions.
 - **One-pass calibration.** No separate video-recording step: capture, detection,
   quality feedback and computation happen live, in a single flow. What you see is
   what gets calibrated.
-- **Runs headless, driven from any device.** The service runs in Docker on the
+- **Runs headless, driven from a browser.** The service runs in Docker on the
   machine the cameras are plugged into — **no desktop or GUI required on that
   host**. The operator drives everything from a web app served over the local
-  network, on **any device**: laptop, tablet or phone. This fits headless
-  servers, robotics rigs, motion-capture setups and production lines.
+  network — available now on a **laptop or tablet (landscape)**, with phone and
+  portrait support coming soon. This fits headless servers, robotics rigs,
+  motion-capture setups and production lines.
 - **Multi-format export.** One calibration, exported to the convention your target
   actually uses — Caliscope-native TOML, or engine-ready JSON with the correct
   axis and handedness for **three.js / OpenGL** (Y-up, right-handed), **Blender /
@@ -60,8 +61,8 @@ removes those three frictions.
 
 ## The workflow
 
-An operator starts the stack (Docker), opens the web app (desktop, **tablet** or
-mobile), and follows a wizard:
+An operator starts the stack (Docker), opens the web app (desktop or **tablet**
+in landscape), and follows a wizard:
 
 1. **Target Config** — define the board(s): ChArUco / ArUco.
 2. **Camera Setup** — discover and set up the USB cameras.
