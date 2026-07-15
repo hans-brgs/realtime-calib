@@ -38,8 +38,8 @@ from calibration_service.telemetry import SHARPNESS_MIN
 # RMSE unchanged). The former RATIONAL_MODEL+FIX_ASPECT anchor was not grounded
 # in caliscope code and produced degenerate per-camera coefficients.
 _CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
-_DEFAULT_CAP = 25  # keyframes kept for the solve (MATLAB recommends 10-20)
-_MAX_DETECT_FRAMES = 400  # cap detection cost on long sweeps (spread across the video)
+# stride/cap defaults live in calibration_service.tuning (ADR-0036); the transport
+# layer resolves omitted request fields there and always passes explicit values.
 _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # cv2.calibrateCameraExtended's internal per-view pose init (cvFindExtrinsicCameraParams2)
 # requires >= 6 point correspondences and hard-crashes below that — observed in
@@ -214,23 +214,21 @@ def select_keyframes(
     detections: list[BoardDetection],
     image_size: tuple[int, int],
     *,
-    cap: int = _DEFAULT_CAP,
-    stride: int = 1,
+    cap: int,
     sharpness_min: float = SHARPNESS_MIN,
 ) -> list[BoardDetection]:
     """Pick a diverse, capped, in-focus subset of detections for the solve.
 
-    Stride pre-filters high-fps runs; the sharpness gate drops blurry frames; a
-    minimum corner count + spread check drops views too sparse/degenerate for the
-    solver (Caliscope filters the same way, before diversifying — see
-    _MIN_CORNERS_FOR_CALIBRATION); then farthest-point sampling over
-    (tilt, image-x, image-y) spreads the selection over orientations and sensor
-    regions (coverage/diversity, [[coverage-metrics]]).
+    The sharpness gate drops blurry frames; a minimum corner count + spread check
+    drops views too sparse/degenerate for the solver (Caliscope filters the same
+    way, before diversifying — see _MIN_CORNERS_FOR_CALIBRATION); then
+    farthest-point sampling over (tilt, image-x, image-y) spreads the selection
+    over orientations and sensor regions (coverage/diversity, [[coverage-metrics]]).
     """
     width, height = image_size
     candidates = [
         d
-        for d in detections[:: max(1, stride)]
+        for d in detections
         if d.found
         and d.ids is not None
         and d.corners is not None
@@ -335,32 +333,26 @@ def compute_intrinsic_from_video(
     video_path: Path,
     board: CalibrationBoard,
     *,
-    cap: int | None = None,
-    stride: int | None = None,
+    cap: int,
+    stride: int,
     frame_start: int = 0,
     frame_end: int | None = None,
 ) -> IntrinsicResult:
     """Recompute intrinsics from a recorded capture (ADR-0019/0022 record → prepare → compute).
 
     The operator bounds cost/quality in the *Prepare* step (ADR-0022): ``stride``
-    ("process every N frames") sub-samples the sweep, ``frame_start``/``frame_end``
-    trim it (frame indices), and ``cap`` limits the kept keyframes. Detection (not the
-    solve) dominates the cost, so ``stride`` is the read decimation; with no ``stride``
-    an adaptive read-stride caps detection at ``_MAX_DETECT_FRAMES`` over the trimmed
-    span. Raises ``ValueError`` on an empty/unusable range (before the solver).
+    ("detect 1 frame every N", the read decimation — detection, not the solve,
+    dominates the cost), ``frame_start``/``frame_end`` trim the sweep (frame
+    indices), and ``cap`` limits the kept keyframes. Defaults for omitted request
+    fields resolve in the transport layer against TUNING (ADR-0036). Raises
+    ``ValueError`` on an empty/unusable range (before the solver).
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
     total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     start = max(0, frame_start)
     end = frame_end if frame_end is not None else (total if total > 0 else None)
-    span = (end - start) if end is not None else 0
-    # Operator "process every N frames" overrides the adaptive cap; else spread the
-    # detection budget over the (trimmed) span.
-    if stride and stride > 0:
-        read_stride = stride
-    else:
-        read_stride = max(1, span // _MAX_DETECT_FRAMES) if span > 0 else 1
+    read_stride = max(1, stride)
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None
     index = 0
@@ -379,7 +371,5 @@ def compute_intrinsic_from_video(
 
     if image_size is None:
         raise ValueError(f"no readable frames in {video_path}")
-    keyframes = select_keyframes(
-        detections, image_size, cap=cap if cap is not None else _DEFAULT_CAP
-    )
+    keyframes = select_keyframes(detections, image_size, cap=cap)
     return calibrate_intrinsic(keyframes, board, image_size)

@@ -27,6 +27,7 @@ from calibration_service.models.session import (
     SessionMode,
     WizardStep,
 )
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -162,8 +163,6 @@ def _to_dict(session: CalibrationSession) -> dict[str, object]:
         "session_id": session.session_id,
         "step": session.step.value,
         "mode": session.mode.value,
-        "intrinsic_fps": session.intrinsic_fps,
-        "optimization_strategy": session.optimization_strategy,
         "export_units": session.export_units,
         "export_targets": list(session.export_targets),
         "cameras": [_camera_to_dict(c) for c in session.cameras],
@@ -177,8 +176,8 @@ def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
         step=WizardStep(data["step"]),
         mode=_parse_mode(str(data["mode"])),
         cameras=cameras,
-        intrinsic_fps=int(data.get("intrinsic_fps", 30)),
-        optimization_strategy=str(data.get("optimization_strategy", "coverage-aware")),
-        export_units=str(data.get("export_units", "mm")),
+        # Unknown keys in older session.toml files (e.g. the removed
+        # intrinsic_fps/optimization_strategy) are simply ignored.
+        export_units=str(data.get("export_units", TUNING.export_units)),
         export_targets=[str(t) for t in data.get("export_targets", [])],
     )

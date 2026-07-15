@@ -66,37 +66,41 @@ export function commonFps(cameras: DetectedCamera[], width: number, height: numb
   return [...first].filter((f) => rest.every((set) => set.has(f))).sort((a, b) => b - a);
 }
 
-// Standard capture rates offered to the operator, fastest first. A rate below what
-// the sensor advertises natively is still offered: the service honours it by pacing
-// the pipeline (dropping surplus frames). So the whole ladder is offerable up to the
-// camera's native max for the chosen resolution; the max caps it (can't exceed it).
-export const FPS_LADDER = [60, 30, 15] as const;
-
-export function offeredFps(cameras: DetectedCamera[], width: number, height: number): number[] {
+// Capture rates offered to the operator, fastest first. The ladder comes from the
+// backend-served defaults (GET /defaults, ADR-0036) — its max IS the recording
+// cap. A rate below what the sensor advertises natively is still offered: the
+// service honours it by pacing the pipeline (dropping surplus frames).
+export function offeredFps(
+  cameras: DetectedCamera[],
+  width: number,
+  height: number,
+  ladder: readonly number[],
+): number[] {
   const native = commonFps(cameras, width, height);
   if (native.length === 0) {
     return [];
   }
   const max = native[0]; // commonFps is sorted high-to-low
-  const ladder = FPS_LADDER.filter((f) => f <= max);
-  return ladder.length > 0 ? ladder : [max];
+  const offered = ladder.filter((f) => f <= max);
+  return offered.length > 0 ? offered : [max];
 }
-
-export const RESIZE_FACTORS = [1, 0.75, 0.5, 1 / 3, 0.25] as const;
 
 export interface CaptureDefaults {
   resolution: ResolutionOption;
   fps: number;
 }
 
-export function defaultCapture(cameras: DetectedCamera[]): CaptureDefaults | null {
+export function defaultCapture(
+  cameras: DetectedCamera[],
+  opts: { fpsOptions: readonly number[]; defaultFps: number },
+): CaptureDefaults | null {
   const resolutions = commonResolutions(cameras);
   if (resolutions.length === 0) {
     return null;
   }
   const top = resolutions[0];
-  const fps = offeredFps(cameras, top.width, top.height);
-  return { resolution: top, fps: fps[0] ?? 30 };
+  const fps = offeredFps(cameras, top.width, top.height, opts.fpsOptions);
+  return { resolution: top, fps: fps[0] ?? opts.defaultFps };
 }
 
 // Build the (uniform) config request: the same resolution / factor / fps applied to

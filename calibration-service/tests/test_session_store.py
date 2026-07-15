@@ -19,6 +19,7 @@ from calibration_service.session.store import (
     save_session,
     session_dir,
 )
+from calibration_service.tuning import TUNING
 
 
 def _sample_camera() -> CameraConfig:
@@ -51,8 +52,7 @@ def test_round_trip_preserves_state(tmp_path: Path) -> None:
         step=WizardStep.EXTRINSIC_CAPTURE,
         mode=SessionMode.LOAD_FROM_FILES,
         cameras=[_sample_camera()],
-        intrinsic_fps=60,
-        optimization_strategy="outlier-rejection",
+        export_units="mm",
     )
 
     save_session(tmp_path, original)
@@ -131,8 +131,8 @@ def test_reload_maps_legacy_modes(tmp_path: Path) -> None:
     assert loaded.mode is SessionMode.LOAD_FROM_FILES
 
 
-def test_reload_defaults_missing_fps_and_strategy(tmp_path: Path) -> None:
-    """session.toml files predating intrinsic_fps/optimization_strategy still load."""
+def test_reload_defaults_missing_export_units_to_tuning(tmp_path: Path) -> None:
+    """session.toml files without an export preference seed from TUNING (metres)."""
     base = session_dir(tmp_path, "legacy")
     base.mkdir(parents=True)
     (base / SESSION_FILE).write_text(
@@ -144,5 +144,4 @@ def test_reload_defaults_missing_fps_and_strategy(tmp_path: Path) -> None:
 
     loaded = load_session(tmp_path, "legacy")
 
-    assert loaded.intrinsic_fps == 30
-    assert loaded.optimization_strategy == "coverage-aware"
+    assert loaded.export_units == TUNING.export_units

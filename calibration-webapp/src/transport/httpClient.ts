@@ -8,6 +8,7 @@ import type {
   CaptureView,
   ConfigRequest,
   DetectedCamera,
+  PipelineDefaults,
   Session,
   SessionSummary,
 } from '@/transport/types';
@@ -97,6 +98,11 @@ export const fetchSession = async (): Promise<Session | null> => {
 
 export const fetchSessions = (): Promise<SessionSummary[]> =>
   getJson<SessionSummary[]>('/sessions');
+
+// Pipeline defaults and bounds — the backend is the single source (ADR-0036);
+// every knob seeds its value and min/max from this payload.
+export const fetchDefaults = (): Promise<PipelineDefaults> =>
+  getJson<PipelineDefaults>('/defaults');
 
 // Create a fresh session (unique folder name = id) and make it active. Its wizard
 // step is intrinsic_board, so the rail auto-navigates to Target Config.
@@ -244,12 +250,16 @@ export const startExtrinsic = (): Promise<{ recording: boolean; cameras: number 
 export const stopExtrinsic = (): Promise<{ frames: Record<string, number> }> =>
   postJson<{ frames: Record<string, number> }>('/extrinsic/stop');
 
-// Prepare-step knobs forwarded to the extrinsic compute; omitted fields use defaults.
+// Prepare-step knobs forwarded to the extrinsic compute; omitted fields resolve
+// backend-side against TUNING (ADR-0036). `min_shared` is deliberately absent:
+// it is an API-only knob since ADR-0036 (possible UI reintegration later, under
+// an Advanced section).
 export interface ExtrinsicComputeParams {
+  // Detection stride over the spread-filtered candidate groups ("1 group / N").
+  stride?: number;
   // Sharpest groups kept for the solve (ADR-0033); omitted = board-type default.
   max_groups?: number;
   max_spread_ms?: number;
-  min_shared?: number;
 }
 
 export const computeExtrinsic = (params?: ExtrinsicComputeParams): Promise<Session> =>
@@ -359,7 +369,7 @@ export const saveExportConfig = (formats: string[], units: 'mm' | 'm'): Promise<
 
 export const exportCalibration = (
   formats: string[],
-  units: 'mm' | 'm' = 'mm', // platform JSONs only — the TOMLs keep their mm semantics
+  units: 'mm' | 'm', // explicit — the session preference is the backend's fallback
 ): Promise<{ files: ExportedFile[] }> =>
   postJson<{ files: ExportedFile[] }>('/export', { formats, units });
 

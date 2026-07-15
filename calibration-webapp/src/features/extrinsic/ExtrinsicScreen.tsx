@@ -29,6 +29,7 @@ import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
   computeExtrinsicThunk,
   selectSession,
@@ -302,14 +303,33 @@ function ExtrinsicInner() {
   const extrinsicBoard = session?.extrinsic_board ?? session?.intrinsic_board ?? null;
   const markerBoard = extrinsicBoard?.board_type === 'aruco';
 
-  // Prepare state: synchronized groups + the compute knobs (ADR-0023/0033).
+  // Backend-served knob defaults/bounds (GET /defaults, ADR-0036).
+  const defaults = useAppSelector(selectDefaults);
+
+  // Prepare state: synchronized groups + the compute knobs (ADR-0023/0033/0036).
+  // `min_shared` deliberately has no control here since ADR-0036 (API-only knob;
+  // possible reintegration later under an Advanced section).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
   const [groupIndex, setGroupIndex] = useState(0);
-  // Sharpest groups kept by the solve (ADR-0033); default = board-type budget.
-  const [maxGroups, setMaxGroups] = useState(markerBoard ? 240 : 80);
-  const [minShared, setMinShared] = useState(5);
+  const [stride, setStride] = useState(1);
+  const [maxGroups, setMaxGroups] = useState(5);
   const [maxSpreadMs, setMaxSpreadMs] = useState<number | ''>('');
   const [result, setResult] = useState<ExtrinsicResultPayload | null>(null);
+
+  // Seed (and RE-seed on a board-type change) the board-type-dependent knobs from
+  // the served defaults — a ChArUco board detects ~10x slower than a marker, so
+  // both budgets differ per type.
+  useEffect(() => {
+    if (!defaults) return;
+    setStride(markerBoard ? defaults.extrinsic_stride_marker : defaults.extrinsic_stride_charuco);
+    setMaxGroups(markerBoard ? defaults.max_groups_marker : defaults.max_groups_charuco);
+  }, [defaults, markerBoard]);
+
+  const strideBounds = defaults?.extrinsic_stride_bounds ?? [1, 30];
+  const maxGroupsBounds = defaults?.max_groups_bounds ?? [5, 960];
+  // "1 group every N" over the spread-filtered candidates: what the compute will
+  // actually detect on (the kept count is bounded by it — both shown live).
+  const analyzedGroups = groups.length > 0 ? Math.ceil(groups.length / Math.max(1, stride)) : 0;
 
   // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
   const wizard = useCaptureWizard({
@@ -325,9 +345,9 @@ function ExtrinsicInner() {
     compute: async () => {
       await dispatch(
         computeExtrinsicThunk({
+          stride,
           max_groups: maxGroups,
           max_spread_ms: maxSpreadMs === '' ? undefined : maxSpreadMs,
-          min_shared: minShared,
         }),
       ).unwrap();
     },
@@ -359,7 +379,7 @@ function ExtrinsicInner() {
   }, []);
 
   // Refetch the group list when the spread threshold changes (server-side filter,
-  // same semantics as the compute). Stride/min-shared are compute-only knobs.
+  // same semantics as the compute). Stride/max-groups are compute-only knobs.
   useEffect(() => {
     if (wizard.step !== 'prepare') return;
     let cancelled = false;
@@ -491,25 +511,28 @@ function ExtrinsicInner() {
                 description="Groups above this timestamp spread are discarded"
                 value={maxSpreadMs}
                 onChange={(v) => setMaxSpreadMs(typeof v === 'number' ? v : '')}
-                min={1}
-                max={100}
+                min={defaults?.max_spread_ms_bounds[0] ?? 1}
+                max={defaults?.max_spread_ms_bounds[1] ?? 100}
+                mb="md"
+              />
+              <NumberInput
+                label="Sampling stride (1 group / N)"
+                description={`${analyzedGroups} of ${groups.length} groups will be analyzed`}
+                value={stride}
+                onChange={(v) => setStride(Math.max(strideBounds[0], Number(v) || strideBounds[0]))}
+                min={strideBounds[0]}
+                max={strideBounds[1]}
                 mb="md"
               />
               <NumberInput
                 label="Max groups (best kept)"
-                description="The solve keeps the sharpest groups, spread over time"
+                description={`Keeps the ${Math.min(maxGroups, analyzedGroups)} sharpest of the analyzed groups`}
                 value={maxGroups}
-                onChange={(v) => setMaxGroups(Math.max(5, Number(v) || 5))}
-                min={5}
-                max={960}
-                mb="md"
-              />
-              <NumberInput
-                label="Min shared views per pair"
-                value={minShared}
-                onChange={(v) => setMinShared(Math.max(2, Number(v) || 2))}
-                min={2}
-                max={30}
+                onChange={(v) =>
+                  setMaxGroups(Math.max(maxGroupsBounds[0], Number(v) || maxGroupsBounds[0]))
+                }
+                min={maxGroupsBounds[0]}
+                max={maxGroupsBounds[1]}
                 mb="md"
               />
               <Text fz="0.66rem" c="dark.3">

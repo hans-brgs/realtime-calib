@@ -183,7 +183,9 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     names = [f["name"] for f in response.json()["files"]]
     assert names == ["camera_array.toml", "camera_array_unity.json"]  # catalog order
     unity = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
-    assert unity["world_units"] == "mm"
+    # No units in the request -> the session preference applies (TUNING default:
+    # Caliscope-native metres, ADR-0036).
+    assert unity["world_units"] == "m"
     assert unity["anchor"] == "cam_0"
 
     archive = client.get("/export/archive")
@@ -191,10 +193,11 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
         assert sorted(bundle.namelist()) == sorted(names)
 
-    # Units apply to the platform JSONs (the TOMLs keep their mm semantics).
-    client.post("/export", json={"formats": ["unity"], "units": "m"})
-    unity_m = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
-    assert unity_m["world_units"] == "m"
+    # An explicit units override is honoured verbatim (and persists as the new
+    # session preference).
+    client.post("/export", json={"formats": ["unity"], "units": "mm"})
+    unity_mm = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
+    assert unity_mm["world_units"] == "mm"
 
     assert client.post("/export", json={"formats": ["nope"]}).status_code == 422
     assert manager.current().step.value == "export"  # wizard advanced

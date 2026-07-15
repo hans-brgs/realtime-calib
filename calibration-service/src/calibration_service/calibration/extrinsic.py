@@ -53,26 +53,16 @@ logger = logging.getLogger(__name__)
 _MIN_COMMON_CORNERS = 6
 _MIN_CORNERS_SINGLE_MARKER = 4
 # Shared boards actually fed to stereoCalibrate per pair, picked for temporal
-# diversity (Caliscope boards_sampled).
+# diversity (Caliscope boards_sampled). The pairwise estimate only INITIALISES
+# the chaining; the BA then consumes every kept group's observations.
 _BOARDS_SAMPLED = 10
-# Minimum shared groups for a pair to be estimated at all (below this the
-# geometry is too weak; the co-visibility gauge tells the operator live).
-_DEFAULT_MIN_SHARED = 5
-# Detection budget over the sweep: groups are subsampled evenly to this cap
-# (detection dominates compute cost, like the intrinsic _MAX_DETECT_FRAMES).
-# Observe first, choose after (ADR-0033): detection runs on a bounded POOL of
-# candidate instants (uniform in time — bounds COST, not quality), then the
-# sharpest groups are KEPT (min member sharpness, temporal bins). Single-marker
-# detection is ~10x cheaper than ChArUco AND each view carries only 4 corners,
-# so markers get much larger budgets (more views = the redundancy).
-_DETECT_POOL = 160
-_DETECT_POOL_SINGLE_MARKER = 960
-# Default keep budgets (the webapp's "Max groups" knob overrides them).
-_MAX_KEPT_GROUPS = 80
-_MAX_KEPT_GROUPS_SINGLE_MARKER = 240
-# Shared boards fed to stereoCalibrate per pair (see _BOARDS_SAMPLED); with only
-# 4 corners per marker view, average over more views.
+# Same, for single-ArUco targets: with only 4 corners per marker view, average
+# over more views.
 _BOARDS_SAMPLED_SINGLE_MARKER = 25
+# stride (detection decimation over the candidate groups), max_groups (sharpest
+# kept) and min_shared defaults live in calibration_service.tuning (ADR-0036);
+# the transport layer resolves omitted request fields there per board type and
+# always passes explicit values.
 # stereoCalibrate refinement on normalized points (Caliscope criteria).
 _STEREO_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 1e-3)
 # Bundle-adjustment settings (Caliscope capture_volume least_squares kwargs), with
@@ -230,7 +220,7 @@ def stereo_pairwise(
     groups: list[dict[str, GroupDetection]],
     board: CalibrationBoard,
     *,
-    min_shared: int = _DEFAULT_MIN_SHARED,
+    min_shared: int,
 ) -> dict[tuple[str, str], PairEstimate]:
     """Estimate the primary->secondary transform of every co-visible camera pair.
 
@@ -1038,19 +1028,21 @@ def compute_extrinsic_from_sweep(
     *,
     anchor: str,
     window_s: float,
-    max_groups: int | None = None,
+    stride: int,
+    max_groups: int,
+    min_shared: int,
     max_spread_s: float | None = None,
-    min_shared: int = _DEFAULT_MIN_SHARED,
 ) -> tuple[ExtrinsicResult, BAInputs]:
     """Solve the camera array from a recorded synchronized sweep (ADR-0023/0033).
 
     Synchronizes on the timestamp **sidecars only** (cheap), drops loosely-synced
-    groups (``max_spread_s``), detects on a bounded POOL of candidate instants,
-    then keeps the ~``max_groups`` SHARPEST groups (observe first, choose after,
-    ADR-0033 — blind uniform sampling injected motion-blurred corners into the
-    BA) and runs pairwise -> chaining -> triangulation -> BA. Also returns the
-    BA observations so 'Minimize' can refine later without redetecting. Supports
-    ChArUco boards and single-ArUco-marker targets (see board_object_points).
+    groups (``max_spread_s``), detects on 1 candidate group every ``stride``
+    (the cost knob, mirroring the intrinsic Prepare — ADR-0036), then keeps the
+    ~``max_groups`` SHARPEST groups (observe first, choose after, ADR-0033 —
+    blind uniform sampling injected motion-blurred corners into the BA) and runs
+    pairwise -> chaining -> triangulation -> BA. Also returns the BA observations
+    so 'Minimize' can refine later without redetecting. Supports ChArUco boards
+    and single-ArUco-marker targets (see board_object_points).
     """
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
@@ -1060,11 +1052,7 @@ def compute_extrinsic_from_sweep(
 
     if max_spread_s is not None:
         groups = [group for group in groups if group.spread <= max_spread_s]
-    charuco = board.board_type is BoardType.CHARUCO
-    pool = _DETECT_POOL if charuco else _DETECT_POOL_SINGLE_MARKER
-    if len(groups) > pool:
-        step = len(groups) / pool
-        groups = [groups[int(i * step)] for i in range(pool)]
+    groups = groups[:: max(1, stride)]
     if not groups:
         raise ValueError("no synchronized groups in the sweep (check the spread threshold)")
     logger.info("extrinsic compute: detecting on %d candidate groups", len(groups))
@@ -1075,15 +1063,12 @@ def compute_extrinsic_from_sweep(
     detections = _detect_group_frames(directory, groups_frames, by_name, board)
     if not detections:
         raise ValueError("no synchronized board views across >= 2 cameras")
-    keep = max_groups if max_groups is not None else (
-        _MAX_KEPT_GROUPS if charuco else _MAX_KEPT_GROUPS_SINGLE_MARKER
-    )
-    selected = _select_quality_groups(detections, max(1, keep))
+    selected = _select_quality_groups(detections, max(1, max_groups))
     logger.info(
         "extrinsic compute: kept %d/%d detected groups by sharpness (cap %d)",
         len(selected),
         len(detections),
-        keep,
+        max_groups,
     )
     detections = selected
 

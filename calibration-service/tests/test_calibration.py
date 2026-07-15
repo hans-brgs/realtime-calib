@@ -114,11 +114,6 @@ def test_select_keyframes_drops_blurry() -> None:
     assert select_keyframes(dets, (640, 480), cap=25) == []
 
 
-def test_select_keyframes_applies_stride() -> None:
-    dets = [_detection(100 + i, 100, 10) for i in range(10)]
-    assert len(select_keyframes(dets, (640, 480), cap=25, stride=2)) == 5
-
-
 def test_select_keyframes_caps_and_keeps_extremes() -> None:
     # 40 clustered near the centre + 4 spread to the corners.
     dets = [_detection(320, 240, 0) for _ in range(40)]
@@ -169,7 +164,7 @@ def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:
         for _ in range(3):
             rec.write(gray)
     with pytest.raises(ValueError, match="usable views"):
-        compute_intrinsic_from_video(path, board)
+        compute_intrinsic_from_video(path, board, cap=25, stride=1)
 
 
 def test_coverage_grid_normalises_to_the_busiest_cell() -> None:
@@ -234,7 +229,7 @@ def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None
         for _ in range(3):
             rec.write(gray)
     with pytest.raises(ValueError, match="no readable frames"):
-        compute_intrinsic_from_video(path, board, frame_start=10)
+        compute_intrinsic_from_video(path, board, cap=25, stride=1, frame_start=10)
 
 
 @pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")

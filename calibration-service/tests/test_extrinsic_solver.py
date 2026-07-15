@@ -233,6 +233,8 @@ def test_sweep_orchestration_solves_from_sidecars(
         models,
         anchor="cam_0",
         window_s=0.95 / fps,
+        stride=1,
+        max_groups=240,
         min_shared=3,
     )
     assert len(ba_inputs.obs_camera) == len(ba_inputs.obs_norm) == len(ba_inputs.obs_px)

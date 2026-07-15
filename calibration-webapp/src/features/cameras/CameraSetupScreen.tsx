@@ -28,7 +28,6 @@ import {
   offeredFps,
   outputDimensions,
   parseResolution,
-  RESIZE_FACTORS,
 } from '@/features/cameras/captureOptions';
 import {
   detectCamerasThunk,
@@ -36,6 +35,7 @@ import {
   selectDetectStatus,
 } from '@/features/cameras/camerasSlice';
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
   applyCameraConfig,
   confirmCameraSetupThunk,
@@ -457,6 +457,8 @@ function LiveCameraSetup() {
   const detected = useAppSelector(selectDetectedCameras);
   const detectStatus = useAppSelector(selectDetectStatus);
   const session = useAppSelector(selectSession);
+  // Backend-served knob defaults/bounds (ADR-0036): fps ladder + resize factors.
+  const defaults = useAppSelector(selectDefaults);
 
   const [prefix, setPrefix] = useState('cam');
   const [resolution, setResolution] = useState<string | null>(null);
@@ -504,12 +506,18 @@ function LiveCameraSetup() {
       setPrefix(first.prefix);
       return;
     }
-    const fallback = defaultCapture(detected);
+    if (defaults === null) {
+      return; // seeds come from GET /defaults (ADR-0036); wait for them
+    }
+    const fallback = defaultCapture(detected, {
+      fpsOptions: defaults.fps_options,
+      defaultFps: defaults.default_fps,
+    });
     if (fallback) {
       setResolution(fallback.resolution.value);
       setFps(fallback.fps);
     }
-  }, [detected, session]);
+  }, [detected, session, defaults]);
 
   // Index order: from the persisted config (by index) if present, else detection order.
   useEffect(() => {
@@ -553,14 +561,17 @@ function LiveCameraSetup() {
 
   const resolutionOptions = commonResolutions(detected);
   const selected = resolution ? parseResolution(resolution) : null;
-  const fpsOptions = selected ? offeredFps(detected, selected.width, selected.height) : [];
+  const fpsLadder = defaults?.fps_options ?? [];
+  const fpsOptions = selected
+    ? offeredFps(detected, selected.width, selected.height, fpsLadder)
+    : [];
   const output = selected ? outputDimensions(selected.width, selected.height, resizeFactor) : null;
 
   const onResolutionChange = (value: string | null) => {
     setResolution(value);
     if (value) {
       const { width, height } = parseResolution(value);
-      const next = offeredFps(detected, width, height);
+      const next = offeredFps(detected, width, height, fpsLadder);
       setFps(next[0] ?? null);
     }
   };
@@ -781,7 +792,7 @@ function LiveCameraSetup() {
                     )}
                   </Group>
                   <Select
-                    data={RESIZE_FACTORS.map((s) => ({
+                    data={(defaults?.resize_factors ?? [1]).map((s) => ({
                       value: String(s),
                       label: `s = ${s.toFixed(2)}`,
                     }))}

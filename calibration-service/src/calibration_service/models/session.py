@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from calibration_service.models.board import CalibrationBoard
+from calibration_service.tuning import TUNING
 
 
 class WizardStep(StrEnum):
@@ -90,13 +91,12 @@ class CalibrationSession:
     step: WizardStep = WizardStep.INTRINSIC_BOARD
     mode: SessionMode = SessionMode.NEW_REALTIME
     cameras: list[CameraConfig] = field(default_factory=list)
-    intrinsic_fps: int = 30
-    optimization_strategy: str = "coverage-aware"
     intrinsic_board: CalibrationBoard | None = None
     extrinsic_board: CalibrationBoard | None = None
     # Persisted export config (ADR-0026): restored on reopen. The truth (poses)
-    # lives in result.json; this is a lightweight "how I export" preference.
-    export_units: str = "mm"
+    # lives in result.json; this is a lightweight "how I export" preference,
+    # seeded from TUNING (Caliscope-native metres) for sessions that never chose.
+    export_units: str = TUNING.export_units
     export_targets: list[str] = field(default_factory=list)
 
     def effective_extrinsic_board(self) -> CalibrationBoard | None:

@@ -15,6 +15,7 @@ import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import { selectSession } from '@/features/session/sessionSlice';
 import {
   type ExportTarget,
@@ -42,13 +43,16 @@ const SECTION_LABEL = {
 
 export function ExportScreen() {
   const session = useAppSelector(selectSession);
+  const defaults = useAppSelector(selectDefaults);
   const cameras = session?.cameras ?? [];
   const posed = cameras.filter((c) => c.rotation != null).length;
   const ready = cameras.length > 0 && posed === cameras.length;
 
   const [targets, setTargets] = useState<ExportTarget[]>([]);
   const [selected, setSelected] = useState<string[]>([]);
-  const [units, setUnits] = useState<'mm' | 'm'>('mm');
+  // Pre-restore placeholder only — the restore effect overwrites it from the
+  // session preference (itself seeded backend-side from TUNING, ADR-0036).
+  const [units, setUnits] = useState<'mm' | 'm'>('m');
   const [preview, setPreview] = useState<PreviewFile[]>([]);
   const [initialized, setInitialized] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -65,14 +69,15 @@ export function ExportScreen() {
     };
   }, []);
 
-  // Restore the persisted export config once the session is available.
+  // Restore the persisted export config once the session AND the served defaults
+  // are available (the defaults are the fallback for sessions that never chose).
   useEffect(() => {
-    if (initialized || !session) return;
-    setUnits(session.export_units ?? 'mm');
+    if (initialized || !session || !defaults) return;
+    setUnits(session.export_units ?? defaults.export_units);
     const saved = session.export_targets ?? [];
     setSelected(saved.length > 0 ? saved : ['caliscope']);
     setInitialized(true);
-  }, [initialized, session]);
+  }, [initialized, session, defaults]);
 
   // On every change: refresh the dry-run preview and persist the config.
   useEffect(() => {
