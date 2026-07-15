@@ -43,6 +43,7 @@ from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
 from calibration_service.synchronization import SyncFrame, SyncGroup
+from calibration_service.synchronization.window import sync_window
 
 logger = logging.getLogger(__name__)
 
@@ -195,7 +196,8 @@ def derive_sweep_window(directory: Path, names: list[str]) -> float:
             medians.append(float(np.median(deltas)))
     if not medians:
         raise ValueError(f"no recorded timestamps under {directory}")
-    return float(np.clip(0.95 * max(medians), 0.02, 0.25))
+    # Same derivation rule as the live synchronizer (ADR-0037): one truth.
+    return sync_window(max(medians))
 
 
 def _diverse_group_indices(candidates: list[tuple[int, int]], cap: int) -> list[int]:

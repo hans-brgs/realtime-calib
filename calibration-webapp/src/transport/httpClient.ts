@@ -166,15 +166,15 @@ export const computeIntrinsic = (camera: string, params?: ComputeParams): Promis
 // extrinsic capture — the rail follows the persisted step, so this IS the navigation.
 export const validateIntrinsic = (): Promise<Session> => postJson<Session>('/intrinsic/validate');
 
-// Preview transcodes (ADR-0027): each recording is transcoded ONCE in the
-// background to an H.264 mp4 re-timed CFR BY INDEX at PREVIEW_FPS — so
-// index = round(video.currentTime * PREVIEW_FPS) is exact by construction.
-// MUST match the backend constant (recording/preview.py).
-export const PREVIEW_FPS = 30;
-
+// Preview transcodes (ADR-0027/0037): each recording is transcoded ONCE in the
+// background to an H.264 mp4 re-timed CFR BY INDEX at the recording's own fps.
+// The rate is SERVED in the status (dynamic contract — no hardcoded copy):
+// index = round(video.currentTime * status.fps) is exact by construction, and
+// playback speed is true whatever the configured capture rate.
 export interface PreviewStatus {
   state: 'missing' | 'running' | 'done' | 'failed';
   frames: number;
+  fps: number; // index <-> time rate of the DONE preview
   error: string | null;
 }
 

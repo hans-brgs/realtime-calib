@@ -24,6 +24,7 @@ from numpy.typing import NDArray
 
 from calibration_service.capture.camera import CameraCapture, CameraOpenError, open_camera
 from calibration_service.capture.enumeration import enumerate_cameras
+from calibration_service.capture.pacing import GridPacer
 from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
@@ -37,12 +38,14 @@ from calibration_service.recording import (
 )
 from calibration_service.session.manager import SessionManager
 from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer
+from calibration_service.synchronization.window import sync_window
 from calibration_service.telemetry import (
     TELEMETRY_TOPIC,
     coverage_metrics_payload,
     covisibility_payload,
 )
 from calibration_service.transport.livekit_publisher import LiveKitPublisher, mint_publish_token
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -99,6 +102,23 @@ def _draw_preview(
     return draw_overlay(base, detection, preview_size)
 
 
+def _detect_only(
+    detector: BoardDetector,
+    image: NDArray[np.uint8],
+    preview_size: tuple[int, int],
+    detect_at_preview: bool,
+) -> BoardDetection:
+    """Detection without drawing — for detection ticks that are not publish ticks.
+
+    Since ADR-0037 the detection grid is decoupled from the publication cadence
+    (a reduced preview_fps must not throttle the live feedback); this is the
+    _process_frame detection path without the preview composition.
+    """
+    if detect_at_preview:
+        return detector.detect(_downscale(image, preview_size))
+    return detector.detect(image)
+
+
 _EMPTY_READ_BACKOFF_S = 0.005
 _FIRST_FRAME_ATTEMPTS = 60
 _FIRST_FRAME_BACKOFF_S = 0.1
@@ -106,30 +126,26 @@ _FIRST_FRAME_BACKOFF_S = 0.1
 _RECONNECT_BACKOFF_S = 2.0
 # Stagger camera opens to ease simultaneous USB bandwidth negotiation (4 cameras).
 _OPEN_STAGGER_S = 0.5
-# Preview fps before configuration: a safe default (avoids over-driving a USB 2.0
-# camera at e.g. 60 fps). After configuration the operator-chosen fps is used.
-_DEFAULT_FPS = 30
 # Single publisher participant; cameras are distinguished by their track name.
 _PARTICIPANT_IDENTITY = "service"
 # Telemetry cadence on the data channel (coverage metrics ~10 Hz, not per frame).
 _TELEMETRY_PERIOD_S = 0.1
-# Board detection + burn-in run only on the single active intrinsic camera now
-# (ADR-0021), so there is CPU headroom to detect at the preview push rate (~30 Hz)
-# for a tightly-tracking overlay. This is the live-feedback rate ONLY; the intrinsic
-# *compute* re-detects on the recorded video (its own frame stride), so it is
-# unaffected by this value.
-_DETECT_PERIOD_S = 1 / 30
-# Recording rate: ~30 Hz of native frames is ample to select keyframes from, and
-# caps the encode load. Writes run off the event loop. The recorded file declares
-# min(capture fps, _RECORD_FPS) so its playback speed matches the write cadence.
-_RECORD_FPS = 30
-_RECORD_PERIOD_S = 1 / _RECORD_FPS
+# Live-detection grids (ADR-0037: their own absolute grids, decoupled from the
+# publication cadence). Intrinsic: a single active camera (ADR-0021) leaves CPU
+# headroom for ~30 Hz overlay tracking. Extrinsic: detection runs on EVERY camera
+# (4x native detections ~4 cores), hence the lower provisional 15 Hz; goal is to
+# match 30 Hz once end-to-end CPU load is validated on the real 4-camera rig.
+# Live-feedback rates ONLY; the computes re-detect on the recordings.
+_DETECT_RATE_HZ = 30
+_EXTRINSIC_DETECT_RATE_HZ = 15
+# Recording cadence = the configured capture fps (ADR-0037): every frame kept by
+# the capture grid is written while recording — no separate record throttle; the
+# mkv declares the capture cadence and the sidecars carry the true timestamps.
 # Preview published to LiveKit is downscaled + rate-capped (ADR-0015): capture stays
 # native (for recording/detection), but publishing 4x1080p@60 overloads the CPU VP8
-# encoder. Downscaling the preview cuts encode ~4x and the fps cap ~2x.
+# encoder. The publication rate follows the preview_fps knob (TUNING), capped by
+# the capture rate — see _publish_rate().
 _PREVIEW_MAX_WIDTH = 960
-_PREVIEW_FPS = 30
-_PUSH_PERIOD_S = 1 / _PREVIEW_FPS
 # Dedicated capture thread pool (ADR-0021): isolate the blocking cv2 reads/decodes/
 # writes from the default executor (shared with the intrinsic compute + sync HTTP
 # routes). Sized for a handful of cameras each parking a thread in a blocking grab()
@@ -142,16 +158,19 @@ _RECONCILE_TICK_S = 1.0
 _ALL_CAMERA_VIEWS = frozenset({"cameras", "extrinsic"})
 _INTRINSIC_VIEW = "intrinsic"
 _EXTRINSIC_VIEW = "extrinsic"
-# Extrinsic sweep: detection runs on EVERY camera, so a lower rate than the
-# single-camera intrinsic 30 Hz (4x native detections ~4 cores). Detection fires on
-# a shared wall-clock grid (int(now/period)) so all cameras detect the same instant
-# — their frame timestamps then differ by at most ~1 frame interval, which the sync
-# window accommodates. Live-feedback only; the compute re-detects the recordings.
-# Provisional 15 Hz; goal is to match the intrinsic 30 Hz once end-to-end CPU load
-# is validated on the real 4-camera rig (operator request).
-_EXTRINSIC_DETECT_PERIOD_S = 1 / 15
 # Co-visibility matrix push rate (small payload; the gauges don't need more).
 _COVISIBILITY_PERIOD_S = 0.33
+
+
+def _publish_rate(fps: int) -> int:
+    """LiveKit publication rate: the preview_fps knob, capped by the capture rate.
+
+    ``TUNING.preview_fps = None`` means "follow the camera fps" (full fidelity);
+    a lower value only spares the publish chain (downscale/burn-in/RGBA/VP8) —
+    recording, live detection and compute are never affected (ADR-0036/0037).
+    """
+    capture = fps or TUNING.default_fps
+    return min(TUNING.preview_fps or capture, capture)
 
 
 def _preview_size(width: int, height: int) -> tuple[int, int]:
@@ -256,9 +275,9 @@ class CameraPublishService:
         path = self._sessions.intrinsic_video_path(camera_name)
         if self._previews is not None:
             self._previews.invalidate(path)  # overwrite in progress: stale mp4 out
-        # Written frames are throttled to _RECORD_FPS; declare the true cadence so the
-        # replayed mkv plays at real time (not Nx fast) whatever the capture fps.
-        record_fps = min(camera.fps, _RECORD_FPS) if camera.fps else _RECORD_FPS
+        # Every frame kept by the capture grid is written (ADR-0037): the mkv
+        # cadence IS the configured capture cadence.
+        record_fps = camera.fps or TUNING.default_fps
         async with self._recorder_lock:
             self._recorder = VideoRecorder(path, camera.width, camera.height, record_fps)
             self._recording_camera = camera_name
@@ -294,16 +313,17 @@ class CameraPublishService:
         if len(cameras) < 2:
             raise ValueError("extrinsic capture needs at least 2 configured cameras")
         specs = [
-            CameraSpec(c.name, c.width, c.height, min(c.fps, _RECORD_FPS) if c.fps else _RECORD_FPS)
+            CameraSpec(c.name, c.width, c.height, c.fps or TUNING.default_fps)
             for c in cameras
         ]
         names = [c.name for c in cameras]
         if self._previews is not None:
             for name in names:  # overwrite in progress: stale previews out
                 self._previews.invalidate(self._sessions.extrinsic_dir() / f"{name}.mkv")
-        # Sync window: detections fire on a shared wall-clock grid, so members of one
-        # instant differ by at most ~one camera frame interval (ADR-0007: < 1/fps).
-        window = 1.2 * max(1.0 / c.fps if c.fps else 1.0 / _DEFAULT_FPS for c in cameras)
+        # Sync window from the slowest camera's configured period — same derivation
+        # rule as the offline solve (sync_window, ADR-0037): the live gauges group
+        # exactly like the compute will.
+        window = sync_window(max(1.0 / (c.fps or TUNING.default_fps) for c in cameras))
         async with self._extrinsic_stop_lock:
             self._extrinsic_locks = {name: asyncio.Lock() for name in names}
             self._ext_sync = FrameSynchronizer(names, window)
@@ -445,7 +465,7 @@ class CameraPublishService:
         # Not configured yet: publish detected cameras for identification.
         return [
             _PublishTarget(
-                f"cam_{d.index}", d.index, d.device_node, d.width, d.height, _DEFAULT_FPS
+                f"cam_{d.index}", d.index, d.device_node, d.width, d.height, TUNING.default_fps
             )
             for d in enumerate_cameras()
         ]
@@ -533,7 +553,9 @@ class CameraPublishService:
                 continue
             previous = published.get(target.name)
             if previous is None:
-                await publisher.publish_camera_track(target.name, size[0], size[1], _PREVIEW_FPS)
+                await publisher.publish_camera_track(
+                    target.name, size[0], size[1], _publish_rate(target.fps)
+                )
                 published[target.name] = size
             elif previous != size:
                 logger.info(
@@ -686,25 +708,31 @@ class CameraPublishService:
         """
         executor = self._capture_executor
         preview_size = _preview_size(target.width, target.height) if target.width else None
-        capture_period = 1.0 / target.fps if target.fps else 0.0
+        # Absolute-grid pacing (ADR-0037): one pacer per cadence, all cells derive
+        # from the shared monotonic clock (loop.time()), so equal-rate pacers tick
+        # on the SAME instants across cameras. Capture = recording cadence; the
+        # detection grids are independent of the publication rate.
+        fps = target.fps or TUNING.default_fps
+        capture_pacer = GridPacer(fps)
+        publish_pacer = GridPacer(_publish_rate(target.fps))
+        detect_pacer_intrinsic = GridPacer(_DETECT_RATE_HZ)
+        detect_pacer_extrinsic = GridPacer(_EXTRINSIC_DETECT_RATE_HZ)
         detector: BoardDetector | None = None
         detector_extrinsic = False  # which board the current detector was built for
         last_detection: BoardDetection | None = None
         last_telemetry = 0.0
-        last_tick = 0
-        last_record = 0.0
-        last_push = 0.0
-        last_capture = 0.0
         while not publisher.is_disconnected():
             if not await loop.run_in_executor(executor, camera.grab):
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
                 continue
             now = loop.time()
-            # Pace to the capture fps: drop this frame undecoded if we are early.
-            if now - last_capture < capture_period:
+            # Grid selection over the continuous drain (ADR-0037): keep the first
+            # frame of each cell, drop the rest UNDECODED. Draining at the driver's
+            # own rate keeps buffered frames fresh and timestamps honest even when a
+            # driver ignores CAP_PROP_FPS; a late frame never shifts the cells.
+            if not capture_pacer.due(now):
                 await asyncio.sleep(0)
                 continue
-            last_capture = now
             frame = await loop.run_in_executor(executor, camera.retrieve)
             if frame is None:
                 continue
@@ -723,80 +751,83 @@ class CameraPublishService:
             elif detector is not None and detector_extrinsic != extrinsic:
                 detector = None  # board target changed (intrinsic <-> extrinsic sweep)
 
-            # Publish the (downscaled) preview at a capped rate to spare the encoder.
-            if now - last_push >= _PUSH_PERIOD_S:
-                last_push = now
-                if active:
-                    if detector is None:
-                        detector = self._build_detector(extrinsic=extrinsic)
-                        detector_extrinsic = extrinsic
-                    # Detection fires on a wall-clock grid: during a sweep all cameras
-                    # detect the SAME instant (sync-friendly timestamps, ADR-0007); for
-                    # the single intrinsic camera the grid is just its 30 Hz cadence.
-                    period = _EXTRINSIC_DETECT_PERIOD_S if extrinsic else _DETECT_PERIOD_S
-                    tick = int(now / period)
-                    if detector is not None and tick != last_tick:
-                        last_tick = tick
+            publish_due = publish_pacer.due(now)
+            preview: NDArray[np.uint8] | None = None
+            if active:
+                if detector is None:
+                    detector = self._build_detector(extrinsic=extrinsic)
+                    detector_extrinsic = extrinsic
+                # Detection fires on its OWN absolute grid, decoupled from the
+                # publication cadence (ADR-0037): a reduced preview_fps must not
+                # throttle the sync groups / co-visibility / gauges. During a sweep
+                # all cameras detect the SAME instants (shared cells).
+                detect_pacer = detect_pacer_extrinsic if extrinsic else detect_pacer_intrinsic
+                if detector is not None and detect_pacer.due(now):
+                    if publish_due:
+                        # Fused path: one downscale serves both detection and drawing.
                         preview, detection = await loop.run_in_executor(
                             executor, _process_frame, detector, frame.image, preview_size, extrinsic
                         )
-                        last_detection = detection
-                        if sweeping:
-                            covis = self._feed_extrinsic(
-                                target.name, frame.timestamp, detection, now
-                            )
-                            if covis is not None:
-                                await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
-                        if now - last_telemetry >= _TELEMETRY_PERIOD_S:
-                            last_telemetry = now
-                            phase = "extrinsic" if extrinsic else "intrinsic"
-                            payload = json.dumps(
-                                coverage_metrics_payload(target.name, detection, phase)
-                            )
-                            await publisher.send_data(payload, TELEMETRY_TOPIC)
                     else:
-                        # Redraw the last detection (no re-detect) so the overlay is steady.
-                        preview = await loop.run_in_executor(
-                            executor,
-                            _draw_preview,
-                            frame.image,
-                            last_detection,
-                            preview_size,
-                            extrinsic,
+                        detection = await loop.run_in_executor(
+                            executor, _detect_only, detector, frame.image, preview_size, extrinsic
                         )
-                    # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
-                    # detect-at-preview both sides) showed running it in the executor vs
-                    # synchronously here is a wash (~25 fps both): the sweep is bound by
-                    # 4-camera single-process serialization, not this call. Kept inline —
-                    # simplest, one fewer executor hop.
-                    publisher.push(target.name, preview)
-                else:
-                    small = await loop.run_in_executor(
-                        executor, _downscale, frame.image, preview_size
+                    last_detection = detection
+                    if sweeping:
+                        covis = self._feed_extrinsic(target.name, frame.timestamp, detection, now)
+                        if covis is not None:
+                            await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
+                    if now - last_telemetry >= _TELEMETRY_PERIOD_S:
+                        last_telemetry = now
+                        phase = "extrinsic" if extrinsic else "intrinsic"
+                        payload = json.dumps(
+                            coverage_metrics_payload(target.name, detection, phase)
+                        )
+                        await publisher.send_data(payload, TELEMETRY_TOPIC)
+                elif publish_due:
+                    # Redraw the last detection (no re-detect) so the overlay is steady.
+                    preview = await loop.run_in_executor(
+                        executor,
+                        _draw_preview,
+                        frame.image,
+                        last_detection,
+                        preview_size,
+                        extrinsic,
                     )
-                    publisher.push(target.name, small)
+            elif publish_due:
+                preview = await loop.run_in_executor(
+                    executor, _downscale, frame.image, preview_size
+                )
 
-            # Record the RAW native frame (detection fidelity), throttled, off event loop.
-            if now - last_record >= _RECORD_PERIOD_S:
-                if sweeping:
-                    last_record = now
-                    lock = self._extrinsic_locks.get(target.name)
-                    recorder = self._extrinsic
-                    if lock is not None and recorder is not None:
-                        async with lock:
-                            if self._extrinsic is recorder:  # not closed meanwhile
-                                await loop.run_in_executor(
-                                    executor,
-                                    recorder.write,
-                                    target.name,
-                                    frame.image,
-                                    frame.timestamp,
-                                )
-                elif self._active_intrinsic == target.name:
-                    last_record = now
-                    async with self._recorder_lock:
-                        if self._recorder is not None:
-                            await loop.run_in_executor(executor, self._recorder.write, frame.image)
+            if publish_due and preview is not None:
+                # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
+                # detect-at-preview both sides) showed running it in the executor vs
+                # synchronously here is a wash (~25 fps both): the sweep is bound by
+                # 4-camera single-process serialization, not this call. Kept inline —
+                # simplest, one fewer executor hop.
+                publisher.push(target.name, preview)
+
+            # Record the RAW native frame (detection fidelity), off the event loop.
+            # EVERY frame kept by the capture grid is written while recording — the
+            # mkv cadence IS the capture cadence (ADR-0037); the sidecars carry the
+            # true timestamps for the extrinsic sync.
+            if sweeping:
+                lock = self._extrinsic_locks.get(target.name)
+                recorder = self._extrinsic
+                if lock is not None and recorder is not None:
+                    async with lock:
+                        if self._extrinsic is recorder:  # not closed meanwhile
+                            await loop.run_in_executor(
+                                executor,
+                                recorder.write,
+                                target.name,
+                                frame.image,
+                                frame.timestamp,
+                            )
+            elif self._active_intrinsic == target.name:
+                async with self._recorder_lock:
+                    if self._recorder is not None:
+                        await loop.run_in_executor(executor, self._recorder.write, frame.image)
             await asyncio.sleep(0)
         logger.info("capture loop %s exiting (disconnected)", target.name)
 

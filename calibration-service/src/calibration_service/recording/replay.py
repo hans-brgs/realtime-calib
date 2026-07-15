@@ -18,6 +18,19 @@ def frame_count(path: Path) -> int:
         capture.release()
 
 
+def declared_fps(path: Path) -> float:
+    """Container-declared frame rate (0.0 if unreadable/unknown).
+
+    Since ADR-0037 the recorded mkv declares the true capture cadence, so this
+    IS the rate the preview transcode re-times at (dynamic scrubber contract).
+    """
+    capture = cv2.VideoCapture(str(path))
+    try:
+        return float(capture.get(cv2.CAP_PROP_FPS))
+    finally:
+        capture.release()
+
+
 def decoded_frame_count(path: Path) -> int:
     """EXACT frame count by decoding the whole file (no metadata trust).
 

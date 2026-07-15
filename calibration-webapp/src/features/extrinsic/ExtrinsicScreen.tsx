@@ -44,7 +44,6 @@ import {
   fetchExtrinsicGroups,
   fetchExtrinsicPreviewStatus,
   fetchExtrinsicResult,
-  PREVIEW_FPS,
   retryExtrinsicPreview,
   setCaptureView,
   startExtrinsic,
@@ -68,18 +67,19 @@ const PLAY_FPS = 8;
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
 // One camera's frame of a synchronized group, shown by seeking its CFR-retimed
-// preview mp4 (ADR-0027): frame i sits exactly at (i + 0.5) / PREVIEW_FPS. The
-// lockstep across cameras comes from the DATA (per-camera indices of the group,
-// ADR-0007) — free-running cameras never share a clock.
-function PreviewFrame({ camera, index }: { camera: string; index: number }) {
+// preview mp4 (ADR-0027/0037): frame i sits exactly at (i + 0.5) / fps, where fps
+// is SERVED by the transcode status (the recording's own rate). The lockstep
+// across cameras comes from the DATA (per-camera indices of the group, ADR-0007)
+// — free-running cameras never share a clock.
+function PreviewFrame({ camera, index, fps }: { camera: string; index: number; fps: number }) {
   const video = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
     const element = video.current;
     if (element && element.readyState > 0) {
-      element.currentTime = (index + 0.5) / PREVIEW_FPS;
+      element.currentTime = (index + 0.5) / fps;
     }
-  }, [index]);
+  }, [index, fps]);
 
   return (
     <video
@@ -89,7 +89,7 @@ function PreviewFrame({ camera, index }: { camera: string; index: number }) {
       playsInline
       preload="auto"
       onLoadedMetadata={(event) => {
-        event.currentTarget.currentTime = (index + 0.5) / PREVIEW_FPS;
+        event.currentTarget.currentTime = (index + 0.5) / fps;
       }}
       style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
     />
@@ -100,11 +100,13 @@ function GroupScrubber({
   cameras,
   groups,
   index,
+  fps,
   onIndex,
 }: {
   cameras: string[];
   groups: ExtrinsicGroup[];
   index: number;
+  fps: number; // index <-> time rate served by the transcode status (ADR-0037)
   onIndex: (i: number) => void;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -159,7 +161,7 @@ function GroupScrubber({
               }}
             >
               {frame !== undefined ? (
-                <PreviewFrame camera={camera} index={frame} />
+                <PreviewFrame camera={camera} index={frame} fps={fps} />
               ) : (
                 <Text fz="0.7rem" c="dark.3">
                   not in this group
@@ -311,6 +313,10 @@ function ExtrinsicInner() {
   // possible reintegration later under an Advanced section).
   const [groups, setGroups] = useState<ExtrinsicGroup[]>([]);
   const [groupIndex, setGroupIndex] = useState(0);
+  // Index <-> time rate of the preview mp4s, SERVED by the transcode status
+  // (dynamic contract, ADR-0037). 30 is a pre-seed placeholder only — always
+  // overwritten before Prepare renders.
+  const [previewFps, setPreviewFps] = useState(30);
   const [stride, setStride] = useState(1);
   const [maxGroups, setMaxGroups] = useState(5);
   const [maxSpreadMs, setMaxSpreadMs] = useState<number | ''>('');
@@ -357,7 +363,14 @@ function ExtrinsicInner() {
   // then enter Prepare. The error can surface on any camera's transcode job.
   const transcode = usePreviewTranscode({
     poll: fetchExtrinsicPreviewStatus,
-    onReady: () => wizard.toPrepare(),
+    onReady: (status) => {
+      // All sweep cameras share the configured fps; take the served rate.
+      const rates = Object.values(status.cameras)
+        .map((c) => c.fps)
+        .filter((f) => f > 0);
+      if (rates.length > 0) setPreviewFps(Math.max(...rates));
+      wizard.toPrepare();
+    },
     getError: (status) => Object.values(status.cameras).find((c) => c.error)?.error ?? null,
     retryJob: retryExtrinsicPreview,
   });
@@ -456,6 +469,7 @@ function ExtrinsicInner() {
               cameras={cameraNames}
               groups={groups}
               index={groupIndex}
+              fps={previewFps}
               onIndex={setGroupIndex}
             />
           ) : (

@@ -541,7 +541,13 @@ def get_preview_jobs(request: Request) -> PreviewJobs:
 
 
 def _preview_status_out(status: PreviewStatus) -> dict[str, object]:
-    return {"state": status.state.value, "frames": status.frames, "error": status.error}
+    return {
+        "state": status.state.value,
+        "frames": status.frames,
+        # Index <-> time rate of the DONE preview (dynamic contract, ADR-0037).
+        "fps": status.fps,
+        "error": status.error,
+    }
 
 
 @router.get("/intrinsic/{camera}/preview")

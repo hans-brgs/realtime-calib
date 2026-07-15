@@ -383,6 +383,10 @@ function IntrinsicsInner() {
   // Initial stride/cap are the structural minima; enterPrepare re-seeds them from
   // the served defaults (no hardcoded copy of the tuning values here).
   const [frameTotal, setFrameTotal] = useState(0);
+  // Index <-> time rate of the preview mp4, SERVED by the transcode status
+  // (dynamic contract, ADR-0037). 30 is a pre-seed placeholder only — always
+  // overwritten before Prepare renders.
+  const [previewFps, setPreviewFps] = useState(30);
   const [frame, setFrame] = useState(0);
   const [stride, setStride] = useState(1);
   const [keyframeCap, setKeyframeCap] = useState(6);
@@ -433,6 +437,9 @@ function IntrinsicsInner() {
       return fetchIntrinsicPreviewStatus(active);
     },
     onReady: (status) => {
+      if (status.state === 'done' && status.fps > 0) {
+        setPreviewFps(status.fps);
+      }
       enterPrepare(status.state === 'done' ? status.frames : 0);
       wizard.toPrepare();
     },
@@ -595,6 +602,7 @@ function IntrinsicsInner() {
               <PrepareScrubber
                 camera={active}
                 total={frameTotal}
+                fps={previewFps}
                 frame={frame}
                 onFrame={setFrame}
                 trim={[trimStart, trimEnd]}

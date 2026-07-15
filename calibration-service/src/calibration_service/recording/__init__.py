@@ -9,7 +9,6 @@ from calibration_service.recording.extrinsic_recorder import (
     read_timestamps,
 )
 from calibration_service.recording.preview import (
-    PREVIEW_FPS,
     PreviewJobs,
     PreviewState,
     PreviewStatus,
@@ -23,7 +22,6 @@ from calibration_service.recording.video_writer import (
 )
 
 __all__ = [
-    "PREVIEW_FPS",
     "CameraSpec",
     "ExtrinsicRecorder",
     "PreviewJobs",
