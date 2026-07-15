@@ -546,6 +546,8 @@ def _preview_status_out(status: PreviewStatus) -> dict[str, object]:
         "frames": status.frames,
         # Index <-> time rate of the DONE preview (dynamic contract, ADR-0037).
         "fps": status.fps,
+        # Cache-buster the webapp appends to the preview URL (stale-video guard).
+        "version": status.version,
         "error": status.error,
     }
 
@@ -644,6 +646,10 @@ async def compute_intrinsic(
         "image_coverage": result.image_coverage,
         "orientation_bins": result.orientation_bins,
         "board_quads": [[list(point) for point in quad] for quad in result.board_quads],
+        # Sharpness of the retained keyframes (ADR-0038): the observability that
+        # replaced the absolute blur gate — a blurry sweep succeeds, visibly.
+        "sharpness_min": result.sharpness_min,
+        "sharpness_median": result.sharpness_median,
     }
     metrics_path = manager.intrinsic_metrics_path(camera)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -670,8 +676,9 @@ async def validate_intrinsic(request: Request) -> SessionOut:
 async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
     """Serve the persisted review metrics for the Results view (ADR-0022).
 
-    ``{coverage: heatmap grid, image_coverage: 5x5 fraction, orientation_bins: /8,
-    board_quads: per-keyframe 4x3 board outline in camera coords}``.
+    ``{coverage: quad-accumulation count map (ADR-0039), image_coverage: union-area
+    fraction, orientation_bins: /8, board_quads: per-keyframe 4x3 board outline in
+    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038)}``.
     """
     path = get_manager(request).intrinsic_metrics_path(camera)
     if not path.is_file():

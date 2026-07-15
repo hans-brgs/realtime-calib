@@ -71,7 +71,17 @@ const PLAY_FPS = 8;
 // is SERVED by the transcode status (the recording's own rate). The lockstep
 // across cameras comes from the DATA (per-camera indices of the group, ADR-0007)
 // — free-running cameras never share a clock.
-function PreviewFrame({ camera, index, fps }: { camera: string; index: number; fps: number }) {
+function PreviewFrame({
+  camera,
+  index,
+  fps,
+  version,
+}: {
+  camera: string;
+  index: number;
+  fps: number;
+  version: string; // cache-buster served by the transcode status (stale-video guard)
+}) {
   const video = useRef<HTMLVideoElement>(null);
 
   useEffect(() => {
@@ -84,7 +94,7 @@ function PreviewFrame({ camera, index, fps }: { camera: string; index: number; f
   return (
     <video
       ref={video}
-      src={extrinsicPreviewUrl(camera)}
+      src={version ? `${extrinsicPreviewUrl(camera)}?v=${version}` : extrinsicPreviewUrl(camera)}
       muted
       playsInline
       preload="auto"
@@ -101,12 +111,14 @@ function GroupScrubber({
   groups,
   index,
   fps,
+  versions,
   onIndex,
 }: {
   cameras: string[];
   groups: ExtrinsicGroup[];
   index: number;
   fps: number; // index <-> time rate served by the transcode status (ADR-0037)
+  versions: Record<string, string>; // per-camera preview cache-busters (served)
   onIndex: (i: number) => void;
 }) {
   const [playing, setPlaying] = useState(false);
@@ -161,7 +173,12 @@ function GroupScrubber({
               }}
             >
               {frame !== undefined ? (
-                <PreviewFrame camera={camera} index={frame} fps={fps} />
+                <PreviewFrame
+                  camera={camera}
+                  index={frame}
+                  fps={fps}
+                  version={versions[camera] ?? ''}
+                />
               ) : (
                 <Text fz="0.7rem" c="dark.3">
                   not in this group
@@ -317,6 +334,9 @@ function ExtrinsicInner() {
   // (dynamic contract, ADR-0037). 30 is a pre-seed placeholder only — always
   // overwritten before Prepare renders.
   const [previewFps, setPreviewFps] = useState(30);
+  // Per-camera preview cache-busters (served): a re-record must never scrub
+  // browser-cached stale videos.
+  const [previewVersions, setPreviewVersions] = useState<Record<string, string>>({});
   const [stride, setStride] = useState(1);
   const [maxGroups, setMaxGroups] = useState(5);
   const [maxSpreadMs, setMaxSpreadMs] = useState<number | ''>('');
@@ -369,6 +389,11 @@ function ExtrinsicInner() {
         .map((c) => c.fps)
         .filter((f) => f > 0);
       if (rates.length > 0) setPreviewFps(Math.max(...rates));
+      setPreviewVersions(
+        Object.fromEntries(
+          Object.entries(status.cameras).map(([name, c]) => [name, c.version]),
+        ),
+      );
       wizard.toPrepare();
     },
     getError: (status) => Object.values(status.cameras).find((c) => c.error)?.error ?? null,
@@ -470,6 +495,7 @@ function ExtrinsicInner() {
               groups={groups}
               index={groupIndex}
               fps={previewFps}
+              versions={previewVersions}
               onIndex={setGroupIndex}
             />
           ) : (

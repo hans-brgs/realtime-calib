@@ -41,6 +41,7 @@ from calibration_service.synchronization import CovisibilityGraph, FrameSynchron
 from calibration_service.synchronization.window import sync_window
 from calibration_service.telemetry import (
     TELEMETRY_TOPIC,
+    SharpnessBaseline,
     coverage_metrics_payload,
     covisibility_payload,
 )
@@ -54,69 +55,57 @@ def _process_frame(
     detector: BoardDetector,
     image: NDArray[np.uint8],
     preview_size: tuple[int, int],
-    detect_at_preview: bool,
 ) -> tuple[NDArray[np.uint8], BoardDetection]:
-    """Detect the board and burn the overlay in at preview resolution.
+    """Detect the board on the DOWNSCALED preview frame and burn the overlay in.
 
-    CPU-bound; meant for an executor. Returns ``(preview, detection)`` — the preview is
-    the overlay composited at ``preview_size`` for LiveKit.
+    CPU-bound; meant for an executor. Returns ``(preview, detection)`` — the preview
+    is the overlay composited at ``preview_size`` for LiveKit.
 
-    ``detect_at_preview`` (the extrinsic sweep) runs the detector on the DOWNSCALED
-    preview frame, not the native one. The extrinsic solve re-detects on the recorded
-    native mkv (see calibration.extrinsic), so the live detection only drives the overlay
-    + co-visibility telemetry — neither needs native precision — and detecting at preview
-    res cuts ~10 ms/frame (16 -> 6) off the sweep's serial per-camera chain. The corners
-    then live in preview space, exactly what the overlay wants (drawn at scale 1). Its
-    one side effect: ``sharpness`` reads lower (Laplacian on the reduced frame), and it
-    gates nothing in the extrinsic phase. Intrinsic keeps native detection (single active
-    camera, and its sharpness gate selects keyframes).
+    Both phases detect at preview resolution (ADR-0038 unified the intrinsic path
+    onto the extrinsic detect-at-preview, once the absolute sharpness gate that
+    required native comparability was removed). Live detection only drives the
+    overlay + gauges + co-visibility — none needs native precision, and the
+    computes re-detect the recorded NATIVE mkv. Corners then live in preview space,
+    exactly what the overlay wants (drawn at scale 1); ``sharpness`` reads on the
+    reduced frame — fine, the live gauge is now relative per camera.
     """
-    if detect_at_preview:
-        small = _downscale(image, preview_size)
-        detection = detector.detect(small)
-        return _draw_preview(small, detection, preview_size), detection
-    detection = detector.detect(image)
-    return _draw_preview(image, detection, preview_size), detection
+    small = _downscale(image, preview_size)
+    detection = detector.detect(small)
+    return _draw_preview(small, detection, preview_size), detection
 
 
 def _draw_preview(
     image: NDArray[np.uint8],
     detection: BoardDetection | None,
     preview_size: tuple[int, int],
-    detect_at_preview: bool = False,
 ) -> NDArray[np.uint8]:
     """Burn the (last known) detection overlay in at preview resolution — no re-detect.
 
     Drawn on every published frame so the board overlay stays steady at the preview
-    rate instead of flickering at the (slower) detection rate. The overlay is
-    composited directly at ``preview_size`` (ADR-0003/0015), not at native then
-    downscaled. ``None`` -> raw downscaled preview.
-
-    ``detect_at_preview`` mirrors _process_frame for the redraw path: the frame is
-    downscaled first so a detection that ran at preview resolution (its corners already
-    in preview space) is drawn at scale 1, staying consistent between re-detect ticks.
+    rate instead of flickering at the (slower) detection rate. Detection runs at
+    preview resolution (ADR-0038), so its corners are in preview space: the frame is
+    downscaled to preview and the overlay drawn at scale 1 (no double-scaling). A
+    frame already at preview size (from ``_process_frame``) downscales as a no-op.
+    ``None`` -> plain downscaled preview.
     """
-    base = _downscale(image, preview_size) if detect_at_preview else image
+    preview = _downscale(image, preview_size)
     if detection is None:
-        return _downscale(base, preview_size)
-    return draw_overlay(base, detection, preview_size)
+        return preview
+    return draw_overlay(preview, detection, preview_size)
 
 
 def _detect_only(
     detector: BoardDetector,
     image: NDArray[np.uint8],
     preview_size: tuple[int, int],
-    detect_at_preview: bool,
 ) -> BoardDetection:
     """Detection without drawing — for detection ticks that are not publish ticks.
 
     Since ADR-0037 the detection grid is decoupled from the publication cadence
     (a reduced preview_fps must not throttle the live feedback); this is the
-    _process_frame detection path without the preview composition.
+    _process_frame detection path (at preview resolution) without the composition.
     """
-    if detect_at_preview:
-        return detector.detect(_downscale(image, preview_size))
-    return detector.detect(image)
+    return detector.detect(_downscale(image, preview_size))
 
 
 _EMPTY_READ_BACKOFF_S = 0.005
@@ -721,6 +710,10 @@ class CameraPublishService:
         detector_extrinsic = False  # which board the current detector was built for
         last_detection: BoardDetection | None = None
         last_telemetry = 0.0
+        # Relative live-sharpness gauge, one window per phase (native intrinsic vs
+        # preview extrinsic differ in scale — ADR-0038).
+        sharpness_intrinsic = SharpnessBaseline()
+        sharpness_extrinsic = SharpnessBaseline()
         while not publisher.is_disconnected():
             if not await loop.run_in_executor(executor, camera.grab):
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
@@ -766,22 +759,28 @@ class CameraPublishService:
                     if publish_due:
                         # Fused path: one downscale serves both detection and drawing.
                         preview, detection = await loop.run_in_executor(
-                            executor, _process_frame, detector, frame.image, preview_size, extrinsic
+                            executor, _process_frame, detector, frame.image, preview_size
                         )
                     else:
                         detection = await loop.run_in_executor(
-                            executor, _detect_only, detector, frame.image, preview_size, extrinsic
+                            executor, _detect_only, detector, frame.image, preview_size
                         )
                     last_detection = detection
                     if sweeping:
                         covis = self._feed_extrinsic(target.name, frame.timestamp, detection, now)
                         if covis is not None:
                             await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
+                    # Feed the relative gauge every detection tick (~15-30 Hz), even
+                    # when telemetry is throttled, so its window tracks real cadence.
+                    baseline = sharpness_extrinsic if extrinsic else sharpness_intrinsic
+                    sharpness_ok = baseline.ok(detection.sharpness)
                     if now - last_telemetry >= _TELEMETRY_PERIOD_S:
                         last_telemetry = now
                         phase = "extrinsic" if extrinsic else "intrinsic"
                         payload = json.dumps(
-                            coverage_metrics_payload(target.name, detection, phase)
+                            coverage_metrics_payload(
+                                target.name, detection, phase, sharpness_ok=sharpness_ok
+                            )
                         )
                         await publisher.send_data(payload, TELEMETRY_TOPIC)
                 elif publish_due:
@@ -792,7 +791,6 @@ class CameraPublishService:
                         frame.image,
                         last_detection,
                         preview_size,
-                        extrinsic,
                     )
             elif publish_due:
                 preview = await loop.run_in_executor(

@@ -13,6 +13,7 @@ interface PrepareScrubberProps {
   camera: string;
   total: number;
   fps: number; // index <-> time rate served by the transcode status
+  version: string; // cache-buster served by the transcode status (stale-video guard)
   frame: number;
   onFrame: (index: number) => void;
   trim: [number, number]; // inclusive [start, end], drawn as slider marks
@@ -24,6 +25,7 @@ export function PrepareScrubber({
   camera,
   total,
   fps,
+  version,
   frame,
   onFrame,
   trim,
@@ -93,7 +95,7 @@ export function PrepareScrubber({
       >
         <video
           ref={video}
-          src={intrinsicPreviewUrl(camera)}
+          src={version ? `${intrinsicPreviewUrl(camera)}?v=${version}` : intrinsicPreviewUrl(camera)}
           muted
           playsInline
           preload="auto"

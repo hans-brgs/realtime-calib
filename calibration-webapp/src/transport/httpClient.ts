@@ -175,6 +175,10 @@ export interface PreviewStatus {
   state: 'missing' | 'running' | 'done' | 'failed';
   frames: number;
   fps: number; // index <-> time rate of the DONE preview
+  // Identity of the DONE mp4 — appended to the preview URL as a cache-buster so a
+  // re-recorded sweep is never scrubbed against a browser-cached stale video
+  // (trim bounds set on the wrong timeline would silently mis-trim the compute).
+  version: string;
   error: string | null;
 }
 
@@ -201,14 +205,21 @@ export const fetchExtrinsicPreviewStatus = (): Promise<ExtrinsicPreviewStatus> =
 export const retryExtrinsicPreview = (): Promise<ExtrinsicPreviewStatus> =>
   postJson<ExtrinsicPreviewStatus>('/extrinsic/preview/transcode');
 
-// Review metrics persisted at compute (ADR-0022, Results): coverage heatmap grid,
-// Caliscope 5x5 image-coverage fraction, occupied tilt-azimuth sectors (/8), and each
-// keyframe board's 4 outline corners in 3D camera coords (for the pose scene).
+// Review metrics persisted at compute (ADR-0022/0038/0039, Results): the coverage
+// map is a quad-accumulation COUNT per cell (how many retained keyframes' board
+// hulls covered it — 0 never, 1 fragile, 3+ robust); image_coverage is the
+// union-of-quads area fraction (grid-free); orientation_bins the occupied
+// tilt-azimuth sectors (/8); board_quads each keyframe board's 4 outline corners
+// in 3D camera coords. sharpness_min/median describe the retained keyframes — the
+// observability that replaced the absolute blur gate (absent on metrics persisted
+// before ADR-0038).
 export interface IntrinsicMetrics {
   coverage: number[][];
   image_coverage: number;
   orientation_bins: number;
   board_quads: number[][][];
+  sharpness_min?: number;
+  sharpness_median?: number;
 }
 
 export const fetchIntrinsicMetrics = (camera: string): Promise<IntrinsicMetrics> =>

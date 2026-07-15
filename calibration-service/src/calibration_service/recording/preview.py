@@ -80,6 +80,11 @@ class PreviewStatus:
     # The index <-> time rate of the DONE preview (the recording's declared fps):
     # the webapp maps index = round(currentTime * fps) — dynamic contract, ADR-0037.
     fps: float = 0.0
+    # Identity of the DONE mp4 (its mtime): the webapp appends it to the preview
+    # URL as a cache-buster, so a re-recorded sweep can never be scrubbed against
+    # a browser-cached STALE video (trim bounds set on the wrong timeline would
+    # silently mis-trim the compute).
+    version: str = ""
     error: str | None = None
 
 
@@ -151,7 +156,8 @@ class PreviewJobs:
                 loop = asyncio.get_running_loop()
                 frames = await loop.run_in_executor(None, self._source_frames, source)
                 fps = await loop.run_in_executor(None, self._source_fps, source)
-                return PreviewStatus(PreviewState.DONE, frames=frames, fps=fps)
+                version = str(destination.stat().st_mtime_ns)
+                return PreviewStatus(PreviewState.DONE, frames=frames, fps=fps, version=version)
         if not source.is_file():
             return PreviewStatus(PreviewState.MISSING)
         self.ensure(source)

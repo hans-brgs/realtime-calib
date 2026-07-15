@@ -103,6 +103,7 @@ def test_real_transcode_preserves_frames_and_cfr_at_source_fps(
         assert status.state is PreviewState.DONE
         assert status.frames == 5
         assert status.fps == pytest.approx(fps)
+        assert status.version  # mp4 identity served as the URL cache-buster
 
     asyncio.run(scenario())
 

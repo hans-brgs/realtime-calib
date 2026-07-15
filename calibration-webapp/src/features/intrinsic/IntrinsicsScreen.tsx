@@ -193,7 +193,7 @@ function ResultPanel({
       </Text>
       <Group justify="space-between" mt="sm">
         <Text fz="0.72rem" c="dark.2">
-          Image coverage (≥ 80 % target)
+          Image coverage (≥ 70 % target)
         </Text>
         <Text
           fz="0.78rem"
@@ -202,7 +202,10 @@ function ResultPanel({
           c={
             coveragePct == null
               ? undefined
-              : coveragePct >= 80
+              : // 70%: the ChArUco interior-corner lattice makes the border ring
+                // (~1 square at close range) physically unreachable — 80% was
+                // quasi impossible on real sweeps (operator-validated).
+                coveragePct >= 70
                 ? 'var(--rc-success)'
                 : 'var(--rc-warning)'
           }
@@ -229,6 +232,16 @@ function ResultPanel({
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
           {camera.grid_count ?? '—'}
+        </Text>
+      </Group>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Keyframe sharpness (min / median)
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {metrics?.sharpness_median != null
+            ? `${Math.round(metrics.sharpness_min ?? 0)} / ${Math.round(metrics.sharpness_median)}`
+            : '—'}
         </Text>
       </Group>
       <Group justify="space-between" mt="sm">
@@ -387,6 +400,9 @@ function IntrinsicsInner() {
   // (dynamic contract, ADR-0037). 30 is a pre-seed placeholder only — always
   // overwritten before Prepare renders.
   const [previewFps, setPreviewFps] = useState(30);
+  // Cache-buster of the preview mp4 (served): a re-record must never scrub a
+  // browser-cached stale video (mis-trimmed compute).
+  const [previewVersion, setPreviewVersion] = useState('');
   const [frame, setFrame] = useState(0);
   const [stride, setStride] = useState(1);
   const [keyframeCap, setKeyframeCap] = useState(6);
@@ -440,6 +456,7 @@ function IntrinsicsInner() {
       if (status.state === 'done' && status.fps > 0) {
         setPreviewFps(status.fps);
       }
+      setPreviewVersion(status.state === 'done' ? status.version : '');
       enterPrepare(status.state === 'done' ? status.frames : 0);
       wizard.toPrepare();
     },
@@ -603,6 +620,7 @@ function IntrinsicsInner() {
                 camera={active}
                 total={frameTotal}
                 fps={previewFps}
+                version={previewVersion}
                 frame={frame}
                 onFrame={setFrame}
                 trim={[trimStart, trimEnd]}
