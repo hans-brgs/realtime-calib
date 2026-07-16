@@ -17,8 +17,14 @@ const GREEN = [74, 222, 128] as const; // matches the gauges' success green
 
 // Redundancy ramp: alpha at index min(count, last). Discrete shades so the
 // operator reads levels, not a gradient. Tune freely after rig testing — adding
-// entries adds shades (legend follows the ramp length automatically).
-const RAMP = [0, 0.2, 0.38, 0.56, 0.74, 0.92] as const; // 0, 1x, 2x, 3x, 4x, 5+x
+// entries adds shades (legend + top label follow the ramp length automatically).
+// Currently 1x..10+x (rig trial): finer redundancy read-out, at the cost of
+// smaller steps between adjacent shades. Revert by shortening this array.
+const RAMP = [0, 0.12, 0.21, 0.3, 0.39, 0.48, 0.56, 0.65, 0.74, 0.83, 0.92] as const;
+
+// The legend row's own height, reserved so the canvas + legend column as a whole
+// fits the panel (they share one width, so the canvas cannot claim it all).
+const LEGEND_ROW_PX = 24;
 
 function alphaFor(count: number): number {
   return RAMP[Math.min(Math.max(count, 0), RAMP.length - 1)];
@@ -80,46 +86,72 @@ export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
           alignItems: 'center',
           justifyContent: 'center',
           padding: 8,
-          background: 'var(--rc-input)',
+          // Deepest surface: everything OUTSIDE the sensor recedes, so the frame
+          // below reads as a raised rectangle rather than blending into it.
+          background: 'var(--rc-page)',
           borderRadius: 'var(--mantine-radius-md)',
+          // Container-query units size the sensor column to the largest
+          // sensor-ratio rectangle that fits, whatever the panel shape.
+          containerType: 'size',
         }}
       >
-        <canvas
-          ref={canvas}
-          width={cols}
-          height={rows}
+        {/* Sensor column: carries THE width, so the canvas and the legend share
+            it by construction — the legend used to span the panel instead, and
+            drifted away from the frame whenever the panel was the wider one. */}
+        <Box
           style={{
-            // Contain preserves the map's aspect whatever the panel shape — a
-            // width/max-height pair stretched it when the panel was wider than
-            // the sensor ratio, distorting the perceived edge margins.
-            width: '100%',
-            height: '100%',
-            objectFit: 'contain',
-            imageRendering: 'pixelated',
-            borderRadius: 4,
+            width:
+              cols > 0 && rows > 0
+                ? `min(100cqw, calc((100cqh - ${LEGEND_ROW_PX}px) * ${cols / rows}))`
+                : '100%',
           }}
-        />
+        >
+          <canvas
+            ref={canvas}
+            width={cols}
+            height={rows}
+            style={{
+              // The ELEMENT is the sensor frame (ADR-0039 display fix): object-fit
+              // letterboxed the 16:9 map invisibly inside the panel-shaped element
+              // (transparent "never" cells = same background as the letterbox), so
+              // the map READ as the panel's ratio and the edge margins looked
+              // inflated. Height follows the bitmap's intrinsic cols:rows ratio.
+              display: 'block',
+              width: '100%',
+              imageRendering: 'pixelated',
+              // Three distinct luminance levels — outside (page) < sensor (input)
+              // < frame (dim). The old border token (dark-4 = #232329) sat within
+              // six points of both surfaces: technically drawn, visually absent.
+              border: '1px solid var(--mantine-color-dark-3)',
+              background: 'var(--rc-input)',
+              borderRadius: 4,
+            }}
+          />
+          <Group justify="space-between" mt={7} wrap="nowrap" gap="xs">
+            {/* Matches what an uncovered cell actually shows: the canvas background
+                through a transparent cell (alpha 0 in the ramp). */}
+            <LegendChip color="var(--rc-input)" label="never" />
+            <Group gap={2} wrap="nowrap">
+              {RAMP.slice(1).map((alpha, i) => (
+                <Box
+                  key={i}
+                  title={i + 1 >= top ? `${top}+× measured` : `${i + 1}× measured`}
+                  style={{
+                    width: 9,
+                    height: 9,
+                    borderRadius: 2,
+                    flex: 'none',
+                    background: `rgba(${GREEN[0]},${GREEN[1]},${GREEN[2]},${alpha})`,
+                  }}
+                />
+              ))}
+              <Text fz="0.62rem" c="dark.3" ml={4} style={{ whiteSpace: 'nowrap' }}>
+                1× → {top}+× measured
+              </Text>
+            </Group>
+          </Group>
+        </Box>
       </Box>
-      <Group justify="space-between" mt="xs" wrap="nowrap">
-        <LegendChip color="rgba(255,255,255,0.05)" label="never" />
-        <Group gap={3} wrap="nowrap">
-          {RAMP.slice(1).map((alpha, i) => (
-            <Box
-              key={i}
-              title={i + 1 >= top ? `${top}+× measured` : `${i + 1}× measured`}
-              style={{
-                width: 9,
-                height: 9,
-                borderRadius: 2,
-                background: `rgba(${GREEN[0]},${GREEN[1]},${GREEN[2]},${alpha})`,
-              }}
-            />
-          ))}
-          <Text fz="0.62rem" c="dark.3" ml={2}>
-            1× → {top}+× measured
-          </Text>
-        </Group>
-      </Group>
     </Box>
   );
 }
