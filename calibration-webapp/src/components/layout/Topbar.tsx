@@ -5,12 +5,14 @@ const NAV = ['Dashboard', 'Logs', 'Settings'] as const;
 interface TopbarProps {
   burgerOpened: boolean;
   onBurger: () => void;
+  // Opens the rig-level settings modal (ADR-0036) — the only live NAV tab so far.
+  onSettings: () => void;
 }
 
 // Persistent top bar: wordmark (logo + realtime-calib with a violet hinge) on the
 // left, a thin set of section tabs on the right. On phone the right tabs collapse
 // to a burger that opens the navigation drawer.
-export function Topbar({ burgerOpened, onBurger }: TopbarProps) {
+export function Topbar({ burgerOpened, onBurger, onSettings }: TopbarProps) {
   return (
     <Box
       h={54}
@@ -39,6 +41,7 @@ export function Topbar({ burgerOpened, onBurger }: TopbarProps) {
               key={label}
               fz="0.84rem"
               c={i === 0 ? undefined : 'dark.2'}
+              onClick={label === 'Settings' ? onSettings : undefined}
               style={
                 i === 0
                   ? {

@@ -1,5 +1,6 @@
 import { CodeHighlightTabs } from '@mantine/code-highlight';
 import {
+  Alert,
   Badge,
   Box,
   Button,
@@ -10,7 +11,13 @@ import {
   Stack,
   Text,
 } from '@mantine/core';
-import { IconDownload, IconFileTypeXml, IconJson, IconLock } from '@tabler/icons-react';
+import {
+  IconAlertTriangle,
+  IconDownload,
+  IconFileTypeXml,
+  IconJson,
+  IconLock,
+} from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
@@ -319,9 +326,17 @@ export function ExportScreen() {
               Download all (zip)
             </Button>
             {message && (
-              <Text fz="0.72rem" c="var(--rc-error)" mt="sm">
-                {message}
-              </Text>
+              // Inline, persistent (ADR-0036): an export refusal names what to
+              // fix — it must not read as a transient blip.
+              <Alert
+                color="red"
+                variant="light"
+                icon={<IconAlertTriangle size={16} />}
+                title="Export failed"
+                mt="sm"
+              >
+                <Text fz="0.72rem">{message}</Text>
+              </Alert>
             )}
           </Box>
         </Box>

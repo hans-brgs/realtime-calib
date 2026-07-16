@@ -21,6 +21,7 @@ from calibration_service.config import Config, LiveKitConfig
 from calibration_service.logging_setup import setup_logging
 from calibration_service.recording import PreviewJobs
 from calibration_service.session.manager import NoActiveSessionError, SessionManager
+from calibration_service.settings import SettingsStore
 from calibration_service.transport.api import router as api_router
 from calibration_service.transport.camera_publish_service import CameraPublishService
 
@@ -53,8 +54,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     assert isinstance(session_manager, SessionManager)
     preview_jobs = app.state.preview_jobs
     assert isinstance(preview_jobs, PreviewJobs)
+    settings_store = app.state.settings
+    assert isinstance(settings_store, SettingsStore)
     publish_service = CameraPublishService(
-        LiveKitConfig(), session_manager, preview_jobs=preview_jobs
+        LiveKitConfig(), session_manager, preview_jobs=preview_jobs, settings=settings_store
     )
     app.state.publish_service = publish_service
     await publish_service.start()
@@ -71,6 +74,8 @@ def create_app(session_manager: SessionManager | None = None) -> FastAPI:
     # Built here (not in lifespan) so route handlers — and tests without a
     # lifespan — always find it; jobs only spawn from within the event loop.
     app.state.preview_jobs = PreviewJobs()
+    # Rig-level operator settings, persisted next to the sessions root (ADR-0036).
+    app.state.settings = SettingsStore(app.state.session_manager.sessions_dir)
     app.include_router(api_router)
 
     # Session-scoped routes call manager.current(); with no active session that

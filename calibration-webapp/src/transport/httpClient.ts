@@ -104,6 +104,29 @@ export const fetchSessions = (): Promise<SessionSummary[]> =>
 export const fetchDefaults = (): Promise<PipelineDefaults> =>
   getJson<PipelineDefaults>('/defaults');
 
+// Rig-level operator settings (ADR-0036), persisted service-side in
+// settings.toml. PUT is full-replace (always send the complete object); changes
+// apply live (publication pacer swaps on the next frame; recording quality on
+// the next recording). preview_fps: null = follow the camera fps.
+export interface Settings {
+  record_quality: number;
+  preview_fps: number | null;
+}
+
+export const fetchSettings = (): Promise<Settings> => getJson<Settings>('/settings');
+
+export const saveSettings = async (settings: Settings): Promise<Settings> => {
+  const response = await fetch(`${API_URL}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw await errorFrom(response, `PUT /settings failed: ${response.status}`);
+  }
+  return (await response.json()) as Settings;
+};
+
 // Create a fresh session (unique folder name = id) and make it active. Its wizard
 // step is intrinsic_board, so the rail auto-navigates to Target Config.
 export const createSession = (sessionId: string): Promise<Session> =>
@@ -311,6 +334,14 @@ export interface ExtrinsicResultPayload {
   // Group that received the "set frame" gesture (review-scrubber marker);
   // null/absent until the gesture, reset by a fresh solve.
   framed_group?: number | null;
+  // Bundle-adjustment diagnostics (ADR-0036): ba_converged false = scipy hit its
+  // evaluation ceiling, so the poses are best-so-far, not a converged optimum.
+  // observations_used/_total report the Minimize outlier filter (equal on a full
+  // solve). Absent on results persisted before ADR-0036.
+  ba_converged?: boolean;
+  ba_nfev?: number;
+  observations_used?: number;
+  observations_total?: number;
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>

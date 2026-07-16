@@ -12,12 +12,13 @@ from pathlib import Path
 
 from calibration_service.calibration import ExtrinsicResult, IntrinsicResult
 from calibration_service.capture.enumeration import enumerate_camera_devices
-from calibration_service.models.board import CalibrationBoard
+from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
 from calibration_service.models.session import (
     CalibrationSession,
     CameraConfig,
     CameraStatus,
+    SessionIssue,
     SessionSummary,
     WizardStep,
     session_status,
@@ -145,9 +146,23 @@ class SessionManager:
             exists = (session_dir(self._sessions_dir, self._session_id) / SESSION_FILE).is_file()
             if exists:
                 session = load_session(self._sessions_dir, self._session_id)
-                intrinsic, extrinsic = load_board_config(self._sessions_dir, self._session_id)
+                intrinsic, extrinsic, problems = load_board_config(
+                    self._sessions_dir, self._session_id
+                )
+                # Legacy sessions may carry a single-ArUco intrinsic board; the
+                # intrinsic solve is ChArUco-only (rejected at POST /board since
+                # ADR-0036) — fail loud instead of failing after a whole sweep.
+                if intrinsic is not None and intrinsic.board_type is not BoardType.CHARUCO:
+                    problems.append(
+                        "the intrinsic board is a single ArUco marker (extrinsic-only)"
+                        " — reconfigure it as a ChArUco board"
+                    )
+                    intrinsic = None
                 session.intrinsic_board = intrinsic
                 session.extrinsic_board = extrinsic
+                session.issues = [SessionIssue(step="boards", message=m) for m in problems]
+                for issue in session.issues:
+                    logger.warning("session issue: %s", issue.message)
             else:
                 session = create_session(self._sessions_dir, self._session_id)
             self._session = session
@@ -222,6 +237,8 @@ class SessionManager:
             session.extrinsic_board,
         )
         save_session(self._sessions_dir, session)
+        # A fresh definition resolves any load-time board anomaly (ADR-0036).
+        session.issues = [issue for issue in session.issues if issue.step != "boards"]
         logger.info("defined %s board; step -> %s", target, session.step)
         return session
 

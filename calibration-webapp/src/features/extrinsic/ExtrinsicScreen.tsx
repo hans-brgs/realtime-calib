@@ -255,13 +255,26 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
       <Text fz="0.72rem" c="dark.2">
         Reprojection error (all cameras)
       </Text>
-      <Text ff="heading" fw={700} fz="1.9rem" className="rc-tnum" mb="md">
+      <Text ff="heading" fw={700} fz="1.9rem" className="rc-tnum" mb={4}>
         {result.error.toFixed(3)}
         <Text span fz="0.9rem" c="dark.2" inherit>
           {' '}
           px
         </Text>
       </Text>
+      {/* The BA stopped on its evaluation ceiling instead of a tolerance
+          (ADR-0036): the poses are the best-so-far, not a converged optimum —
+          say so rather than let a truncated solve pass for a good one. */}
+      {result.ba_converged === false && (
+        <Group gap={5} wrap="nowrap" mb="md">
+          <IconAlertTriangle size={13} color="var(--rc-warning)" style={{ flex: 'none' }} />
+          <Text fz="0.66rem" c="var(--rc-warning)" style={{ lineHeight: 1.4 }}>
+            Bundle adjustment hit its iteration ceiling ({result.ba_nfev} evaluations) — these
+            poses are the best so far, not a converged optimum.
+          </Text>
+        </Group>
+      )}
+      {result.ba_converged !== false && <Box mb="md" />}
       {result.cameras.map((camera) => {
         const deviation = result.per_camera_error[camera];
         // Spec deviation highlight: green <= 0.25 px, amber <= 0.5, red above.

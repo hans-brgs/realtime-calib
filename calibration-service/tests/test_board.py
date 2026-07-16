@@ -95,9 +95,10 @@ def test_validate_rejects_dictionary_too_small() -> None:
 def test_board_config_round_trip(tmp_path: Path) -> None:
     board = _charuco(square_size_mm=42.5, marker_ratio=0.8)
     save_board_config(tmp_path, "demo", board, None)
-    intrinsic, extrinsic = load_board_config(tmp_path, "demo")
+    intrinsic, extrinsic, issues = load_board_config(tmp_path, "demo")
     assert intrinsic == board
     assert extrinsic is None
+    assert issues == []
 
 
 def test_board_config_omits_square_fields_for_aruco(tmp_path: Path) -> None:
@@ -117,10 +118,49 @@ def test_board_config_omits_square_fields_for_aruco(tmp_path: Path) -> None:
     block = text.split("[extrinsic_board]")[1]
     assert "square_size_mm" not in block
     assert "marker_ratio" not in block
-    _intrinsic, extrinsic = load_board_config(tmp_path, "demo")
+    _intrinsic, extrinsic, issues = load_board_config(tmp_path, "demo")
     assert extrinsic is not None
     assert extrinsic.marker_size_mm == 297.6
     assert extrinsic.marker_id == 8
+    assert issues == []  # absent-by-design keys are NOT anomalies
+
+
+def test_board_config_fails_loud_on_missing_required_key(tmp_path: Path) -> None:
+    # A ChArUco block without its measured square is a corrupted physical scale:
+    # it used to reload silently at 40 mm (ADR-0036 audit's sharpest finding).
+    save_board_config(tmp_path, "demo", _charuco(), None)
+    path = tmp_path / "demo" / "config.toml"
+    text = "\n".join(
+        line for line in path.read_text().splitlines() if "square_size_mm" not in line
+    )
+    path.write_text(text)
+
+    intrinsic, _extrinsic, issues = load_board_config(tmp_path, "demo")
+    assert intrinsic is None  # board to reconfigure, not a silently-rescaled world
+    assert len(issues) == 1
+    assert "square_size_mm" in issues[0]
+
+
+def test_session_load_surfaces_board_issues(tmp_path: Path) -> None:
+    # End to end: a corrupt board block -> SessionOut.issues names the boards step,
+    # the board reads unconfigured, and a fresh definition clears the issue.
+    client = _client(tmp_path)
+    board = {"board_type": "charuco", "dictionary": "DICT_4X4_100"}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    path = tmp_path / "default" / "config.toml"
+    text = "\n".join(
+        line for line in path.read_text().splitlines() if "square_size_mm" not in line
+    )
+    path.write_text(text)
+
+    fresh = _client(tmp_path)  # a service restart: reload from disk
+    body = fresh.get("/session").json()
+    assert body["intrinsic_board"] is None
+    assert body["issues"] and body["issues"][0]["step"] == "boards"
+    assert "square_size_mm" in body["issues"][0]["message"]
+
+    fresh.post("/board", json={"target": "intrinsic", "board": board})
+    assert fresh.get("/session").json()["issues"] == []
 
 
 def test_define_board_advances_and_persists(tmp_path: Path) -> None:

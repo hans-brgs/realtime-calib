@@ -131,6 +131,15 @@ class ExtrinsicResult:
     # t-l in board frame) lets the webapp derive the board's local xyz triad.
     points: list[list[float]] = field(default_factory=list)
     point_groups: list[int] = field(default_factory=list)
+    # Bundle-adjustment diagnostics (ADR-0036 observability): `ba_converged` is
+    # False when scipy hit the _BA_MAX_NFEV ceiling instead of a tolerance — the
+    # poses are then the best-so-far, NOT a converged optimum, and the webapp
+    # warns. `observations_used`/`_total` report the Minimize outlier filter
+    # (a full solve uses them all).
+    ba_converged: bool = True
+    ba_nfev: int = 0
+    observations_used: int = 0
+    observations_total: int = 0
     # Group whose board received the operator's "set frame" gesture (ADR-0026):
     # shown as a marker on the review scrubber. None until the gesture; a fresh
     # solve resets it (new world), rotate/minimize preserve it (same world).
@@ -445,6 +454,19 @@ def triangulate_groups(
     )
 
 
+@dataclass(frozen=True)
+class BAStatus:
+    """Bundle-adjustment outcome (ADR-0036 observability).
+
+    ``converged`` is False when either pass stopped on the ``_BA_MAX_NFEV``
+    ceiling rather than a tolerance — the solution is then the best-so-far, not
+    an optimum, and the operator deserves to know.
+    """
+
+    converged: bool
+    nfev: int  # function evaluations across both passes
+
+
 def bundle_adjust(
     camera_order: list[str],
     poses: dict[str, NDArray[np.float64]],
@@ -453,14 +475,15 @@ def bundle_adjust(
     obs_point: NDArray[np.intp],
     obs_norm: NDArray[np.float64],
     anchor: str,
-) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.float64]]:
+) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.float64], BAStatus]:
     """Jointly refine non-anchor poses + 3D points on normalized reprojection error.
 
     Parameter vector = ``[rvec|tvec per NON-anchor camera, then xyz per point]``;
     the anchor stays identity (gauge fixed, ADR-0023). Sparse Jacobian: each
     residual row touches its camera's 6 params (unless anchor) + its point's 3.
     Residuals in normalized coords (undistorted upstream), projected with K=I —
-    Caliscope's ``use_normalized`` mode (Triggs et al. conditioning).
+    Caliscope's ``use_normalized`` mode (Triggs et al. conditioning). Also returns
+    a :class:`BAStatus` so a truncated solve never passes for a converged one.
     """
     free = [name for name in camera_order if name != anchor]
     free_slot = {name: i for i, name in enumerate(free)}
@@ -534,7 +557,21 @@ def bundle_adjust(
         residuals, np.asarray(first.x, np.float64), loss="huber", f_scale=_BA_HUBER_SCALE, **common
     )
     solution = np.asarray(result.x, np.float64)
-    logger.info("bundle adjustment: cost %.6f -> %.6f", float(first.cost), float(result.cost))
+    # scipy status: 0 = max_nfev ceiling hit (truncated), > 0 = a tolerance was
+    # satisfied. Both passes must converge for the answer to be an optimum.
+    status = BAStatus(
+        converged=int(first.status) > 0 and int(result.status) > 0,
+        nfev=int(first.nfev) + int(result.nfev),
+    )
+    logger.info(
+        "bundle adjustment: cost %.6f -> %.6f (%s, nfev=%d)",
+        float(first.cost),
+        float(result.cost),
+        "converged" if status.converged else "TRUNCATED at the max_nfev ceiling",
+        status.nfev,
+    )
+    if not status.converged:
+        logger.warning("bundle adjustment hit max_nfev=%d: poses are best-so-far", _BA_MAX_NFEV)
 
     solved: dict[str, NDArray[np.float64]] = {anchor: poses[anchor].copy()}
     for name, slot in free_slot.items():
@@ -542,7 +579,7 @@ def bundle_adjust(
         solved[name] = _transform(
             np.asarray(rmat, np.float64), solution[6 * slot + 3 : 6 * slot + 6]
         )
-    return solved, solution[n_cam_params:].reshape(-1, 3)
+    return solved, solution[n_cam_params:].reshape(-1, 3), status
 
 
 def _observation_residuals_px(
@@ -822,7 +859,7 @@ def refine_result(
     keep = _filter_observations(obs_camera, obs_point, residuals, _REFINE_FILTER_FRACTION)
     logger.info("minimize: %d/%d observations kept", int(keep.sum()), len(keep))
 
-    solved, refined = bundle_adjust(
+    solved, refined, ba_status = bundle_adjust(
         result.cameras, poses, points3d, obs_camera[keep], obs_point[keep], obs_norm[keep], anchor
     )
     per_camera, overall = pixel_errors(
@@ -854,6 +891,12 @@ def refine_result(
         point_count=len(refined),
         points=[[float(v) for v in point] for point in refined],
         point_groups=result.point_groups,
+        ba_converged=ba_status.converged,
+        ba_nfev=ba_status.nfev,
+        # The Minimize report: how many observations survived the filter, out of
+        # the FULL persisted set (this run always re-filters from it).
+        observations_used=int(keep.sum()),
+        observations_total=len(keep),
         board_quads=_group_board_quads(
             np.asarray(result.point_groups, np.intp),
             np.asarray(ba_inputs.point_corner, np.int32),
@@ -1082,7 +1125,7 @@ def compute_extrinsic_from_sweep(
     poses = chain_from_anchor(pairs, names, anchor)
     triangulation = triangulate_groups(detections, poses)
     order = triangulation.camera_order
-    solved, points_opt = bundle_adjust(
+    solved, points_opt, ba_status = bundle_adjust(
         order,
         poses,
         triangulation.points3d,
@@ -1120,6 +1163,11 @@ def compute_extrinsic_from_sweep(
         point_count=len(points_opt),
         points=[[float(v) for v in point] for point in points_opt],
         point_groups=[int(g) for g in triangulation.point_group],
+        ba_converged=ba_status.converged,
+        ba_nfev=ba_status.nfev,
+        # A full solve uses every observation (Minimize is what filters).
+        observations_used=len(triangulation.obs_camera),
+        observations_total=len(triangulation.obs_camera),
         board_quads=_group_board_quads(
             triangulation.point_group,
             triangulation.point_corner,

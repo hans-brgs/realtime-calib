@@ -244,3 +244,12 @@ def test_export_conventions_catalog_route(tmp_path: Path) -> None:
     catalog = client.get("/export/conventions").json()["targets"]
     ids = [t["id"] for t in catalog]
     assert ids == ["caliscope", "threejs", "blender", "unity", "unreal"]
+
+
+def test_export_refuses_a_camera_without_translation() -> None:
+    # Fail loud (ADR-0036): exporting a missing translation as the world ORIGIN
+    # produced a plausible file with a teleported camera.
+    session = _session()
+    session.cameras[1].translation = None
+    with pytest.raises(ValueError, match="cam_1"):
+        caliscope_document(session, SQUARE_MM)

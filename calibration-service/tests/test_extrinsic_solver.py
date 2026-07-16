@@ -173,7 +173,7 @@ def test_bundle_adjust_recovers_truth_with_anchor_fixed() -> None:
         perturbed[name][:3, 3] += rng.normal(0.0, 0.05, 3)
     noisy_points = points3d + rng.normal(0.0, 0.03, points3d.shape)
 
-    solved, refined = bundle_adjust(
+    solved, refined, _status = bundle_adjust(
         order, perturbed, noisy_points, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
     )
     assert np.allclose(solved["cam_0"], np.eye(4))  # anchor fixed by construction
@@ -408,7 +408,7 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
 
     groups = _groups(4)
     tri = triangulate_groups(groups, POSES)
-    solved, refined = bundle_adjust(
+    solved, refined, _status = bundle_adjust(
         tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
     )
     rotations, translations = {}, {}
@@ -464,7 +464,7 @@ def test_refine_filters_outlier_observations() -> None:
         obs_norm[index, 0] += 0.04  # ~32 px at f=800
         obs_px[index, 0] += 32.0
 
-    solved, refined_points = bundle_adjust(
+    solved, refined_points, _status = bundle_adjust(
         tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, obs_norm, "cam_0"
     )
     models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in tri.camera_order]
@@ -571,7 +571,7 @@ def test_single_marker_board_solves_pairwise_and_full_chain() -> None:
 
     poses = chain_from_anchor(pairs, list(POSES), "cam_0")
     tri = triangulate_groups(groups, poses)
-    solved, refined = bundle_adjust(
+    solved, refined, _status = bundle_adjust(
         tri.camera_order, poses, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_norm, "cam_0"
     )
     assert np.allclose(solved["cam_2"][:3, :3], POSES["cam_2"][:3, :3], atol=1e-3)

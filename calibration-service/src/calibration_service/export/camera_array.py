@@ -134,8 +134,16 @@ def _output_size(camera: CameraConfig) -> list[int]:
 
 
 def _translation_mm(camera: CameraConfig, square_size_mm: float) -> list[float]:
-    """Extrinsic translation scaled from board squares to millimetres."""
-    return [float(v) * square_size_mm for v in camera.translation or [0.0, 0.0, 0.0]]
+    """Extrinsic translation scaled from board squares to millimetres.
+
+    Fail loud on a missing translation (ADR-0036): exporting it as the world
+    ORIGIN produced a plausible-looking file with a teleported camera. The API
+    guards normally prevent this, but a silently wrong export is worse than a
+    refused one.
+    """
+    if camera.translation is None:
+        raise ValueError(f"camera {camera.name} has no extrinsic translation — recompute first")
+    return [float(v) * square_size_mm for v in camera.translation]
 
 
 def caliscope_document(

@@ -60,6 +60,7 @@ from calibration_service.recording import (
 from calibration_service.recording.ffmpeg import FfmpegError
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
+from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.transport.camera_publish_service import CameraPublishService
 from calibration_service.tuning import TUNING
 
@@ -74,6 +75,50 @@ async def pipeline_defaults() -> dict[str, object]:
     hardcoding copies; the values live in ``calibration_service.tuning``.
     """
     return asdict(TUNING)
+
+
+class SettingsPayload(BaseModel):
+    """Rig-level operator settings (ADR-0036): full-replace PUT semantics.
+
+    Both fields are always sent (the webapp holds the complete current value from
+    GET), so there is no partial-update ambiguity. ``preview_fps = null`` means
+    "follow the camera fps". Changes apply live: the capture loops re-read the
+    settings (publication pacer swaps on the next frame; recording quality
+    applies to the next recording).
+    """
+
+    record_quality: int = Field(
+        ge=TUNING.record_quality_bounds[0],
+        le=TUNING.record_quality_bounds[1],
+    )
+    preview_fps: int | None = Field(
+        default=None,
+        ge=1,
+        le=max(TUNING.fps_options),
+    )
+
+
+def get_settings_store(request: Request) -> SettingsStore:
+    store = request.app.state.settings
+    assert isinstance(store, SettingsStore)
+    return store
+
+
+@router.get("/settings")
+async def get_settings(request: Request) -> SettingsPayload:
+    current = get_settings_store(request).current
+    return SettingsPayload(
+        record_quality=current.record_quality, preview_fps=current.preview_fps
+    )
+
+
+@router.put("/settings")
+async def put_settings(request: Request, body: SettingsPayload) -> SettingsPayload:
+    """Persist the operator settings to <sessions_dir>/settings.toml (ADR-0036)."""
+    get_settings_store(request).replace(
+        RuntimeSettings(record_quality=body.record_quality, preview_fps=body.preview_fps)
+    )
+    return body
 
 
 # --- Schemas -----------------------------------------------------------------
@@ -158,11 +203,21 @@ class BoardOut(BoardIn):
     pass
 
 
+class IssueOut(BaseModel):
+    """One actionable load-time anomaly (ADR-0036 fail-loud): the wizard stage to
+    revisit (webapp rail id) and a human message. The webapp shows a banner and a
+    badge on that rail step."""
+
+    step: str
+    message: str
+
+
 class SessionOut(BaseModel):
     session_id: str
     session_dir: str = ""  # host-relative session folder (compose mounts ./sessions)
     step: str
     mode: str
+    issues: list[IssueOut] = []  # transient: recomputed at every session load
     export_units: str  # persisted export config (ADR-0026), restored on reopen
     export_targets: list[str] = []
     cameras: list[CameraConfigOut]
@@ -234,6 +289,7 @@ def _session_out(session: CalibrationSession, manager: SessionManager) -> Sessio
         session_dir=manager.session_dir_label(),
         step=session.step,
         mode=session.mode,
+        issues=[IssueOut(step=i.step, message=i.message) for i in session.issues],
         export_units=session.export_units,
         export_targets=list(session.export_targets),
         cameras=[

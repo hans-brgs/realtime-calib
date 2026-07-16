@@ -37,6 +37,7 @@ from calibration_service.recording import (
     VideoRecorder,
 )
 from calibration_service.session.manager import SessionManager
+from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer
 from calibration_service.synchronization.window import sync_window
 from calibration_service.telemetry import (
@@ -151,15 +152,16 @@ _EXTRINSIC_VIEW = "extrinsic"
 _COVISIBILITY_PERIOD_S = 0.33
 
 
-def _publish_rate(fps: int) -> int:
-    """LiveKit publication rate: the preview_fps knob, capped by the capture rate.
+def _publish_rate(fps: int, preview_fps: int | None) -> int:
+    """LiveKit publication rate: the preview_fps setting, capped by the capture rate.
 
-    ``TUNING.preview_fps = None`` means "follow the camera fps" (full fidelity);
-    a lower value only spares the publish chain (downscale/burn-in/RGBA/VP8) —
-    recording, live detection and compute are never affected (ADR-0036/0037).
+    ``preview_fps = None`` means "follow the camera fps" (full fidelity); a lower
+    value only spares the publish chain (downscale/burn-in/RGBA/VP8) — recording,
+    live detection and compute are never affected (ADR-0036/0037). The value is
+    the operator's runtime setting (settings.toml), defaulted from TUNING.
     """
     capture = fps or TUNING.default_fps
-    return min(TUNING.preview_fps or capture, capture)
+    return min(preview_fps or capture, capture)
 
 
 def _preview_size(width: int, height: int) -> tuple[int, int]:
@@ -194,10 +196,15 @@ class CameraPublishService:
         config: LiveKitConfig,
         session_manager: SessionManager,
         preview_jobs: PreviewJobs | None = None,
+        settings: SettingsStore | None = None,
     ) -> None:
         self._config = config
         self._sessions = session_manager
         self._previews = preview_jobs  # background H.264 preview transcodes (ADR-0027)
+        # Operator runtime settings (ADR-0036): read live by the capture loops
+        # (publication pacer swaps on the next frame after a change; recording
+        # quality applies to the next recording). None (tests) -> TUNING defaults.
+        self._settings_store = settings
         self._task: asyncio.Task[None] | None = None
         self._capture_executor: ThreadPoolExecutor | None = None
         # Serializes start/stop/refresh: concurrent refreshes (two quick drag
@@ -238,6 +245,10 @@ class CameraPublishService:
         self._ext_graph: CovisibilityGraph | None = None
         self._last_covisibility = 0.0
 
+    def _settings(self) -> RuntimeSettings:
+        """Current operator settings (TUNING defaults when no store is wired)."""
+        return self._settings_store.current if self._settings_store else RuntimeSettings()
+
     def set_active_view(self, view: str | None) -> None:
         """Report the operator's current wizard view; drives the live set (ADR-0021)."""
         logger.info("active view -> %s", view)
@@ -268,7 +279,13 @@ class CameraPublishService:
         # cadence IS the configured capture cadence.
         record_fps = camera.fps or TUNING.default_fps
         async with self._recorder_lock:
-            self._recorder = VideoRecorder(path, camera.width, camera.height, record_fps)
+            self._recorder = VideoRecorder(
+                path,
+                camera.width,
+                camera.height,
+                record_fps,
+                quality=self._settings().record_quality,
+            )
             self._recording_camera = camera_name
         logger.info("recording intrinsic sweep of %s -> %s", camera_name, path)
 
@@ -318,7 +335,9 @@ class CameraPublishService:
             self._ext_sync = FrameSynchronizer(names, window)
             self._ext_graph = CovisibilityGraph(names)
             self._last_covisibility = 0.0
-            self._extrinsic = ExtrinsicRecorder(self._sessions.extrinsic_dir(), specs)
+            self._extrinsic = ExtrinsicRecorder(
+                self._sessions.extrinsic_dir(), specs, quality=self._settings().record_quality
+            )
         self._reconcile.set()  # keep/reopen every camera while the sweep runs
         logger.info("recording extrinsic sweep of %d cameras", len(specs))
 
@@ -543,7 +562,10 @@ class CameraPublishService:
             previous = published.get(target.name)
             if previous is None:
                 await publisher.publish_camera_track(
-                    target.name, size[0], size[1], _publish_rate(target.fps)
+                    target.name,
+                    size[0],
+                    size[1],
+                    _publish_rate(target.fps, self._settings().preview_fps),
                 )
                 published[target.name] = size
             elif previous != size:
@@ -703,7 +725,8 @@ class CameraPublishService:
         # detection grids are independent of the publication rate.
         fps = target.fps or TUNING.default_fps
         capture_pacer = GridPacer(fps)
-        publish_pacer = GridPacer(_publish_rate(target.fps))
+        publish_rate = _publish_rate(target.fps, self._settings().preview_fps)
+        publish_pacer = GridPacer(publish_rate)
         detect_pacer_intrinsic = GridPacer(_DETECT_RATE_HZ)
         detect_pacer_extrinsic = GridPacer(_EXTRINSIC_DETECT_RATE_HZ)
         detector: BoardDetector | None = None
@@ -744,6 +767,13 @@ class CameraPublishService:
             elif detector is not None and detector_extrinsic != extrinsic:
                 detector = None  # board target changed (intrinsic <-> extrinsic sweep)
 
+            # The preview_fps setting applies LIVE: swap the publication pacer as
+            # soon as the operator changes it (no reconnect — the track's
+            # max_framerate stays an encoder hint until the next republish).
+            rate = _publish_rate(target.fps, self._settings().preview_fps)
+            if rate != publish_rate:
+                publish_rate = rate
+                publish_pacer = GridPacer(rate)
             publish_due = publish_pacer.due(now)
             preview: NDArray[np.uint8] | None = None
             if active:

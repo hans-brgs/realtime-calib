@@ -1,9 +1,11 @@
 import '@mantine/core/styles.css';
 import '@mantine/code-highlight/styles.css'; // after core styles (Export preview)
 import '@mantine/dropzone/styles.css'; // after core styles (import-ZIP modal)
+import '@mantine/notifications/styles.css'; // after core styles (session checklist)
 import '@livekit/components-styles';
 
 import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 
@@ -40,6 +42,9 @@ function AppContent() {
 export default function App() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
+      {/* Toast host for the session checklist (ADR-0036 issues) — a regular
+          component, but it must live inside MantineProvider. */}
+      <Notifications position="bottom-right" />
       <Provider store={store}>
         <AppContent />
       </Provider>

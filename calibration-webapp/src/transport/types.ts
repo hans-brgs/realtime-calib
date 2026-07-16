@@ -73,11 +73,19 @@ export interface BoardConfigRequest {
   board: Board | null; // null = inherit the intrinsic board (extrinsic only)
 }
 
+// One actionable load-time anomaly (ADR-0036 fail-loud): the wizard stage to
+// revisit and a human message. Shown as a banner + a badge on that rail step.
+export interface SessionIssue {
+  step: string; // rail stage id, e.g. "boards"
+  message: string;
+}
+
 export interface Session {
   session_id: string;
   session_dir?: string; // host-relative session folder (e.g. "sessions/default")
   step: WizardStep;
   mode: SessionMode;
+  issues?: SessionIssue[]; // transient: recomputed at every session load
   export_units?: 'mm' | 'm'; // persisted export config (ADR-0026), restored on reopen
   export_targets?: string[];
   cameras: CameraConfig[];
