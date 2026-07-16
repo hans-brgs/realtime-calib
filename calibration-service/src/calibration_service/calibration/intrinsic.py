@@ -28,7 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
-from calibration_service.detection import BoardDetection, BoardDetector
+from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
 
 # Real Caliscope parity (ADR-0032, verified against caliscope source): plain
@@ -48,6 +48,10 @@ _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # this is filtered independently of BoardDetector's lower live-detection floor
 # (detection/detector.py's _MIN_CORNERS=4, which only gates UI "board found").
 _MIN_CORNERS_FOR_CALIBRATION = 6
+# Anti-"sliver" gate: a view whose corners are near-collinear is rank-deficient
+# (2nd singular value under this share of the 1st) and derails the solver's pose
+# init — see _is_well_spread. Prudent and eprouve; not a tuning knob.
+_MIN_SPREAD_RATIO = 0.02
 
 
 @dataclass(frozen=True)
@@ -217,7 +221,7 @@ def _is_well_spread(corners: NDArray[np.float32]) -> bool:
     """
     centered = corners.astype(np.float64) - corners.mean(axis=0)
     singular_values = np.linalg.svd(centered, compute_uv=False)
-    return bool(singular_values[1] > 0.02 * singular_values[0])
+    return bool(singular_values[1] > _MIN_SPREAD_RATIO * singular_values[0])
 
 
 def select_keyframes(
@@ -288,11 +292,6 @@ def _cv_charuco_board(board: CalibrationBoard) -> cv2.aruco.CharucoBoard:
     )
 
 
-def _initial_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
-    f = float(width)
-    return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
-
-
 def calibrate_intrinsic(
     detections: list[BoardDetection],
     board: CalibrationBoard,
@@ -329,7 +328,7 @@ def calibrate_intrinsic(
         raise ValueError(f"need >= {_MIN_VIEWS} usable views, got {len(object_points)}")
 
     width, height = image_size
-    guess = _initial_camera_matrix(width, height)
+    guess = guessed_camera_matrix(width, height)
     # distCoeffs=None is valid at runtime (OpenCV allocates it); the cv2 stub types
     # it as required, hence the ignore.
     result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]

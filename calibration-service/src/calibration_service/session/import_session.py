@@ -77,6 +77,11 @@ _JUNK_BASENAMES = frozenset({".DS_Store", "Thumbs.db"})
 # to ~1 s of tail drift; beyond that the csv is considered misaligned (frame i of
 # the video would no longer be row i of the csv).
 _ROWS_FRAMES_TOLERANCE = 30
+# Last-resort sidecar cadence when a degenerate alignment has NOTHING to
+# synchronize AND the videos declare no usable rate: purely arbitrary (any
+# positive period does), deliberately NOT tied to the camera default_fps — this
+# is not a capture cadence, just a non-zero slot spacing.
+_FALLBACK_FPS = 30.0
 
 
 class ImportValidationError(ValueError):
@@ -378,7 +383,14 @@ def _caliscope_aligned_times(
         raise ImportValidationError("could not align the extrinsic videos (no frames)")
     duration = max(series[-1] for series in grids.values() if series)
     # Slot spacing spans the recording: N slots cover [0, duration] in N-1 steps.
-    period = duration / (len(slots) - 1) if len(slots) > 1 and duration > 0 else 1.0 / 30.0
+    # Degenerate fallback (<= 1 slot or zero duration = nothing to synchronize):
+    # any positive period works, so derive it from the videos' own probed rate
+    # rather than assuming 30 fps — a hand-inspected sidecar then reads true.
+    # `fps` floors unusable probes at 1e-6 (a 0-fps container), which would blow
+    # the period up to ~1e6 s: only trust plausible rates, else _FALLBACK_FPS.
+    plausible = [rate for rate in fps.values() if rate > 1.0]
+    fallback_period = 1.0 / max(plausible, default=_FALLBACK_FPS)
+    period = duration / (len(slots) - 1) if len(slots) > 1 and duration > 0 else fallback_period
     times = {
         video.index: [(-1.0) for _ in range(counts[str(video.index)])]
         for video in plan.extrinsic

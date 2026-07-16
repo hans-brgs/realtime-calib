@@ -186,6 +186,28 @@ def _min_corners(board: CalibrationBoard) -> int:
     )
 
 
+def _best_shared_count(groups: list[dict[str, GroupDetection]], board: CalibrationBoard) -> int:
+    """Shared board views of the BEST camera pair — same rule as stereo_pairwise.
+
+    Diagnostic only: turns "no pair shares >= N views" into a message the
+    operator can act on (how far off the sweep actually was).
+    """
+    min_corners = _min_corners(board)
+    names = sorted({name for group in groups for name in group})
+    best = 0
+    for i, cam_a in enumerate(names):
+        for cam_b in names[i + 1 :]:
+            shared = 0
+            for group in groups:
+                det_a, det_b = group.get(cam_a), group.get(cam_b)
+                if det_a is None or det_b is None:
+                    continue
+                if len(np.intersect1d(det_a.ids, det_b.ids)) >= min_corners:
+                    shared += 1
+            best = max(best, shared)
+    return best
+
+
 def derive_sweep_window(directory: Path, names: list[str]) -> float:
     """Sync window derived from the RECORDED cadence, not the configured fps.
 
@@ -1119,7 +1141,14 @@ def compute_extrinsic_from_sweep(
 
     pairs = stereo_pairwise(detections, board, min_shared=min_shared)
     if not pairs:
-        raise ValueError(f"no camera pair shares >= {min_shared} board views")
+        # Actionable (ADR-0036): name the best pair the sweep actually managed, so
+        # the operator knows whether to re-sweep or lower the API-only min_shared.
+        best = _best_shared_count(detections, board)
+        raise ValueError(
+            f"no camera pair shares >= {min_shared} board views "
+            f"(best pair: {best}) — sweep the board where the cameras overlap, "
+            f"or lower 'min_shared' (API-only knob)"
+        )
 
     names = [model.name for model in models]
     poses = chain_from_anchor(pairs, names, anchor)
