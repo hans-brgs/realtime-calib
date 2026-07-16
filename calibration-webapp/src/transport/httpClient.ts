@@ -383,13 +383,9 @@ export interface ExportTarget {
   handedness: string;
 }
 
-// Persist a drag-reorder (device paths in the chosen order). Unlike /cameras/config
-// this keeps calibrations — only index + position-based name change.
-export const reorderCameras = (devicePaths: string[]): Promise<Session> =>
-  postJson<Session>('/cameras/order', { device_paths: devicePaths });
-
-// Advance past Camera Setup WITHOUT rebuilding the configs (load-from-files:
-// the cameras derive from the imported videos — this just unlocks Intrinsics).
+// Advance past Camera Setup without touching the configs (ADR-0040: the only way
+// forward — /cameras/config applies but never advances). Also the load-from-files
+// "Continue" (the cameras derive from the imported videos).
 export const confirmCameraSetup = (): Promise<Session> => postJson<Session>('/cameras/confirm');
 
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>

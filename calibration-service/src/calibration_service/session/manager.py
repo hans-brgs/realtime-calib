@@ -75,29 +75,6 @@ class SessionManager:
         self._session_id = session_id
         self._session: CalibrationSession | None = None
 
-    def reorder_cameras(self, device_paths: list[str]) -> CalibrationSession:
-        """Permute camera indices to match the given device order and persist.
-
-        Lightweight companion to ``configure_cameras`` (which REBUILDS the
-        configs and drops calibrations): here each camera keeps its identity and
-        calibration — they belong to the physical device — and only ``index``
-        (anchor = 0, ADR-0012) and the position-based ``name`` change. Note:
-        recordings already on disk stay keyed by the OLD names (reordering is a
-        pre-calibration gesture in the wizard).
-        """
-        session = self.current()
-        by_path = {c.device_path: c for c in session.cameras}
-        if set(device_paths) != set(by_path) or len(device_paths) != len(by_path):
-            raise ValueError("device paths do not match the configured cameras")
-        for position, path in enumerate(device_paths):
-            camera = by_path[path]
-            camera.index = position
-            camera.name = f"{camera.prefix}_{position}"
-        session.cameras.sort(key=lambda c: c.index)
-        save_session(self._sessions_dir, session)
-        logger.info("cameras reordered: %s", ", ".join(device_paths))
-        return session
-
     def sessions_root_label(self) -> str:
         """Host-relative sessions root (compose mounts ./<name>), for the create popup."""
         return self._sessions_dir.name
@@ -328,10 +305,18 @@ class SessionManager:
         return session
 
     def configure_cameras(self, cameras: list[CameraConfig]) -> CalibrationSession:
-        """Set the session's cameras, advance to intrinsic capture, and persist."""
+        """Rebuild the session's cameras and persist — WITHOUT advancing the wizard.
+
+        Config and progression are decoupled (ADR-0040): the operator applies,
+        verifies, iterates, then moves on via ``confirm_camera_setup``. The step
+        regresses to CAMERA_SETUP unconditionally — a rebuild drops every
+        calibration result (the fresh configs carry none), so any downstream
+        step just lost its prerequisites. The destructive cases are confirmed
+        upstream by the webapp's modal.
+        """
         session = self.current()
         session.cameras = cameras
-        session.step = WizardStep.INTRINSIC_CAPTURE
+        session.step = WizardStep.CAMERA_SETUP
         save_session(self._sessions_dir, session)
         logger.info("configured %d camera(s); step -> %s", len(cameras), session.step)
         return session

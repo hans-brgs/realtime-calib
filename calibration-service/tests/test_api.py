@@ -14,9 +14,10 @@ from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
+from calibration_service.models.session import WizardStep
 from calibration_service.recording import VideoRecorder, preview_path
 from calibration_service.session.manager import SessionManager
-from calibration_service.session.store import create_session, load_session
+from calibration_service.session.store import create_session, load_session, save_session
 
 requires_ffmpeg = pytest.mark.skipif(
     shutil.which("ffmpeg") is None, reason="ffmpeg not installed"
@@ -233,7 +234,9 @@ def test_configure_cameras_persists_and_advances(tmp_path: Path) -> None:
 
     assert response.status_code == 200
     body = response.json()
-    assert body["step"] == "intrinsic_capture"
+    # Config no longer advances the wizard (ADR-0040): the operator verifies,
+    # iterates, then moves on via /cameras/confirm.
+    assert body["step"] == "camera_setup"
     assert [c["name"] for c in body["cameras"]] == ["cam_0", "cam_1"]
 
     # Persisted to disk: a fresh load reflects the config.
@@ -243,64 +246,62 @@ def test_configure_cameras_persists_and_advances(tmp_path: Path) -> None:
     assert reloaded.cameras[0].status.value == "configured"
 
 
-def test_reorder_cameras_persists_and_keeps_calibrations(tmp_path: Path) -> None:
-    # Drag-reorder persistence: /cameras/order permutes index + position-based
-    # name WITHOUT rebuilding the configs — calibrations follow the device.
+def test_reconfigure_regresses_the_wizard_and_reorder_persists(tmp_path: Path) -> None:
+    # ADR-0040: /cameras/config is the ONE write path (order included) and never
+    # advances; a rebuild from a later step regresses to camera_setup because
+    # the fresh configs carry no calibration — the downstream steps just lost
+    # their prerequisites. /cameras/confirm is the only way forward.
+    def cam(index: int, path: str) -> dict[str, object]:
+        return {
+            "index": index,
+            "device_path": path,
+            "device_node": f"/dev/video{index}",
+            "width": 1280,
+            "height": 720,
+            "resize_factor": 1.0,
+            "fps": 30,
+        }
+
     client = _client(tmp_path)
     client.post(
         "/cameras/config",
         json={
             "prefix": "cam",
-            "cameras": [
-                {
-                    "index": 0,
-                    "device_path": "/dev/v4l/by-path/cam-a",
-                    "device_node": "/dev/video0",
-                    "width": 1280,
-                    "height": 720,
-                    "resize_factor": 1.0,
-                    "fps": 30,
-                },
-                {
-                    "index": 1,
-                    "device_path": "/dev/v4l/by-path/cam-b",
-                    "device_node": "/dev/video2",
-                    "width": 1280,
-                    "height": 720,
-                    "resize_factor": 1.0,
-                    "fps": 30,
-                },
-            ],
+            "cameras": [cam(0, "/dev/v4l/by-path/cam-a"), cam(1, "/dev/v4l/by-path/cam-b")],
         },
     )
-    # Give cam-a a calibration to prove it SURVIVES the reorder.
-    matrix = [[800.0, 0.0, 640.0], [0.0, 800.0, 360.0], [0.0, 0.0, 1.0]]
+    assert client.post("/cameras/confirm").json()["step"] == "intrinsic_capture"
+
+    # Simulate a calibrated session past camera setup.
     manager = SessionManager(tmp_path, "default")
-    manager.current().cameras[0].matrix = matrix
-    reordered = manager.reorder_cameras(
-        ["/dev/v4l/by-path/cam-b", "/dev/v4l/by-path/cam-a"]
-    )
-    assert [c.device_path for c in reordered.cameras] == [
+    session = manager.current()
+    session.cameras[0].matrix = [[800.0, 0.0, 640.0], [0.0, 800.0, 360.0], [0.0, 0.0, 1.0]]
+    session.step = WizardStep.EXTRINSIC_CAPTURE
+    save_session(tmp_path, session)
+
+    # Re-apply with the two cameras SWAPPED (a drag-reorder, via the same path).
+    body = client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [cam(0, "/dev/v4l/by-path/cam-b"), cam(1, "/dev/v4l/by-path/cam-a")],
+        },
+    ).json()
+    assert body["step"] == "camera_setup"  # regressed: prerequisites are gone
+    assert [c["device_path"] for c in body["cameras"]] == [
         "/dev/v4l/by-path/cam-b",
         "/dev/v4l/by-path/cam-a",
     ]
-    assert [c.name for c in reordered.cameras] == ["cam_0", "cam_1"]
-    # The calibration moved WITH its device (cam-a is now index 1 / cam_1).
-    assert reordered.cameras[1].matrix == matrix
+    assert [c["name"] for c in body["cameras"]] == ["cam_0", "cam_1"]
+    assert all(c["matrix"] is None for c in body["cameras"])  # rebuild = recalibrate
 
-    # Persisted: a fresh load sees the new order and the kept calibration.
+    # The new order survives a reload.
     reloaded = load_session(tmp_path, "default")
     assert [c.device_path for c in reloaded.cameras] == [
         "/dev/v4l/by-path/cam-b",
         "/dev/v4l/by-path/cam-a",
     ]
-    assert reloaded.cameras[1].matrix == matrix
-
-    # Route-level guard: unknown paths -> 422.
-    response = _client(tmp_path).post(
-        "/cameras/order", json={"device_paths": ["/dev/v4l/by-path/nope"]}
-    )
-    assert response.status_code == 422
+    assert reloaded.step is WizardStep.CAMERA_SETUP
 
 
 def test_validate_intrinsic_guards_then_advances_to_extrinsic(tmp_path: Path) -> None:
@@ -424,6 +425,7 @@ def test_list_sessions_summaries(tmp_path: Path) -> None:
             ],
         },
     )
+    client.post("/cameras/confirm")
     summaries = client.get("/sessions").json()
     assert summaries[0]["camera_count"] == 1
     assert summaries[0]["status"] == "in_progress"

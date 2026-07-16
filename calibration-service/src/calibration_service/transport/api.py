@@ -1277,30 +1277,10 @@ async def export_archive(request: Request) -> Response:
     )
 
 
-class CameraOrderRequest(BaseModel):
-    """Persist a drag-reorder: device paths in the operator's chosen order."""
-
-    device_paths: list[str]
-
-
-@router.post("/cameras/order", response_model=SessionOut)
-async def reorder_cameras(request: Request, body: CameraOrderRequest) -> SessionOut:
-    """Permute camera indices (anchor = position 0) without rebuilding configs.
-
-    Unlike /cameras/config this KEEPS calibrations (they belong to the physical
-    device); only index + position-based name change. Republishes so the track
-    names follow.
-    """
-    manager = get_manager(request)
-    try:
-        session = manager.reorder_cameras(body.device_paths)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    publish_service = get_publish_service(request)
-    if publish_service is not None:
-        await publish_service.refresh()
-    return _session_out(session, manager)
+# No /cameras/order: reordering goes through /cameras/config like every other
+# parameter (ADR-0040). A "preserving" reorder endpoint only preserved the config
+# objects — on-disk artefacts are keyed by name, so a post-calibration reorder
+# silently re-bound cam_<i>.mp4 to a different physical device.
 
 
 @router.post("/board", response_model=SessionOut)
