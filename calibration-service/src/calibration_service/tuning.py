@@ -56,7 +56,13 @@ class PipelineTuning:
     # --- Intrinsic Prepare (ADR-0022/0038) ---
     intrinsic_stride: int = 5  # decode+detect 1 frame every N within the trim
     intrinsic_stride_bounds: tuple[int, int] = (1, 30)
-    intrinsic_cap: int = 25  # keyframes kept for calibrateCamera
+    # Keyframes kept for calibrateCamera. 50, not 25, on MEASURED evidence
+    # (ADR-0038 A/B on sessions/test, 4 identical cameras): at 25 the four focal
+    # estimates scatter ~10 px (0.74%) and depend on which frames the selector
+    # happened to pick; at 50 they settle to ~4-6 px AND two different selectors
+    # agree within 0.4% — i.e. 25 samples the sweep, 50 measures the lens.
+    # Cost is a few seconds per camera (detection, not the solve, dominates).
+    intrinsic_cap: int = 50
     intrinsic_cap_bounds: tuple[int, int] = (6, 100)
 
     # --- Extrinsic Prepare (ADR-0023/0033/0036) ---
