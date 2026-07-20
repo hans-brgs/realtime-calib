@@ -1,5 +1,6 @@
 import { Box, Stack, Text, Tooltip, UnstyledButton } from '@mantine/core';
 import {
+  IconAlertTriangleFilled,
   IconCamera,
   IconCheck,
   IconChevronLeft,
@@ -23,6 +24,9 @@ export interface RailItem {
   id: ViewId;
   label: string;
   status: RailStatus;
+  // A load-time anomaly points at this stage (SessionOut.issues, ADR-0036):
+  // persistent warning marker until the operator reconfigures it.
+  alert?: boolean;
 }
 
 const ICONS: Record<ViewId, ComponentType<IconProps>> = {
@@ -82,17 +86,33 @@ function RailButton({ item, selected, collapsed, onNavigate }: RailButtonProps) 
         opacity: locked ? 0.55 : 1,
       }}
     >
-      <Icon
-        size={18}
-        stroke={1.8}
-        color={selected ? 'var(--rc-accent-bright)' : 'var(--mantine-color-dark-2)'}
-        style={{ flex: 'none' }}
-      />
+      <Box style={{ position: 'relative', flex: 'none', display: 'flex' }}>
+        <Icon
+          size={18}
+          stroke={1.8}
+          color={selected ? 'var(--rc-accent-bright)' : 'var(--mantine-color-dark-2)'}
+        />
+        {item.alert && collapsed && (
+          // Collapsed rail: the warning rides the icon as a corner dot.
+          <Box
+            style={{
+              position: 'absolute',
+              top: -3,
+              right: -4,
+              width: 7,
+              height: 7,
+              borderRadius: '50%',
+              background: 'var(--rc-warning)',
+            }}
+          />
+        )}
+      </Box>
       {!collapsed && (
         <>
           <Text fz="0.84rem" style={{ flex: 1, whiteSpace: 'nowrap' }} inherit>
             {item.label}
           </Text>
+          {item.alert && <IconAlertTriangleFilled size={12} color="var(--rc-warning)" />}
           <StatusGlyph status={item.status} />
         </>
       )}

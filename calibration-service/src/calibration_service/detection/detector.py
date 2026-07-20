@@ -93,11 +93,13 @@ def _charuco_outline(
     return cast("NDArray[np.float32]", cv2.perspectiveTransform(outline_grid, homography)[0])
 
 
-def _guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
-    """A rough pinhole K (focal ≈ frame width, ~52° HFOV) for pre-calibration PnP.
+def guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
+    """A rough pinhole K (focal ≈ frame width, ~52° HFOV) when none is known yet.
 
-    The tilt estimate is approximate but monotonic — enough to guide the operator;
-    it is recomputed exactly at compute time with the real intrinsics.
+    ONE definition for both users (ADR-0036 — it used to exist twice): the live
+    tilt metric's pre-calibration PnP (approximate but monotonic, enough to guide
+    the operator) and the intrinsic solve's CALIB_USE_INTRINSIC_GUESS seed. The
+    tilt is recomputed exactly at compute time with the real intrinsics.
     """
     f = float(width)
     return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
@@ -128,7 +130,7 @@ def _tilt_deg(
         if len(np.unique(object_points[:, 0])) < 2 or len(np.unique(object_points[:, 1])) < 2:
             return None  # collinear → pose ill-defined
         flag = cv2.SOLVEPNP_IPPE
-    camera_matrix = _guessed_camera_matrix(width, height)
+    camera_matrix = guessed_camera_matrix(width, height)
     try:
         ok, rvec, _ = cv2.solvePnP(object_points, image_points, camera_matrix, None, flags=flag)
     except cv2.error:

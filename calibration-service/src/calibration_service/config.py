@@ -25,8 +25,10 @@ class Config(BaseSettings):
     # Root of the calibration session folders = source of truth (ADR-0011).
     sessions_dir: Path = Path("/data/sessions")
 
-    # Camera capture backend (V4L2 on Linux).
-    camera_backend: str = "v4l2"
+    # NOTE: capture is V4L2-only for now (open_camera hardcodes cv2.CAP_V4L2).
+    # Backend selection (v4l2/rtsp/...) will return as an operator setting served
+    # through PipelineTuning when the multi-backend capture abstraction lands
+    # (GStreamer plan) — not as an env var (ADR-0036).
 
 
 class LiveKitConfig(BaseSettings):

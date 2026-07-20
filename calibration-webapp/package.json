@@ -27,6 +27,7 @@
     "@mantine/core": "9.4.1",
     "@mantine/dropzone": "9.4.1",
     "@mantine/hooks": "9.4.1",
+    "@mantine/notifications": "9.4.1",
     "@react-three/drei": "^10.6.1",
     "@react-three/fiber": "^9.3.0",
     "@reduxjs/toolkit": "^2.11.0",

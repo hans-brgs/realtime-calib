@@ -35,6 +35,7 @@ import {
   selectSession,
   validateIntrinsicThunk,
 } from '@/features/session/sessionSlice';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import { type CoverageMetrics, selectCoverage } from '@/features/telemetry/telemetrySlice';
 import {
   errorMessage,
@@ -192,7 +193,7 @@ function ResultPanel({
       </Text>
       <Group justify="space-between" mt="sm">
         <Text fz="0.72rem" c="dark.2">
-          Image coverage (≥ 80 % target)
+          Image coverage (≥ 70 % target)
         </Text>
         <Text
           fz="0.78rem"
@@ -201,7 +202,10 @@ function ResultPanel({
           c={
             coveragePct == null
               ? undefined
-              : coveragePct >= 80
+              : // 70%: the ChArUco interior-corner lattice makes the border ring
+                // (~1 square at close range) physically unreachable — 80% was
+                // quasi impossible on real sweeps (operator-validated).
+                coveragePct >= 70
                 ? 'var(--rc-success)'
                 : 'var(--rc-warning)'
           }
@@ -228,6 +232,16 @@ function ResultPanel({
         </Text>
         <Text fz="0.78rem" fw={600} className="rc-tnum">
           {camera.grid_count ?? '—'}
+        </Text>
+      </Group>
+      <Group justify="space-between" mt="sm">
+        <Text fz="0.72rem" c="dark.2">
+          Keyframe sharpness (min / median)
+        </Text>
+        <Text fz="0.78rem" fw={600} className="rc-tnum">
+          {metrics?.sharpness_median != null
+            ? `${Math.round(metrics.sharpness_min ?? 0)} / ${Math.round(metrics.sharpness_median)}`
+            : '—'}
         </Text>
       </Group>
       <Group justify="space-between" mt="sm">
@@ -276,6 +290,9 @@ interface PreparePanelProps {
   trimEnd: number;
   stride: number;
   keyframeCap: number;
+  // Backend-served bounds (GET /defaults, ADR-0036) — [min, max] per knob.
+  strideBounds: [number, number];
+  capBounds: [number, number];
   onTrimStart: (n: number) => void;
   onTrimEnd: (n: number) => void;
   onStride: (n: number) => void;
@@ -290,11 +307,16 @@ function PreparePanel({
   trimEnd,
   stride,
   keyframeCap,
+  strideBounds,
+  capBounds,
   onTrimStart,
   onTrimEnd,
   onStride,
   onCap,
 }: PreparePanelProps) {
+  // "1 frame every N" over the trim span: what the compute will actually detect.
+  const span = Math.max(0, trimEnd + 1 - trimStart);
+  const analyzed = span > 0 ? Math.ceil(span / Math.max(1, stride)) : 0;
   return (
     <>
       <Text
@@ -327,18 +349,19 @@ function PreparePanel({
 
       <NumberInput
         label="Sampling stride (1 frame / N)"
+        description={`${analyzed} frames will be analyzed`}
         value={stride}
-        onChange={(v) => onStride(Math.max(1, Number(v) || 1))}
-        min={1}
-        max={30}
+        onChange={(v) => onStride(Math.max(strideBounds[0], Number(v) || strideBounds[0]))}
+        min={strideBounds[0]}
+        max={strideBounds[1]}
         mb="md"
       />
       <NumberInput
         label="Keyframe cap (max kept)"
         value={keyframeCap}
-        onChange={(v) => onCap(Math.max(6, Number(v) || 6))}
-        min={6}
-        max={60}
+        onChange={(v) => onCap(Math.max(capBounds[0], Number(v) || capBounds[0]))}
+        min={capBounds[0]}
+        max={capBounds[1]}
         mb="md"
       />
       <Text fz="0.66rem" c="dark.3">
@@ -366,11 +389,23 @@ function IntrinsicsInner() {
   const coverage = useAppSelector(selectCoverage(active));
   const camera = cameras.find((c) => c.name === active) ?? null;
 
+  // Backend-served knob defaults/bounds (GET /defaults, ADR-0036).
+  const defaults = useAppSelector(selectDefaults);
+
   // Prepare-step state (ADR-0022): the recorded sweep + the operator knobs.
+  // Initial stride/cap are the structural minima; enterPrepare re-seeds them from
+  // the served defaults (no hardcoded copy of the tuning values here).
   const [frameTotal, setFrameTotal] = useState(0);
+  // Index <-> time rate of the preview mp4, SERVED by the transcode status
+  // (dynamic contract, ADR-0037). 30 is a pre-seed placeholder only — always
+  // overwritten before Prepare renders.
+  const [previewFps, setPreviewFps] = useState(30);
+  // Cache-buster of the preview mp4 (served): a re-record must never scrub a
+  // browser-cached stale video (mis-trimmed compute).
+  const [previewVersion, setPreviewVersion] = useState('');
   const [frame, setFrame] = useState(0);
-  const [stride, setStride] = useState(5);
-  const [keyframeCap, setKeyframeCap] = useState(25);
+  const [stride, setStride] = useState(1);
+  const [keyframeCap, setKeyframeCap] = useState(6);
   const [trimStart, setTrimStart] = useState(0);
   const [trimEnd, setTrimEnd] = useState(0);
   const [metrics, setMetrics] = useState<IntrinsicMetrics | null>(null);
@@ -383,8 +418,10 @@ function IntrinsicsInner() {
     setFrame(0);
     setTrimStart(0);
     setTrimEnd(Math.max(0, total - 1));
-    setStride(5);
-    setKeyframeCap(25);
+    if (defaults) {
+      setStride(defaults.intrinsic_stride);
+      setKeyframeCap(defaults.intrinsic_cap);
+    }
   };
 
   // Shared capture sub-wizard (D5): capture -> prepare -> computing -> review.
@@ -416,6 +453,10 @@ function IntrinsicsInner() {
       return fetchIntrinsicPreviewStatus(active);
     },
     onReady: (status) => {
+      if (status.state === 'done' && status.fps > 0) {
+        setPreviewFps(status.fps);
+      }
+      setPreviewVersion(status.state === 'done' ? status.version : '');
       enterPrepare(status.state === 'done' ? status.frames : 0);
       wizard.toPrepare();
     },
@@ -578,6 +619,8 @@ function IntrinsicsInner() {
               <PrepareScrubber
                 camera={active}
                 total={frameTotal}
+                fps={previewFps}
+                version={previewVersion}
                 frame={frame}
                 onFrame={setFrame}
                 trim={[trimStart, trimEnd]}
@@ -623,6 +666,8 @@ function IntrinsicsInner() {
               trimEnd={trimEnd}
               stride={stride}
               keyframeCap={keyframeCap}
+              strideBounds={defaults?.intrinsic_stride_bounds ?? [1, 30]}
+              capBounds={defaults?.intrinsic_cap_bounds ?? [6, 100]}
               onTrimStart={(n) => setTrimStart(Math.min(n, trimEnd))}
               onTrimEnd={(n) => setTrimEnd(Math.max(n, trimStart))}
               onStride={setStride}

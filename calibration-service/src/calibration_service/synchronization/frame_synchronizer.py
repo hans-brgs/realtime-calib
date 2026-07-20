@@ -31,9 +31,11 @@ logger = logging.getLogger(__name__)
 # Frames a present camera may accumulate before we stop waiting for the missing
 # ones and emit a partial (>= quorum) group. Bounds the wait for a dead/lagging
 # camera to ~wait_depth/fps seconds without freezing the pipeline (samvision
-# SYNC_WAIT_DEPTH).
-_DEFAULT_WAIT_DEPTH = 3
-_DEFAULT_MAX_BUFFER = 30
+# SYNC_WAIT_DEPTH). Deliberate invariants (feedback-only synchronizer, ADR-0036).
+_WAIT_DEPTH = 3
+# Per-camera buffer depth; deque(maxlen) silently evicts the oldest on overflow
+# (2 s of margin at the 15 Hz extrinsic detection grid).
+_MAX_BUFFER = 30
 _QUORUM = 2  # >= 2 views to constrain an extrinsic pair (ADR-0007)
 
 
@@ -58,21 +60,14 @@ class SyncGroup[T]:
 class FrameSynchronizer[T]:
     """Pair per-camera timestamped payloads into synchronized groups (ADR-0007)."""
 
-    def __init__(
-        self,
-        cameras: list[str],
-        window_s: float,
-        *,
-        wait_depth: int = _DEFAULT_WAIT_DEPTH,
-        max_buffer: int = _DEFAULT_MAX_BUFFER,
-    ) -> None:
+    def __init__(self, cameras: list[str], window_s: float) -> None:
         self._cameras = list(cameras)
         self._window_s = window_s
-        self._wait_depth = wait_depth
+        self._wait_depth = _WAIT_DEPTH
         # deque(maxlen) silently evicts the oldest on overflow — fine here (no
         # slot ownership to release, unlike samvision's rings).
         self._buffers: dict[str, deque[SyncFrame[T]]] = {
-            name: deque(maxlen=max_buffer) for name in self._cameras
+            name: deque(maxlen=_MAX_BUFFER) for name in self._cameras
         }
         # Live cameras expected in a *complete* group; a dead camera must not
         # add wait_depth frames of latency to every group (samvision pattern).

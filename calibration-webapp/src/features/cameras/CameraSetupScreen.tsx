@@ -14,10 +14,16 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Box, Button, Group, Select, Text } from '@mantine/core';
+import { Box, Button, Group, Modal, Select, Text } from '@mantine/core';
 import { useMediaQuery } from '@mantine/hooks';
-import { IconGripVertical, IconInfoCircle, IconRefresh } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import {
+  IconAlertTriangle,
+  IconArrowRight,
+  IconGripVertical,
+  IconInfoCircle,
+  IconRefresh,
+} from '@tabler/icons-react';
+import { type ReactNode, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
@@ -28,7 +34,6 @@ import {
   offeredFps,
   outputDimensions,
   parseResolution,
-  RESIZE_FACTORS,
 } from '@/features/cameras/captureOptions';
 import {
   detectCamerasThunk,
@@ -36,11 +41,10 @@ import {
   selectDetectStatus,
 } from '@/features/cameras/camerasSlice';
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
   applyCameraConfig,
   confirmCameraSetupThunk,
-  rehydrateSession,
-  reorderCamerasThunk,
   selectSession,
 } from '@/features/session/sessionSlice';
 import { errorMessage, intrinsicPreviewUrl } from '@/transport/httpClient';
@@ -451,12 +455,20 @@ export function CameraSetupScreen() {
 // Live Camera Setup: preview (left) + the shared capture configuration and index order
 // (right). The capture format is uniform across the array (spec camera-detection-config):
 // resolution / fps are intersected over all detected cameras, the resize factor derives
-// an even output size, and Apply persists the config + republishes (cascade).
+// an even output size.
+//
+// ADR-0040 contract: the screen edits a local DRAFT (parameters + order). "Apply
+// configuration" is the ONE write path — enabled while the draft differs from the
+// persisted config (isDirty), confirmed by a modal when it would drop existing
+// calibrations (a rebuild always does). It never advances the wizard; "Continue to
+// Intrinsics" (/cameras/confirm) does, and only when the draft is clean.
 function LiveCameraSetup() {
   const dispatch = useAppDispatch();
   const detected = useAppSelector(selectDetectedCameras);
   const detectStatus = useAppSelector(selectDetectStatus);
   const session = useAppSelector(selectSession);
+  // Backend-served knob defaults/bounds (ADR-0036): fps ladder + resize factors.
+  const defaults = useAppSelector(selectDefaults);
 
   const [prefix, setPrefix] = useState('cam');
   const [resolution, setResolution] = useState<string | null>(null);
@@ -464,22 +476,8 @@ function LiveCameraSetup() {
   const [fps, setFps] = useState<number | null>(null);
   const [order, setOrder] = useState<string[]>([]);
   const [applying, setApplying] = useState(false);
-  // Debounced reorder persistence: a multi-move sort must trigger ONE server
-  // refresh (each one republishes the whole publisher session). Flushed on
-  // unmount so a quick drag-then-navigate is never lost.
-  const reorderTimer = useRef<number | undefined>(undefined);
-  const pendingReorder = useRef<string[] | null>(null);
-
-  useEffect(
-    () => () => {
-      window.clearTimeout(reorderTimer.current);
-      if (pendingReorder.current) {
-        void dispatch(reorderCamerasThunk(pendingReorder.current));
-        pendingReorder.current = null;
-      }
-    },
-    [dispatch],
-  );
+  const [continuing, setContinuing] = useState(false);
+  const [confirmOpened, setConfirmOpened] = useState(false);
 
   // A small drag distance avoids hijacking taps/clicks (touch + mouse).
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 5 } }));
@@ -504,12 +502,18 @@ function LiveCameraSetup() {
       setPrefix(first.prefix);
       return;
     }
-    const fallback = defaultCapture(detected);
+    if (defaults === null) {
+      return; // seeds come from GET /defaults (ADR-0036); wait for them
+    }
+    const fallback = defaultCapture(detected, {
+      fpsOptions: defaults.fps_options,
+      defaultFps: defaults.default_fps,
+    });
     if (fallback) {
       setResolution(fallback.resolution.value);
       setFps(fallback.fps);
     }
-  }, [detected, session]);
+  }, [detected, session, defaults]);
 
   // Index order: from the persisted config (by index) if present, else detection order.
   useEffect(() => {
@@ -521,46 +525,29 @@ function LiveCameraSetup() {
     }
   }, [detected, session]);
 
+  // Drag only mutates the draft (ADR-0040): order persists with Apply, like
+  // every other parameter. The preview tiles still follow the draft live.
   const onDragEnd = (event: DragEndEvent) => {
     const { active, over } = event;
     if (!over || active.id === over.id) {
       return;
     }
-    const next = arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id)));
-    setOrder(next);
-    // Persist the reorder when these devices are already configured (index =
-    // position, calibrations kept server-side — /cameras/order), DEBOUNCED so a
-    // sort in several moves fires one refresh. Before the first Apply there is
-    // nothing to persist: the order ships with Apply.
-    const configured = session?.cameras ?? [];
-    if (
-      configured.length > 0 &&
-      configured.length === next.length &&
-      configured.every((camera) => next.includes(camera.device_path))
-    ) {
-      pendingReorder.current = next;
-      window.clearTimeout(reorderTimer.current);
-      reorderTimer.current = window.setTimeout(() => {
-        pendingReorder.current = null;
-        // On rejection (e.g. the device set changed under us) resync local order
-        // from the server rather than leaving the UI diverged.
-        void dispatch(reorderCamerasThunk(next))
-          .unwrap()
-          .catch(() => dispatch(rehydrateSession()));
-      }, 400);
-    }
+    setOrder(arrayMove(order, order.indexOf(String(active.id)), order.indexOf(String(over.id))));
   };
 
   const resolutionOptions = commonResolutions(detected);
   const selected = resolution ? parseResolution(resolution) : null;
-  const fpsOptions = selected ? offeredFps(detected, selected.width, selected.height) : [];
+  const fpsLadder = defaults?.fps_options ?? [];
+  const fpsOptions = selected
+    ? offeredFps(detected, selected.width, selected.height, fpsLadder)
+    : [];
   const output = selected ? outputDimensions(selected.width, selected.height, resizeFactor) : null;
 
   const onResolutionChange = (value: string | null) => {
     setResolution(value);
     if (value) {
       const { width, height } = parseResolution(value);
-      const next = offeredFps(detected, width, height);
+      const next = offeredFps(detected, width, height, fpsLadder);
       setFps(next[0] ?? null);
     }
   };
@@ -571,7 +558,32 @@ function LiveCameraSetup() {
     .map((path) => detected.find((d) => d.device_path === path))
     .filter((d): d is NonNullable<typeof d> => d !== undefined);
 
-  const onApply = async () => {
+  const configured = session?.cameras ?? [];
+  const persisted = [...configured].sort((a, b) => a.index - b.index);
+
+  // Derived dirty state (ADR-0040): the session file IS the proof of validation —
+  // no stored boolean to drift. Dirty = the draft (parameters + order) differs
+  // from the persisted config; reverting a change re-enables Continue for free.
+  const isDirty =
+    configured.length === 0
+      ? orderedCameras.length > 0
+      : selected === null ||
+        fps === null ||
+        persisted.length !== orderedCameras.length ||
+        persisted.some(
+          (camera, position) =>
+            camera.device_path !== orderedCameras[position]?.device_path ||
+            camera.prefix !== prefix ||
+            camera.width !== selected.width ||
+            camera.height !== selected.height ||
+            camera.resize_factor !== resizeFactor ||
+            camera.fps !== fps,
+        );
+  // A rebuild drops every result, so ANY apply over a calibrated array is
+  // destructive and must be confirmed (the modal below).
+  const hasResults = configured.some((camera) => camera.matrix != null);
+
+  const doApply = async () => {
     if (!resolution || fps === null) {
       return;
     }
@@ -587,10 +599,29 @@ function LiveCameraSetup() {
       // Error surfaced via session slice; keep the form usable.
     } finally {
       setApplying(false);
+      setConfirmOpened(false);
     }
   };
 
-  const configured = session?.cameras ?? [];
+  const onApply = () => {
+    if (hasResults) {
+      setConfirmOpened(true);
+      return;
+    }
+    void doApply();
+  };
+
+  const onContinue = async () => {
+    setContinuing(true);
+    try {
+      await dispatch(confirmCameraSetupThunk()).unwrap();
+      // The persisted step moves to intrinsic_capture; the wizard follows it.
+    } catch {
+      // Error surfaced via session slice; keep the screen usable.
+    } finally {
+      setContinuing(false);
+    }
+  };
   // Position-based name: a reorder card previews what the camera becomes after Apply
   // (cam_<new index>), matching the live tile relabel — not the persisted (device-
   // bound) name, which would not move with the drag.
@@ -623,6 +654,34 @@ function LiveCameraSetup() {
 
   return (
     <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+      {/* Destructive-apply confirmation (ADR-0040): a rebuild drops every
+          calibration result, so it never happens silently over a calibrated array. */}
+      <Modal
+        opened={confirmOpened}
+        onClose={() => setConfirmOpened(false)}
+        title="Apply a changed configuration?"
+        centered
+      >
+        <Group gap={9} wrap="nowrap" align="flex-start">
+          <IconAlertTriangle
+            size={18}
+            color="var(--rc-warning)"
+            style={{ flex: 'none', marginTop: 2 }}
+          />
+          <Text fz="0.81rem" style={{ lineHeight: 1.55 }}>
+            The camera configuration changed. Applying rebuilds the cameras: the completed
+            calibration steps (intrinsics and extrinsics) will need to be redone.
+          </Text>
+        </Group>
+        <Group justify="flex-end" mt="lg" gap="sm">
+          <Button variant="default" onClick={() => setConfirmOpened(false)}>
+            Cancel
+          </Button>
+          <Button color="red" loading={applying} onClick={() => void doApply()}>
+            Apply & redo calibration
+          </Button>
+        </Group>
+      </Modal>
       <ScreenHeader
         title="Camera Setup"
         subtitle={
@@ -781,7 +840,7 @@ function LiveCameraSetup() {
                     )}
                   </Group>
                   <Select
-                    data={RESIZE_FACTORS.map((s) => ({
+                    data={(defaults?.resize_factors ?? [1]).map((s) => ({
                       value: String(s),
                       label: `s = ${s.toFixed(2)}`,
                     }))}
@@ -819,11 +878,27 @@ function LiveCameraSetup() {
                   fullWidth
                   mt={2}
                   loading={applying}
-                  disabled={!resolution || fps === null}
+                  disabled={!isDirty || !resolution || fps === null}
                   onClick={onApply}
                 >
                   Apply configuration
                 </Button>
+                <Button
+                  variant="light"
+                  color="violet"
+                  fullWidth
+                  loading={continuing}
+                  disabled={isDirty || configured.length === 0}
+                  rightSection={<IconArrowRight size={15} />}
+                  onClick={() => void onContinue()}
+                >
+                  Continue to Intrinsics
+                </Button>
+                {isDirty && configured.length > 0 && (
+                  <Text fz="0.625rem" c="var(--rc-warning)" style={{ lineHeight: 1.5 }}>
+                    Unapplied changes — apply the configuration before continuing.
+                  </Text>
+                )}
               </Box>
             )}
 
@@ -841,8 +916,9 @@ function LiveCameraSetup() {
                 style={{ flex: 'none', marginTop: 1 }}
               />
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
-                Calibrated in native; the factor applies on export (K_out = s·K). Applying a new
-                resolution invalidates all intrinsics (cascade).
+                Calibrated in native; the factor applies on export (K_out = s·K). Applying a
+                changed configuration rebuilds the cameras — completed calibrations are discarded
+                (you will be asked to confirm).
               </Text>
             </Group>
           </Box>

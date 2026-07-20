@@ -2,22 +2,34 @@ import { ActionIcon, Box, Center, Group, Slider, Text } from '@mantine/core';
 import { IconPlayerPauseFilled, IconPlayerPlayFilled } from '@tabler/icons-react';
 import { useEffect, useRef, useState } from 'react';
 
-import { intrinsicPreviewUrl, PREVIEW_FPS } from '@/transport/httpClient';
+import { intrinsicPreviewUrl } from '@/transport/httpClient';
 
-// Prepare-step replay (ADR-0027): a native <video> over the CFR-retimed preview
-// mp4 — frame i sits exactly at (i + 0.5) / PREVIEW_FPS, so the slider and trim
-// bounds map 1:1 onto the mkv indices the compute reads. Play loops in the trim.
+// Prepare-step replay (ADR-0027/0037): a native <video> over the CFR-retimed
+// preview mp4 — frame i sits exactly at (i + 0.5) / fps, where fps is SERVED by
+// the transcode status (the recording's own rate — dynamic contract), so the
+// slider and trim bounds map 1:1 onto the mkv indices the compute reads and
+// playback speed is true. Play loops in the trim.
 interface PrepareScrubberProps {
   camera: string;
   total: number;
+  fps: number; // index <-> time rate served by the transcode status
+  version: string; // cache-buster served by the transcode status (stale-video guard)
   frame: number;
   onFrame: (index: number) => void;
   trim: [number, number]; // inclusive [start, end], drawn as slider marks
 }
 
-const frameTime = (index: number): number => (index + 0.5) / PREVIEW_FPS;
+const frameTime = (index: number, fps: number): number => (index + 0.5) / fps;
 
-export function PrepareScrubber({ camera, total, frame, onFrame, trim }: PrepareScrubberProps) {
+export function PrepareScrubber({
+  camera,
+  total,
+  fps,
+  version,
+  frame,
+  onFrame,
+  trim,
+}: PrepareScrubberProps) {
   const video = useRef<HTMLVideoElement>(null);
   const reported = useRef(-1);
   const [playing, setPlaying] = useState(false);
@@ -28,9 +40,9 @@ export function PrepareScrubber({ camera, total, frame, onFrame, trim }: Prepare
   useEffect(() => {
     const element = video.current;
     if (element && !playing) {
-      element.currentTime = frameTime(Math.min(frame, max));
+      element.currentTime = frameTime(Math.min(frame, max), fps);
     }
-  }, [frame, max, playing]);
+  }, [frame, max, playing, fps]);
 
   // Playing: the video clock leads; report indices up, loop inside the trim.
   useEffect(() => {
@@ -38,21 +50,21 @@ export function PrepareScrubber({ camera, total, frame, onFrame, trim }: Prepare
     if (!element || !playing || total === 0) return;
     void element.play();
     const id = window.setInterval(() => {
-      const index = Math.min(Math.floor(element.currentTime * PREVIEW_FPS), max);
+      const index = Math.min(Math.floor(element.currentTime * fps), max);
       if (index >= end) {
-        element.currentTime = frameTime(start); // loop back to the trim start
+        element.currentTime = frameTime(start, fps); // loop back to the trim start
         reported.current = start;
         onFrame(start);
       } else if (index !== reported.current) {
         reported.current = index;
         onFrame(index);
       }
-    }, 1000 / PREVIEW_FPS);
+    }, 1000 / fps);
     return () => {
       window.clearInterval(id);
       element.pause();
     };
-  }, [playing, start, end, max, total, onFrame]);
+  }, [playing, start, end, max, total, onFrame, fps]);
 
   if (total === 0) {
     return (
@@ -83,12 +95,12 @@ export function PrepareScrubber({ camera, total, frame, onFrame, trim }: Prepare
       >
         <video
           ref={video}
-          src={intrinsicPreviewUrl(camera)}
+          src={version ? `${intrinsicPreviewUrl(camera)}?v=${version}` : intrinsicPreviewUrl(camera)}
           muted
           playsInline
           preload="auto"
           onLoadedMetadata={(event) => {
-            event.currentTarget.currentTime = frameTime(Math.min(frame, max));
+            event.currentTarget.currentTime = frameTime(Math.min(frame, max), fps);
           }}
           style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
         />

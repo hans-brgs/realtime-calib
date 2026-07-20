@@ -3,10 +3,11 @@
 Two stages, kept separate so keyframe selection is testable without the OpenCV
 solver:
 
-- ``select_keyframes`` — from all detections of a camera, apply a stride (cheap
-  temporal pre-filter for high-fps capture), drop blurry frames (sharpness gate,
-  ADR-0008) and pick a diverse, capped subset (farthest-point sampling over
-  tilt + image-position) so coverage/diversity is maximised, not the frame count.
+- ``select_keyframes`` — from all detections of a camera, pick a diverse, capped
+  subset: farthest-point sampling over tilt + image-position places the keyframes
+  (diversity), and the sharpest candidate of each cell is kept (quality within a
+  cell, no absolute blur gate — ADR-0038). Coverage/diversity is maximised, not
+  the frame count.
 - ``calibrate_intrinsic`` — run ``cv2.calibrateCameraExtended`` on the retained
   views (classic 5-coefficient model, seeded guess — real Caliscope parity,
   ADR-0032), exposing ``perViewErrors`` for outlier rejection.
@@ -27,9 +28,8 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
-from calibration_service.detection import BoardDetection, BoardDetector
+from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
-from calibration_service.telemetry import SHARPNESS_MIN
 
 # Real Caliscope parity (ADR-0032, verified against caliscope source): plain
 # cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
@@ -38,8 +38,8 @@ from calibration_service.telemetry import SHARPNESS_MIN
 # RMSE unchanged). The former RATIONAL_MODEL+FIX_ASPECT anchor was not grounded
 # in caliscope code and produced degenerate per-camera coefficients.
 _CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
-_DEFAULT_CAP = 25  # keyframes kept for the solve (MATLAB recommends 10-20)
-_MAX_DETECT_FRAMES = 400  # cap detection cost on long sweeps (spread across the video)
+# stride/cap defaults live in calibration_service.tuning (ADR-0036); the transport
+# layer resolves omitted request fields there and always passes explicit values.
 _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # cv2.calibrateCameraExtended's internal per-view pose init (cvFindExtrinsicCameraParams2)
 # requires >= 6 point correspondences and hard-crashes below that — observed in
@@ -48,6 +48,10 @@ _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # this is filtered independently of BoardDetector's lower live-detection floor
 # (detection/detector.py's _MIN_CORNERS=4, which only gates UI "board found").
 _MIN_CORNERS_FOR_CALIBRATION = 6
+# Anti-"sliver" gate: a view whose corners are near-collinear is rank-deficient
+# (2nd singular value under this share of the 1st) and derails the solver's pose
+# init — see _is_well_spread. Prudent and eprouve; not a tuning knob.
+_MIN_SPREAD_RATIO = 0.02
 
 
 @dataclass(frozen=True)
@@ -62,14 +66,20 @@ class IntrinsicResult:
     view_count: int  # keyframes used
     image_size: tuple[int, int]  # (width, height)
     # Review metrics (ADR-0022). All resolution-independent, so ``scaled()`` leaves them
-    # unchanged. `coverage` = normalised sensor occupancy heatmap (rows x cols in [0,1]);
-    # `image_coverage` = Caliscope 5x5 cells-hit fraction; `orientation_bins` = occupied
-    # 45deg tilt-azimuth sectors (Caliscope, /8); `board_quads` = each keyframe board's
-    # 4 outline corners in 3D camera coords (square units) for the pose scene.
-    coverage: tuple[tuple[float, ...], ...] = ()
+    # unchanged. `coverage` = per-cell count of keyframes whose detected-corner hull
+    # covers it (redundancy map, ADR-0039: 0 = never, 1 = fragile, 3+ = robust);
+    # `image_coverage` = union-of-quads area fraction (no arbitrary grid);
+    # `orientation_bins` = occupied 45deg tilt-azimuth sectors (Caliscope, /8);
+    # `board_quads` = each keyframe board's 4 outline corners in 3D camera coords.
+    coverage: tuple[tuple[int, ...], ...] = ()
     image_coverage: float = 0.0
     orientation_bins: int = 0
     board_quads: tuple[tuple[tuple[float, float, float], ...], ...] = ()
+    # Sharpness (Laplacian variance) of the retained keyframes — the former
+    # absolute gate is gone (ADR-0038), so these make "how sharp did we manage to
+    # get?" observable: a uniformly-blurry sweep now succeeds instead of failing.
+    sharpness_min: float = 0.0
+    sharpness_median: float = 0.0
 
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
@@ -95,50 +105,54 @@ class IntrinsicResult:
         )
 
 
-_COVERAGE_COLS = 12
-_COVERAGE_ROWS = 8
+# Accumulation-map width; rows derive from the image aspect for ~square cells.
+# A raster fine enough that its quantisation of the union area is negligible, small
+# enough to ship in the metrics/telemetry payload (~96x54 at 16:9).
+_COVERAGE_COLS = 96
 
 
-def _coverage_grid(
+def _coverage_map(
     image_points: list[NDArray[np.float32]],
     image_size: tuple[int, int],
     cols: int = _COVERAGE_COLS,
-    rows: int = _COVERAGE_ROWS,
-) -> tuple[tuple[float, ...], ...]:
-    """Normalised sensor occupancy by the used corners (Results heatmap, ADR-0022).
+) -> tuple[tuple[int, ...], ...]:
+    """Per-cell keyframe-coverage count = quad accumulation map (ADR-0039).
 
-    Bins every calibration corner into a ``rows`` x ``cols`` grid over the frame; each
-    cell is its share of the busiest cell (0..1), showing where the board did / did not
-    cover the field of view. Scale-invariant (relative bins).
+    Points have AREA where corners have none: each keyframe's board is the convex
+    hull of its DETECTED corners (a partial detection credits only what it saw),
+    rasterised onto a ``cols``-wide grid (rows from the image aspect) and summed.
+    The intensity is a redundancy map — 0 = never covered (go fill it), 1 = seen
+    once (fragile), 3+ = well constrained — and ``_union_coverage`` reads the area
+    fraction off it, with no arbitrary grid size baked into the metric.
     """
     width, height = image_size
-    counts = np.zeros((rows, cols), dtype=np.float64)
+    rows = max(1, round(cols * height / max(1, width)))
+    acc = np.zeros((rows, cols), dtype=np.int32)
+    sx, sy = cols / max(1, width), rows / max(1, height)
     for pts in image_points:
-        xy = pts.reshape(-1, 2)
-        col = np.clip((xy[:, 0] / max(1, width) * cols).astype(int), 0, cols - 1)
-        row = np.clip((xy[:, 1] / max(1, height) * rows).astype(int), 0, rows - 1)
-        np.add.at(counts, (row, col), 1.0)
-    peak = counts.max()
-    if peak > 0:
-        counts /= peak
-    return tuple(tuple(float(v) for v in grid_row) for grid_row in counts)
+        xy = pts.reshape(-1, 2).astype(np.float64)
+        scaled = np.column_stack((xy[:, 0] * sx, xy[:, 1] * sy)).astype(np.int32)
+        hull = cv2.convexHull(scaled)
+        mask = np.zeros((rows, cols), dtype=np.uint8)
+        cv2.fillConvexPoly(mask, hull, 1)
+        acc += mask.astype(np.int32)
+    return tuple(tuple(int(v) for v in grid_row) for grid_row in acc)
 
 
 _ORIENTATION_SECTORS = 8  # Caliscope 45deg tilt-azimuth bins
 _FRONTAL_TILT_DEG = 8.0  # below this the tilt direction is meaningless -> not binned
 
 
-def _covered_fraction(grid: tuple[tuple[float, ...], ...]) -> float:
-    """Image coverage = fraction of heatmap cells hit by any used corner.
+def _union_coverage(coverage_map: tuple[tuple[int, ...], ...]) -> float:
+    """Image coverage = area fraction of the union of the keyframe quads (ADR-0039).
 
-    Computed on the *same* grid as the Results heatmap (Caliscope uses a coarser 5x5,
-    which over-reports: one corner marks a whole cell). Here an empty cell visible as a
-    gap in the heatmap directly lowers the percentage, so metric and viz agree.
+    Grid-free by construction: any cell covered by at least one quad counts, so a
+    finer raster does not shift the value (unlike the former fixed-grid metric).
     """
-    if not grid or not grid[0]:
+    if not coverage_map or not coverage_map[0]:
         return 0.0
-    covered = sum(1 for row in grid for value in row if value > 0.0)
-    return covered / float(len(grid) * len(grid[0]))
+    covered = sum(1 for row in coverage_map for value in row if value > 0)
+    return covered / float(len(coverage_map) * len(coverage_map[0]))
 
 
 def _orientation_bins(rvecs: list[NDArray[np.float64]]) -> int:
@@ -207,34 +221,34 @@ def _is_well_spread(corners: NDArray[np.float32]) -> bool:
     """
     centered = corners.astype(np.float64) - corners.mean(axis=0)
     singular_values = np.linalg.svd(centered, compute_uv=False)
-    return bool(singular_values[1] > 0.02 * singular_values[0])
+    return bool(singular_values[1] > _MIN_SPREAD_RATIO * singular_values[0])
 
 
 def select_keyframes(
     detections: list[BoardDetection],
     image_size: tuple[int, int],
     *,
-    cap: int = _DEFAULT_CAP,
-    stride: int = 1,
-    sharpness_min: float = SHARPNESS_MIN,
+    cap: int,
 ) -> list[BoardDetection]:
-    """Pick a diverse, capped, in-focus subset of detections for the solve.
+    """Pick a diverse, capped subset for the solve: diversity places, sharpness picks.
 
-    Stride pre-filters high-fps runs; the sharpness gate drops blurry frames; a
-    minimum corner count + spread check drops views too sparse/degenerate for the
-    solver (Caliscope filters the same way, before diversifying — see
-    _MIN_CORNERS_FOR_CALIBRATION); then farthest-point sampling over
-    (tilt, image-x, image-y) spreads the selection over orientations and sensor
-    regions (coverage/diversity, [[coverage-metrics]]).
+    Structural gates first (found, >= _MIN_CORNERS_FOR_CALIBRATION corners, not a
+    near-collinear sliver — the solver's own hard floors). Then a two-pass
+    selection (ADR-0038): farthest-point sampling over (tilt, image-x, image-y)
+    picks ``cap`` diversity ANCHORS (where a keyframe is wanted); every candidate
+    is assigned to its nearest anchor, and the SHARPEST candidate of each cell is
+    kept. Diversity decides how many keyframes and where; sharpness decides which
+    one to take at each spot. So a uniformly-blurry sweep still calibrates (no
+    absolute blur gate), while coverage is never traded away for the crispest few
+    (they cluster on the frontal/centre hold — anti-pattern ADR-0009).
     """
     width, height = image_size
     candidates = [
         d
-        for d in detections[:: max(1, stride)]
+        for d in detections
         if d.found
         and d.ids is not None
         and d.corners is not None
-        and d.sharpness >= sharpness_min
         and d.count >= _MIN_CORNERS_FOR_CALIBRATION
         and _is_well_spread(d.corners)
     ]
@@ -249,27 +263,33 @@ def select_keyframes(
         features.append((tilt, cx / width, cy / height))
     feats = np.asarray(features, dtype=np.float64)
 
-    # Farthest-point sampling: start from the highest-corner-count frame, then
-    # repeatedly add the candidate farthest from the already-selected set.
+    # Pass 1 — diversity anchors: farthest-point sampling from the richest view,
+    # each time adding the candidate farthest from the already-chosen anchors.
     start = int(max(range(len(candidates)), key=lambda i: candidates[i].count))
-    selected = [start]
+    anchors = [start]
     min_dist = np.linalg.norm(feats - feats[start], axis=1)
-    while len(selected) < cap:
+    while len(anchors) < cap:
         nxt = int(np.argmax(min_dist))
-        selected.append(nxt)
+        anchors.append(nxt)
         min_dist = np.minimum(min_dist, np.linalg.norm(feats - feats[nxt], axis=1))
-    return [candidates[i] for i in selected]
+
+    # Pass 2 — sharpness within each anchor's cell: assign every candidate to its
+    # nearest anchor, keep the sharpest per cell (an anchor is its own cell member,
+    # so a lone cell degenerates to just keeping the anchor).
+    anchor_feats = feats[anchors]
+    best: dict[int, int] = {}  # anchor slot -> chosen candidate index
+    for i in range(len(candidates)):
+        slot = int(np.argmin(np.linalg.norm(anchor_feats - feats[i], axis=1)))
+        current = best.get(slot)
+        if current is None or candidates[i].sharpness > candidates[current].sharpness:
+            best[slot] = i
+    return [candidates[best[slot]] for slot in sorted(best)]
 
 
 def _cv_charuco_board(board: CalibrationBoard) -> cv2.aruco.CharucoBoard:
     return cv2.aruco.CharucoBoard(
         (board.columns, board.rows), 1.0, board.marker_ratio, resolve(board.dictionary)
     )
-
-
-def _initial_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
-    f = float(width)
-    return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
 
 
 def calibrate_intrinsic(
@@ -287,6 +307,7 @@ def calibrate_intrinsic(
     cv_board = _cv_charuco_board(board)
     object_points: list[NDArray[np.float32]] = []
     image_points: list[NDArray[np.float32]] = []
+    used_sharpness: list[float] = []
     grid_count = 0
     for det in detections:
         if det.corners is None or det.ids is None or det.count < _MIN_CORNERS_FOR_CALIBRATION:
@@ -300,13 +321,14 @@ def calibrate_intrinsic(
             continue
         object_points.append(obj)
         image_points.append(img)
+        used_sharpness.append(det.sharpness)
         grid_count += int(obj.shape[0])
 
     if len(object_points) < _MIN_VIEWS:
         raise ValueError(f"need >= {_MIN_VIEWS} usable views, got {len(object_points)}")
 
     width, height = image_size
-    guess = _initial_camera_matrix(width, height)
+    guess = guessed_camera_matrix(width, height)
     # distCoeffs=None is valid at runtime (OpenCV allocates it); the cv2 stub types
     # it as required, hence the ignore.
     result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
@@ -315,7 +337,7 @@ def calibrate_intrinsic(
     rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
-    coverage = _coverage_grid(image_points, (width, height))
+    coverage = _coverage_map(image_points, (width, height))
     return IntrinsicResult(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
@@ -325,9 +347,11 @@ def calibrate_intrinsic(
         view_count=len(object_points),
         image_size=(width, height),
         coverage=coverage,
-        image_coverage=_covered_fraction(coverage),
+        image_coverage=_union_coverage(coverage),
         orientation_bins=_orientation_bins(rvec_list),
         board_quads=_board_quads(rvec_list, tvec_list, cv_board),
+        sharpness_min=float(min(used_sharpness)),
+        sharpness_median=float(np.median(used_sharpness)),
     )
 
 
@@ -335,32 +359,26 @@ def compute_intrinsic_from_video(
     video_path: Path,
     board: CalibrationBoard,
     *,
-    cap: int | None = None,
-    stride: int | None = None,
+    cap: int,
+    stride: int,
     frame_start: int = 0,
     frame_end: int | None = None,
 ) -> IntrinsicResult:
     """Recompute intrinsics from a recorded capture (ADR-0019/0022 record → prepare → compute).
 
     The operator bounds cost/quality in the *Prepare* step (ADR-0022): ``stride``
-    ("process every N frames") sub-samples the sweep, ``frame_start``/``frame_end``
-    trim it (frame indices), and ``cap`` limits the kept keyframes. Detection (not the
-    solve) dominates the cost, so ``stride`` is the read decimation; with no ``stride``
-    an adaptive read-stride caps detection at ``_MAX_DETECT_FRAMES`` over the trimmed
-    span. Raises ``ValueError`` on an empty/unusable range (before the solver).
+    ("detect 1 frame every N", the read decimation — detection, not the solve,
+    dominates the cost), ``frame_start``/``frame_end`` trim the sweep (frame
+    indices), and ``cap`` limits the kept keyframes. Defaults for omitted request
+    fields resolve in the transport layer against TUNING (ADR-0036). Raises
+    ``ValueError`` on an empty/unusable range (before the solver).
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
     total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     start = max(0, frame_start)
     end = frame_end if frame_end is not None else (total if total > 0 else None)
-    span = (end - start) if end is not None else 0
-    # Operator "process every N frames" overrides the adaptive cap; else spread the
-    # detection budget over the (trimmed) span.
-    if stride and stride > 0:
-        read_stride = stride
-    else:
-        read_stride = max(1, span // _MAX_DETECT_FRAMES) if span > 0 else 1
+    read_stride = max(1, stride)
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None
     index = 0
@@ -379,7 +397,5 @@ def compute_intrinsic_from_video(
 
     if image_size is None:
         raise ValueError(f"no readable frames in {video_path}")
-    keyframes = select_keyframes(
-        detections, image_size, cap=cap if cap is not None else _DEFAULT_CAP
-    )
+    keyframes = select_keyframes(detections, image_size, cap=cap)
     return calibrate_intrinsic(keyframes, board, image_size)

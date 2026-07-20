@@ -50,6 +50,9 @@ def reencode_cfr_args(source: Path, destination: Path, fps: float) -> list[str]:
         f"fps={fps:.6f}",
         "-c:v",
         "mjpeg",
+        # Quasi-lossless on the ffmpeg 2-31 scale — the import-side mirror of the
+        # recorder's TUNING.record_quality: these are the pixels every compute
+        # re-detects on, so the CFR normalisation must not cost corner fidelity.
         "-q:v",
         "3",
         str(destination),

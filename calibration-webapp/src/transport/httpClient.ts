@@ -8,6 +8,7 @@ import type {
   CaptureView,
   ConfigRequest,
   DetectedCamera,
+  PipelineDefaults,
   Session,
   SessionSummary,
 } from '@/transport/types';
@@ -98,6 +99,34 @@ export const fetchSession = async (): Promise<Session | null> => {
 export const fetchSessions = (): Promise<SessionSummary[]> =>
   getJson<SessionSummary[]>('/sessions');
 
+// Pipeline defaults and bounds — the backend is the single source (ADR-0036);
+// every knob seeds its value and min/max from this payload.
+export const fetchDefaults = (): Promise<PipelineDefaults> =>
+  getJson<PipelineDefaults>('/defaults');
+
+// Rig-level operator settings (ADR-0036), persisted service-side in
+// settings.toml. PUT is full-replace (always send the complete object); changes
+// apply live (publication pacer swaps on the next frame; recording quality on
+// the next recording). preview_fps: null = follow the camera fps.
+export interface Settings {
+  record_quality: number;
+  preview_fps: number | null;
+}
+
+export const fetchSettings = (): Promise<Settings> => getJson<Settings>('/settings');
+
+export const saveSettings = async (settings: Settings): Promise<Settings> => {
+  const response = await fetch(`${API_URL}/settings`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(settings),
+  });
+  if (!response.ok) {
+    throw await errorFrom(response, `PUT /settings failed: ${response.status}`);
+  }
+  return (await response.json()) as Settings;
+};
+
 // Create a fresh session (unique folder name = id) and make it active. Its wizard
 // step is intrinsic_board, so the rail auto-navigates to Target Config.
 export const createSession = (sessionId: string): Promise<Session> =>
@@ -160,15 +189,19 @@ export const computeIntrinsic = (camera: string, params?: ComputeParams): Promis
 // extrinsic capture — the rail follows the persisted step, so this IS the navigation.
 export const validateIntrinsic = (): Promise<Session> => postJson<Session>('/intrinsic/validate');
 
-// Preview transcodes (ADR-0027): each recording is transcoded ONCE in the
-// background to an H.264 mp4 re-timed CFR BY INDEX at PREVIEW_FPS — so
-// index = round(video.currentTime * PREVIEW_FPS) is exact by construction.
-// MUST match the backend constant (recording/preview.py).
-export const PREVIEW_FPS = 30;
-
+// Preview transcodes (ADR-0027/0037): each recording is transcoded ONCE in the
+// background to an H.264 mp4 re-timed CFR BY INDEX at the recording's own fps.
+// The rate is SERVED in the status (dynamic contract — no hardcoded copy):
+// index = round(video.currentTime * status.fps) is exact by construction, and
+// playback speed is true whatever the configured capture rate.
 export interface PreviewStatus {
   state: 'missing' | 'running' | 'done' | 'failed';
   frames: number;
+  fps: number; // index <-> time rate of the DONE preview
+  // Identity of the DONE mp4 — appended to the preview URL as a cache-buster so a
+  // re-recorded sweep is never scrubbed against a browser-cached stale video
+  // (trim bounds set on the wrong timeline would silently mis-trim the compute).
+  version: string;
   error: string | null;
 }
 
@@ -195,14 +228,21 @@ export const fetchExtrinsicPreviewStatus = (): Promise<ExtrinsicPreviewStatus> =
 export const retryExtrinsicPreview = (): Promise<ExtrinsicPreviewStatus> =>
   postJson<ExtrinsicPreviewStatus>('/extrinsic/preview/transcode');
 
-// Review metrics persisted at compute (ADR-0022, Results): coverage heatmap grid,
-// Caliscope 5x5 image-coverage fraction, occupied tilt-azimuth sectors (/8), and each
-// keyframe board's 4 outline corners in 3D camera coords (for the pose scene).
+// Review metrics persisted at compute (ADR-0022/0038/0039, Results): the coverage
+// map is a quad-accumulation COUNT per cell (how many retained keyframes' board
+// hulls covered it — 0 never, 1 fragile, 3+ robust); image_coverage is the
+// union-of-quads area fraction (grid-free); orientation_bins the occupied
+// tilt-azimuth sectors (/8); board_quads each keyframe board's 4 outline corners
+// in 3D camera coords. sharpness_min/median describe the retained keyframes — the
+// observability that replaced the absolute blur gate (absent on metrics persisted
+// before ADR-0038).
 export interface IntrinsicMetrics {
   coverage: number[][];
   image_coverage: number;
   orientation_bins: number;
   board_quads: number[][][];
+  sharpness_min?: number;
+  sharpness_median?: number;
 }
 
 export const fetchIntrinsicMetrics = (camera: string): Promise<IntrinsicMetrics> =>
@@ -244,12 +284,16 @@ export const startExtrinsic = (): Promise<{ recording: boolean; cameras: number 
 export const stopExtrinsic = (): Promise<{ frames: Record<string, number> }> =>
   postJson<{ frames: Record<string, number> }>('/extrinsic/stop');
 
-// Prepare-step knobs forwarded to the extrinsic compute; omitted fields use defaults.
+// Prepare-step knobs forwarded to the extrinsic compute; omitted fields resolve
+// backend-side against TUNING (ADR-0036). `min_shared` is deliberately absent:
+// it is an API-only knob since ADR-0036 (possible UI reintegration later, under
+// an Advanced section).
 export interface ExtrinsicComputeParams {
+  // Detection stride over the spread-filtered candidate groups ("1 group / N").
+  stride?: number;
   // Sharpest groups kept for the solve (ADR-0033); omitted = board-type default.
   max_groups?: number;
   max_spread_ms?: number;
-  min_shared?: number;
 }
 
 export const computeExtrinsic = (params?: ExtrinsicComputeParams): Promise<Session> =>
@@ -290,6 +334,14 @@ export interface ExtrinsicResultPayload {
   // Group that received the "set frame" gesture (review-scrubber marker);
   // null/absent until the gesture, reset by a fresh solve.
   framed_group?: number | null;
+  // Bundle-adjustment diagnostics (ADR-0036): ba_converged false = scipy hit its
+  // evaluation ceiling, so the poses are best-so-far, not a converged optimum.
+  // observations_used/_total report the Minimize outlier filter (equal on a full
+  // solve). Absent on results persisted before ADR-0036.
+  ba_converged?: boolean;
+  ba_nfev?: number;
+  observations_used?: number;
+  observations_total?: number;
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
@@ -331,13 +383,9 @@ export interface ExportTarget {
   handedness: string;
 }
 
-// Persist a drag-reorder (device paths in the chosen order). Unlike /cameras/config
-// this keeps calibrations — only index + position-based name change.
-export const reorderCameras = (devicePaths: string[]): Promise<Session> =>
-  postJson<Session>('/cameras/order', { device_paths: devicePaths });
-
-// Advance past Camera Setup WITHOUT rebuilding the configs (load-from-files:
-// the cameras derive from the imported videos — this just unlocks Intrinsics).
+// Advance past Camera Setup without touching the configs (ADR-0040: the only way
+// forward — /cameras/config applies but never advances). Also the load-from-files
+// "Continue" (the cameras derive from the imported videos).
 export const confirmCameraSetup = (): Promise<Session> => postJson<Session>('/cameras/confirm');
 
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>
@@ -359,7 +407,7 @@ export const saveExportConfig = (formats: string[], units: 'mm' | 'm'): Promise<
 
 export const exportCalibration = (
   formats: string[],
-  units: 'mm' | 'm' = 'mm', // platform JSONs only — the TOMLs keep their mm semantics
+  units: 'mm' | 'm', // explicit — the session preference is the backend's fallback
 ): Promise<{ files: ExportedFile[] }> =>
   postJson<{ files: ExportedFile[] }>('/export', { formats, units });
 

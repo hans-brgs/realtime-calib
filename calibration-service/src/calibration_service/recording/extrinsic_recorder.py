@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 
 from calibration_service.recording.video_writer import VideoRecorder
 from calibration_service.session.store import session_dir
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -47,13 +48,18 @@ class CameraSpec:
 class ExtrinsicRecorder:
     """N per-camera recorders + timestamp sidecars for one synchronized sweep."""
 
-    def __init__(self, directory: Path, cameras: list[CameraSpec]) -> None:
+    def __init__(
+        self,
+        directory: Path,
+        cameras: list[CameraSpec],
+        quality: int = TUNING.record_quality,
+    ) -> None:
         directory.mkdir(parents=True, exist_ok=True)
         self._directory = directory
         self._specs = list(cameras)
         self._recorders = {
             spec.name: VideoRecorder(
-                directory / f"{spec.name}.mkv", spec.width, spec.height, spec.fps
+                directory / f"{spec.name}.mkv", spec.width, spec.height, spec.fps, quality=quality
             )
             for spec in cameras
         }

@@ -39,15 +39,3 @@ class CovisibilityGraph:
 
     def count(self, a: str, b: str) -> int:
         return self.pair_counts.get(pair_key(a, b), 0)
-
-    def degree(self, camera: str, *, min_shared: int = 1) -> int:
-        """Number of cameras sharing >= ``min_shared`` co-visible groups with ``camera``.
-
-        The anchor guard-rail (ADR-0012/0023) reads this: degree 0 means the
-        anchor cannot be chained to anything.
-        """
-        return sum(
-            1
-            for other in self.cameras
-            if other != camera and self.count(camera, other) >= min_shared
-        )

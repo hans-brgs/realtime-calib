@@ -11,6 +11,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 
 from calibration_service.models.board import CalibrationBoard
+from calibration_service.tuning import TUNING
 
 
 class WizardStep(StrEnum):
@@ -78,6 +79,14 @@ class CameraConfig:
     extrinsic_error: float | None = None  # RMS reprojection error after BA (px)
 
 
+@dataclass(frozen=True)
+class SessionIssue:
+    """One actionable load-time anomaly: which wizard stage to revisit, and why."""
+
+    step: str  # webapp rail stage id (e.g. "boards")
+    message: str
+
+
 @dataclass
 class CalibrationSession:
     """The full wizard state needed to resume after interruption.
@@ -90,14 +99,18 @@ class CalibrationSession:
     step: WizardStep = WizardStep.INTRINSIC_BOARD
     mode: SessionMode = SessionMode.NEW_REALTIME
     cameras: list[CameraConfig] = field(default_factory=list)
-    intrinsic_fps: int = 30
-    optimization_strategy: str = "coverage-aware"
     intrinsic_board: CalibrationBoard | None = None
     extrinsic_board: CalibrationBoard | None = None
     # Persisted export config (ADR-0026): restored on reopen. The truth (poses)
-    # lives in result.json; this is a lightweight "how I export" preference.
-    export_units: str = "mm"
+    # lives in result.json; this is a lightweight "how I export" preference,
+    # seeded from TUNING (Caliscope-native metres) for sessions that never chose.
+    export_units: str = TUNING.export_units
     export_targets: list[str] = field(default_factory=list)
+    # TRANSIENT (never serialized): actionable anomalies found while loading the
+    # session (ADR-0036 fail-loud — e.g. an invalid board block, a legacy ArUco
+    # intrinsic board). Each names the wizard stage to revisit; the webapp shows
+    # a banner + a badge on that rail step.
+    issues: list[SessionIssue] = field(default_factory=list)
 
     def effective_extrinsic_board(self) -> CalibrationBoard | None:
         """Extrinsic board, inheriting the intrinsic one when not set explicitly."""

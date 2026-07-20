@@ -43,6 +43,7 @@ from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
 from calibration_service.synchronization import SyncFrame, SyncGroup
+from calibration_service.synchronization.window import sync_window
 
 logger = logging.getLogger(__name__)
 
@@ -53,26 +54,16 @@ logger = logging.getLogger(__name__)
 _MIN_COMMON_CORNERS = 6
 _MIN_CORNERS_SINGLE_MARKER = 4
 # Shared boards actually fed to stereoCalibrate per pair, picked for temporal
-# diversity (Caliscope boards_sampled).
+# diversity (Caliscope boards_sampled). The pairwise estimate only INITIALISES
+# the chaining; the BA then consumes every kept group's observations.
 _BOARDS_SAMPLED = 10
-# Minimum shared groups for a pair to be estimated at all (below this the
-# geometry is too weak; the co-visibility gauge tells the operator live).
-_DEFAULT_MIN_SHARED = 5
-# Detection budget over the sweep: groups are subsampled evenly to this cap
-# (detection dominates compute cost, like the intrinsic _MAX_DETECT_FRAMES).
-# Observe first, choose after (ADR-0033): detection runs on a bounded POOL of
-# candidate instants (uniform in time — bounds COST, not quality), then the
-# sharpest groups are KEPT (min member sharpness, temporal bins). Single-marker
-# detection is ~10x cheaper than ChArUco AND each view carries only 4 corners,
-# so markers get much larger budgets (more views = the redundancy).
-_DETECT_POOL = 160
-_DETECT_POOL_SINGLE_MARKER = 960
-# Default keep budgets (the webapp's "Max groups" knob overrides them).
-_MAX_KEPT_GROUPS = 80
-_MAX_KEPT_GROUPS_SINGLE_MARKER = 240
-# Shared boards fed to stereoCalibrate per pair (see _BOARDS_SAMPLED); with only
-# 4 corners per marker view, average over more views.
+# Same, for single-ArUco targets: with only 4 corners per marker view, average
+# over more views.
 _BOARDS_SAMPLED_SINGLE_MARKER = 25
+# stride (detection decimation over the candidate groups), max_groups (sharpest
+# kept) and min_shared defaults live in calibration_service.tuning (ADR-0036);
+# the transport layer resolves omitted request fields there per board type and
+# always passes explicit values.
 # stereoCalibrate refinement on normalized points (Caliscope criteria).
 _STEREO_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 40, 1e-3)
 # Bundle-adjustment settings (Caliscope capture_volume least_squares kwargs), with
@@ -140,6 +131,15 @@ class ExtrinsicResult:
     # t-l in board frame) lets the webapp derive the board's local xyz triad.
     points: list[list[float]] = field(default_factory=list)
     point_groups: list[int] = field(default_factory=list)
+    # Bundle-adjustment diagnostics (ADR-0036 observability): `ba_converged` is
+    # False when scipy hit the _BA_MAX_NFEV ceiling instead of a tolerance — the
+    # poses are then the best-so-far, NOT a converged optimum, and the webapp
+    # warns. `observations_used`/`_total` report the Minimize outlier filter
+    # (a full solve uses them all).
+    ba_converged: bool = True
+    ba_nfev: int = 0
+    observations_used: int = 0
+    observations_total: int = 0
     # Group whose board received the operator's "set frame" gesture (ADR-0026):
     # shown as a marker on the review scrubber. None until the gesture; a fresh
     # solve resets it (new world), rotate/minimize preserve it (same world).
@@ -186,6 +186,28 @@ def _min_corners(board: CalibrationBoard) -> int:
     )
 
 
+def _best_shared_count(groups: list[dict[str, GroupDetection]], board: CalibrationBoard) -> int:
+    """Shared board views of the BEST camera pair — same rule as stereo_pairwise.
+
+    Diagnostic only: turns "no pair shares >= N views" into a message the
+    operator can act on (how far off the sweep actually was).
+    """
+    min_corners = _min_corners(board)
+    names = sorted({name for group in groups for name in group})
+    best = 0
+    for i, cam_a in enumerate(names):
+        for cam_b in names[i + 1 :]:
+            shared = 0
+            for group in groups:
+                det_a, det_b = group.get(cam_a), group.get(cam_b)
+                if det_a is None or det_b is None:
+                    continue
+                if len(np.intersect1d(det_a.ids, det_b.ids)) >= min_corners:
+                    shared += 1
+            best = max(best, shared)
+    return best
+
+
 def derive_sweep_window(directory: Path, names: list[str]) -> float:
     """Sync window derived from the RECORDED cadence, not the configured fps.
 
@@ -205,7 +227,8 @@ def derive_sweep_window(directory: Path, names: list[str]) -> float:
             medians.append(float(np.median(deltas)))
     if not medians:
         raise ValueError(f"no recorded timestamps under {directory}")
-    return float(np.clip(0.95 * max(medians), 0.02, 0.25))
+    # Same derivation rule as the live synchronizer (ADR-0037): one truth.
+    return sync_window(max(medians))
 
 
 def _diverse_group_indices(candidates: list[tuple[int, int]], cap: int) -> list[int]:
@@ -230,7 +253,7 @@ def stereo_pairwise(
     groups: list[dict[str, GroupDetection]],
     board: CalibrationBoard,
     *,
-    min_shared: int = _DEFAULT_MIN_SHARED,
+    min_shared: int,
 ) -> dict[tuple[str, str], PairEstimate]:
     """Estimate the primary->secondary transform of every co-visible camera pair.
 
@@ -453,6 +476,19 @@ def triangulate_groups(
     )
 
 
+@dataclass(frozen=True)
+class BAStatus:
+    """Bundle-adjustment outcome (ADR-0036 observability).
+
+    ``converged`` is False when either pass stopped on the ``_BA_MAX_NFEV``
+    ceiling rather than a tolerance — the solution is then the best-so-far, not
+    an optimum, and the operator deserves to know.
+    """
+
+    converged: bool
+    nfev: int  # function evaluations across both passes
+
+
 def bundle_adjust(
     camera_order: list[str],
     poses: dict[str, NDArray[np.float64]],
@@ -461,14 +497,15 @@ def bundle_adjust(
     obs_point: NDArray[np.intp],
     obs_norm: NDArray[np.float64],
     anchor: str,
-) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.float64]]:
+) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.float64], BAStatus]:
     """Jointly refine non-anchor poses + 3D points on normalized reprojection error.
 
     Parameter vector = ``[rvec|tvec per NON-anchor camera, then xyz per point]``;
     the anchor stays identity (gauge fixed, ADR-0023). Sparse Jacobian: each
     residual row touches its camera's 6 params (unless anchor) + its point's 3.
     Residuals in normalized coords (undistorted upstream), projected with K=I —
-    Caliscope's ``use_normalized`` mode (Triggs et al. conditioning).
+    Caliscope's ``use_normalized`` mode (Triggs et al. conditioning). Also returns
+    a :class:`BAStatus` so a truncated solve never passes for a converged one.
     """
     free = [name for name in camera_order if name != anchor]
     free_slot = {name: i for i, name in enumerate(free)}
@@ -542,7 +579,21 @@ def bundle_adjust(
         residuals, np.asarray(first.x, np.float64), loss="huber", f_scale=_BA_HUBER_SCALE, **common
     )
     solution = np.asarray(result.x, np.float64)
-    logger.info("bundle adjustment: cost %.6f -> %.6f", float(first.cost), float(result.cost))
+    # scipy status: 0 = max_nfev ceiling hit (truncated), > 0 = a tolerance was
+    # satisfied. Both passes must converge for the answer to be an optimum.
+    status = BAStatus(
+        converged=int(first.status) > 0 and int(result.status) > 0,
+        nfev=int(first.nfev) + int(result.nfev),
+    )
+    logger.info(
+        "bundle adjustment: cost %.6f -> %.6f (%s, nfev=%d)",
+        float(first.cost),
+        float(result.cost),
+        "converged" if status.converged else "TRUNCATED at the max_nfev ceiling",
+        status.nfev,
+    )
+    if not status.converged:
+        logger.warning("bundle adjustment hit max_nfev=%d: poses are best-so-far", _BA_MAX_NFEV)
 
     solved: dict[str, NDArray[np.float64]] = {anchor: poses[anchor].copy()}
     for name, slot in free_slot.items():
@@ -550,7 +601,7 @@ def bundle_adjust(
         solved[name] = _transform(
             np.asarray(rmat, np.float64), solution[6 * slot + 3 : 6 * slot + 6]
         )
-    return solved, solution[n_cam_params:].reshape(-1, 3)
+    return solved, solution[n_cam_params:].reshape(-1, 3), status
 
 
 def _observation_residuals_px(
@@ -830,7 +881,7 @@ def refine_result(
     keep = _filter_observations(obs_camera, obs_point, residuals, _REFINE_FILTER_FRACTION)
     logger.info("minimize: %d/%d observations kept", int(keep.sum()), len(keep))
 
-    solved, refined = bundle_adjust(
+    solved, refined, ba_status = bundle_adjust(
         result.cameras, poses, points3d, obs_camera[keep], obs_point[keep], obs_norm[keep], anchor
     )
     per_camera, overall = pixel_errors(
@@ -862,6 +913,12 @@ def refine_result(
         point_count=len(refined),
         points=[[float(v) for v in point] for point in refined],
         point_groups=result.point_groups,
+        ba_converged=ba_status.converged,
+        ba_nfev=ba_status.nfev,
+        # The Minimize report: how many observations survived the filter, out of
+        # the FULL persisted set (this run always re-filters from it).
+        observations_used=int(keep.sum()),
+        observations_total=len(keep),
         board_quads=_group_board_quads(
             np.asarray(result.point_groups, np.intp),
             np.asarray(ba_inputs.point_corner, np.int32),
@@ -1038,19 +1095,21 @@ def compute_extrinsic_from_sweep(
     *,
     anchor: str,
     window_s: float,
-    max_groups: int | None = None,
+    stride: int,
+    max_groups: int,
+    min_shared: int,
     max_spread_s: float | None = None,
-    min_shared: int = _DEFAULT_MIN_SHARED,
 ) -> tuple[ExtrinsicResult, BAInputs]:
     """Solve the camera array from a recorded synchronized sweep (ADR-0023/0033).
 
     Synchronizes on the timestamp **sidecars only** (cheap), drops loosely-synced
-    groups (``max_spread_s``), detects on a bounded POOL of candidate instants,
-    then keeps the ~``max_groups`` SHARPEST groups (observe first, choose after,
-    ADR-0033 — blind uniform sampling injected motion-blurred corners into the
-    BA) and runs pairwise -> chaining -> triangulation -> BA. Also returns the
-    BA observations so 'Minimize' can refine later without redetecting. Supports
-    ChArUco boards and single-ArUco-marker targets (see board_object_points).
+    groups (``max_spread_s``), detects on 1 candidate group every ``stride``
+    (the cost knob, mirroring the intrinsic Prepare — ADR-0036), then keeps the
+    ~``max_groups`` SHARPEST groups (observe first, choose after, ADR-0033 —
+    blind uniform sampling injected motion-blurred corners into the BA) and runs
+    pairwise -> chaining -> triangulation -> BA. Also returns the BA observations
+    so 'Minimize' can refine later without redetecting. Supports ChArUco boards
+    and single-ArUco-marker targets (see board_object_points).
     """
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
@@ -1060,11 +1119,7 @@ def compute_extrinsic_from_sweep(
 
     if max_spread_s is not None:
         groups = [group for group in groups if group.spread <= max_spread_s]
-    charuco = board.board_type is BoardType.CHARUCO
-    pool = _DETECT_POOL if charuco else _DETECT_POOL_SINGLE_MARKER
-    if len(groups) > pool:
-        step = len(groups) / pool
-        groups = [groups[int(i * step)] for i in range(pool)]
+    groups = groups[:: max(1, stride)]
     if not groups:
         raise ValueError("no synchronized groups in the sweep (check the spread threshold)")
     logger.info("extrinsic compute: detecting on %d candidate groups", len(groups))
@@ -1075,27 +1130,31 @@ def compute_extrinsic_from_sweep(
     detections = _detect_group_frames(directory, groups_frames, by_name, board)
     if not detections:
         raise ValueError("no synchronized board views across >= 2 cameras")
-    keep = max_groups if max_groups is not None else (
-        _MAX_KEPT_GROUPS if charuco else _MAX_KEPT_GROUPS_SINGLE_MARKER
-    )
-    selected = _select_quality_groups(detections, max(1, keep))
+    selected = _select_quality_groups(detections, max(1, max_groups))
     logger.info(
         "extrinsic compute: kept %d/%d detected groups by sharpness (cap %d)",
         len(selected),
         len(detections),
-        keep,
+        max_groups,
     )
     detections = selected
 
     pairs = stereo_pairwise(detections, board, min_shared=min_shared)
     if not pairs:
-        raise ValueError(f"no camera pair shares >= {min_shared} board views")
+        # Actionable (ADR-0036): name the best pair the sweep actually managed, so
+        # the operator knows whether to re-sweep or lower the API-only min_shared.
+        best = _best_shared_count(detections, board)
+        raise ValueError(
+            f"no camera pair shares >= {min_shared} board views "
+            f"(best pair: {best}) — sweep the board where the cameras overlap, "
+            f"or lower 'min_shared' (API-only knob)"
+        )
 
     names = [model.name for model in models]
     poses = chain_from_anchor(pairs, names, anchor)
     triangulation = triangulate_groups(detections, poses)
     order = triangulation.camera_order
-    solved, points_opt = bundle_adjust(
+    solved, points_opt, ba_status = bundle_adjust(
         order,
         poses,
         triangulation.points3d,
@@ -1133,6 +1192,11 @@ def compute_extrinsic_from_sweep(
         point_count=len(points_opt),
         points=[[float(v) for v in point] for point in points_opt],
         point_groups=[int(g) for g in triangulation.point_group],
+        ba_converged=ba_status.converged,
+        ba_nfev=ba_status.nfev,
+        # A full solve uses every observation (Minimize is what filters).
+        observations_used=len(triangulation.obs_camera),
+        observations_total=len(triangulation.obs_camera),
         board_quads=_group_board_quads(
             triangulation.point_group,
             triangulation.point_corner,

@@ -19,9 +19,9 @@ from typing import Literal
 
 import numpy as np
 import rtoml
-from fastapi import APIRouter, Form, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
 from calibration_service.calibration import (
@@ -60,9 +60,65 @@ from calibration_service.recording import (
 from calibration_service.recording.ffmpeg import FfmpegError
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
+from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.transport.camera_publish_service import CameraPublishService
+from calibration_service.tuning import TUNING
 
 router = APIRouter()
+
+
+@router.get("/defaults")
+async def pipeline_defaults() -> dict[str, object]:
+    """User-facing pipeline defaults and bounds — backend = single source (ADR-0036).
+
+    The webapp seeds its inputs (values AND min/max) from this payload instead of
+    hardcoding copies; the values live in ``calibration_service.tuning``.
+    """
+    return asdict(TUNING)
+
+
+class SettingsPayload(BaseModel):
+    """Rig-level operator settings (ADR-0036): full-replace PUT semantics.
+
+    Both fields are always sent (the webapp holds the complete current value from
+    GET), so there is no partial-update ambiguity. ``preview_fps = null`` means
+    "follow the camera fps". Changes apply live: the capture loops re-read the
+    settings (publication pacer swaps on the next frame; recording quality
+    applies to the next recording).
+    """
+
+    record_quality: int = Field(
+        ge=TUNING.record_quality_bounds[0],
+        le=TUNING.record_quality_bounds[1],
+    )
+    preview_fps: int | None = Field(
+        default=None,
+        ge=1,
+        le=max(TUNING.fps_options),
+    )
+
+
+def get_settings_store(request: Request) -> SettingsStore:
+    store = request.app.state.settings
+    assert isinstance(store, SettingsStore)
+    return store
+
+
+@router.get("/settings")
+async def get_settings(request: Request) -> SettingsPayload:
+    current = get_settings_store(request).current
+    return SettingsPayload(
+        record_quality=current.record_quality, preview_fps=current.preview_fps
+    )
+
+
+@router.put("/settings")
+async def put_settings(request: Request, body: SettingsPayload) -> SettingsPayload:
+    """Persist the operator settings to <sessions_dir>/settings.toml (ADR-0036)."""
+    get_settings_store(request).replace(
+        RuntimeSettings(record_quality=body.record_quality, preview_fps=body.preview_fps)
+    )
+    return body
 
 
 # --- Schemas -----------------------------------------------------------------
@@ -88,8 +144,10 @@ class CameraConfigIn(BaseModel):
     device_node: str
     width: int
     height: int
-    resize_factor: float = 1.0
-    fps: int
+    # Output-contract scale (ADR-0015): 1.0 = native; the offered list is TUNING's.
+    resize_factor: float = Field(default=1.0, gt=0.0, le=1.0)
+    # The ladder max IS the recording cap (ADR-0037: one cadence per camera).
+    fps: int = Field(ge=1, le=max(TUNING.fps_options))
 
 
 class ConfigRequest(BaseModel):
@@ -118,15 +176,21 @@ class CameraConfigOut(BaseModel):
 
 
 class BoardIn(BaseModel):
+    """Board definition; omitted fields resolve to the TUNING defaults (ADR-0036).
+
+    Semantic coherence (ratio vs sizes, dictionary capacity...) stays in
+    ``validate_board`` — bounds here only reject the structurally impossible.
+    """
+
     board_type: str
     dictionary: str
-    columns: int = 8
-    rows: int = 5
-    marker_ratio: float = 0.75
-    marker_id: int = 0
-    square_size_mm: float = 40.0
-    marker_size_mm: float = 30.0
-    inverted: bool = False
+    columns: int = Field(default=TUNING.board.columns, ge=2, le=30)
+    rows: int = Field(default=TUNING.board.rows, ge=2, le=30)
+    marker_ratio: float = Field(default=TUNING.board.marker_ratio, gt=0.0, lt=1.0)
+    marker_id: int = Field(default=TUNING.board.marker_id, ge=0)
+    square_size_mm: float = Field(default=TUNING.board.square_size_mm, gt=0.0)
+    marker_size_mm: float = Field(default=TUNING.board.marker_size_mm, gt=0.0)
+    inverted: bool = TUNING.board.inverted
 
 
 class BoardConfigRequest(BaseModel):
@@ -139,14 +203,22 @@ class BoardOut(BoardIn):
     pass
 
 
+class IssueOut(BaseModel):
+    """One actionable load-time anomaly (ADR-0036 fail-loud): the wizard stage to
+    revisit (webapp rail id) and a human message. The webapp shows a banner and a
+    badge on that rail step."""
+
+    step: str
+    message: str
+
+
 class SessionOut(BaseModel):
     session_id: str
     session_dir: str = ""  # host-relative session folder (compose mounts ./sessions)
     step: str
     mode: str
-    intrinsic_fps: int
-    optimization_strategy: str
-    export_units: str = "mm"  # persisted export config (ADR-0026), restored on reopen
+    issues: list[IssueOut] = []  # transient: recomputed at every session load
+    export_units: str  # persisted export config (ADR-0026), restored on reopen
     export_targets: list[str] = []
     cameras: list[CameraConfigOut]
     intrinsic_board: BoardOut | None
@@ -217,8 +289,7 @@ def _session_out(session: CalibrationSession, manager: SessionManager) -> Sessio
         session_dir=manager.session_dir_label(),
         step=session.step,
         mode=session.mode,
-        intrinsic_fps=session.intrinsic_fps,
-        optimization_strategy=session.optimization_strategy,
+        issues=[IssueOut(step=i.step, message=i.message) for i in session.issues],
         export_units=session.export_units,
         export_targets=list(session.export_targets),
         cameras=[
@@ -526,7 +597,15 @@ def get_preview_jobs(request: Request) -> PreviewJobs:
 
 
 def _preview_status_out(status: PreviewStatus) -> dict[str, object]:
-    return {"state": status.state.value, "frames": status.frames, "error": status.error}
+    return {
+        "state": status.state.value,
+        "frames": status.frames,
+        # Index <-> time rate of the DONE preview (dynamic contract, ADR-0037).
+        "fps": status.fps,
+        # Cache-buster the webapp appends to the preview URL (stale-video guard).
+        "version": status.version,
+        "error": status.error,
+    }
 
 
 @router.get("/intrinsic/{camera}/preview")
@@ -555,12 +634,22 @@ async def intrinsic_preview_retry(request: Request, camera: str) -> dict[str, ob
 
 
 class ComputeRequest(BaseModel):
-    """Prepare-step knobs (ADR-0022); all optional — omitted fields use auto/defaults."""
+    """Prepare-step knobs (ADR-0022); omitted fields resolve to TUNING (ADR-0036)."""
 
-    stride: int | None = None  # "process every N frames" (read decimation); None = auto
-    cap: int | None = None  # keyframe cap (plafond); None = default
-    frame_start: int = 0  # trim start (frame index)
-    frame_end: int | None = None  # trim end (exclusive); None = end of recording
+    # "Detect 1 frame every N" within the trim (read decimation).
+    stride: int | None = Field(
+        default=None,
+        ge=TUNING.intrinsic_stride_bounds[0],
+        le=TUNING.intrinsic_stride_bounds[1],
+    )
+    # Keyframes kept for the solve.
+    cap: int | None = Field(
+        default=None,
+        ge=TUNING.intrinsic_cap_bounds[0],
+        le=TUNING.intrinsic_cap_bounds[1],
+    )
+    frame_start: int = Field(default=0, ge=0)  # trim start (frame index)
+    frame_end: int | None = Field(default=None, ge=1)  # trim end (exclusive)
 
 
 @router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
@@ -595,8 +684,10 @@ async def compute_intrinsic(
             lambda: compute_intrinsic_from_video(
                 path,
                 board,
-                cap=params.cap,
-                stride=params.stride,
+                cap=params.cap if params.cap is not None else TUNING.intrinsic_cap,
+                stride=params.stride
+                if params.stride is not None
+                else TUNING.intrinsic_stride,
                 frame_start=params.frame_start,
                 frame_end=params.frame_end,
             ),
@@ -611,6 +702,10 @@ async def compute_intrinsic(
         "image_coverage": result.image_coverage,
         "orientation_bins": result.orientation_bins,
         "board_quads": [[list(point) for point in quad] for quad in result.board_quads],
+        # Sharpness of the retained keyframes (ADR-0038): the observability that
+        # replaced the absolute blur gate — a blurry sweep succeeds, visibly.
+        "sharpness_min": result.sharpness_min,
+        "sharpness_median": result.sharpness_median,
     }
     metrics_path = manager.intrinsic_metrics_path(camera)
     metrics_path.parent.mkdir(parents=True, exist_ok=True)
@@ -637,8 +732,9 @@ async def validate_intrinsic(request: Request) -> SessionOut:
 async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
     """Serve the persisted review metrics for the Results view (ADR-0022).
 
-    ``{coverage: heatmap grid, image_coverage: 5x5 fraction, orientation_bins: /8,
-    board_quads: per-keyframe 4x3 board outline in camera coords}``.
+    ``{coverage: quad-accumulation count map (ADR-0039), image_coverage: union-area
+    fraction, orientation_bins: /8, board_quads: per-keyframe 4x3 board outline in
+    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038)}``.
     """
     path = get_manager(request).intrinsic_metrics_path(camera)
     if not path.is_file():
@@ -697,13 +793,35 @@ async def stop_extrinsic(request: Request) -> dict[str, object]:
 
 
 class ExtrinsicComputeRequest(BaseModel):
-    """Prepare-step knobs (ADR-0023/0033); omitted fields use defaults."""
+    """Prepare-step knobs (ADR-0023/0033); omitted fields resolve to TUNING (ADR-0036)."""
 
-    # Sharpest groups kept for the solve (ADR-0033); None = board-type default
-    # (240 single-marker / 80 ChArUco), clamped to what the sweep provides.
-    max_groups: int | None = None
-    max_spread_ms: float | None = None  # drop groups with a larger timestamp spread
-    min_shared: int | None = None  # minimum shared board views per camera pair
+    # Detection stride over the spread-filtered candidate groups ("1 group / N",
+    # the cost knob, mirroring the intrinsic Prepare); None = board-type default.
+    stride: int | None = Field(
+        default=None,
+        ge=TUNING.extrinsic_stride_bounds[0],
+        le=TUNING.extrinsic_stride_bounds[1],
+    )
+    # Sharpest groups kept for the solve (ADR-0033); None = board-type default.
+    max_groups: int | None = Field(
+        default=None,
+        ge=TUNING.max_groups_bounds[0],
+        le=TUNING.max_groups_bounds[1],
+    )
+    # Drop groups with a larger timestamp spread; None = no filter.
+    max_spread_ms: float | None = Field(
+        default=None,
+        ge=TUNING.max_spread_ms_bounds[0],
+        le=TUNING.max_spread_ms_bounds[1],
+    )
+    # Minimum shared board views per camera pair. API-only knob since ADR-0036
+    # (the UI control was removed; possible reintegration under an Advanced
+    # section later).
+    min_shared: int | None = Field(
+        default=None,
+        ge=TUNING.min_shared_bounds[0],
+        le=TUNING.min_shared_bounds[1],
+    )
 
 
 def _native_camera_model(camera: CameraConfig) -> CameraModel:
@@ -759,7 +877,23 @@ async def compute_extrinsic(
         window_s = derive_sweep_window(directory, [c.name for c in session.cameras])
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
-    max_spread_s = params.max_spread_ms / 1000.0 if params.max_spread_ms else None
+    # Resolve omitted knobs against TUNING in one place (ADR-0036); an explicit
+    # value is honoured verbatim — the Pydantic bounds already rejected nonsense.
+    max_spread_s = (
+        params.max_spread_ms / 1000.0 if params.max_spread_ms is not None else None
+    )
+    charuco = board.board_type is BoardType.CHARUCO
+    stride = (
+        params.stride
+        if params.stride is not None
+        else (TUNING.extrinsic_stride_charuco if charuco else TUNING.extrinsic_stride_marker)
+    )
+    max_groups = (
+        params.max_groups
+        if params.max_groups is not None
+        else (TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker)
+    )
+    min_shared = params.min_shared if params.min_shared is not None else TUNING.min_shared
 
     loop = asyncio.get_running_loop()
     try:
@@ -771,9 +905,10 @@ async def compute_extrinsic(
                 models,
                 anchor=anchor.name,
                 window_s=window_s,
-                max_groups=params.max_groups,
+                stride=stride,
+                max_groups=max_groups,
                 max_spread_s=max_spread_s,
-                min_shared=params.min_shared or 5,
+                min_shared=min_shared,
             ),
         )
     except ValueError as exc:
@@ -901,7 +1036,11 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
 @router.get("/extrinsic/groups")
 async def extrinsic_groups(
     request: Request,
-    max_spread_ms: float | None = None,
+    max_spread_ms: float | None = Query(
+        default=None,
+        ge=TUNING.max_spread_ms_bounds[0],
+        le=TUNING.max_spread_ms_bounds[1],
+    ),
 ) -> dict[str, object]:
     """Synchronized groups of the recorded sweep, for the Prepare scrubber (ADR-0023).
 
@@ -1010,7 +1149,8 @@ class ExportRequest(BaseModel):
     each. ``units`` applies to the platform JSONs only (the TOML stays mm)."""
 
     formats: list[str] = []
-    units: Literal["mm", "m"] = "mm"
+    # None = the session's persisted preference (seeded from TUNING at creation).
+    units: Literal["mm", "m"] | None = None
 
 
 def _export_board(session: CalibrationSession) -> CalibrationBoard:
@@ -1052,16 +1192,17 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
     directory = manager.export_dir()
     directory.mkdir(parents=True, exist_ok=True)
     square = board_unit_mm(board)  # square side (ChArUco) or marker side (ArUco)
+    units = body.units if body.units is not None else session.export_units
     selected = set(body.formats)
     files: list[dict[str, object]] = []
     for target in export_targets():  # catalog order, stable output
         if target.id not in selected:
             continue
-        _language, content = _render_target(session, target.id, square, body.units)
+        _language, content = _render_target(session, target.id, square, units)
         (directory / target.filename).write_text(content)
         files.append({"name": target.filename, "convention": target.label})
 
-    manager.set_export_config(body.units, body.formats)
+    manager.set_export_config(units, body.formats)
     manager.mark_exported()
     logging.getLogger(__name__).info("exported: %s", ", ".join(str(f["name"]) for f in files))
     return {"files": files}
@@ -1077,7 +1218,7 @@ class ExportPreviewRequest(BaseModel):
     """Dry-run preview: render the selected targets' content without writing."""
 
     formats: list[str] = []
-    units: Literal["mm", "m"] = "mm"
+    units: Literal["mm", "m"] | None = None  # None = session preference
 
 
 @router.post("/export/preview")
@@ -1087,21 +1228,25 @@ async def export_preview(request: Request, body: ExportPreviewRequest) -> dict[s
     board = _export_board(session)
     _reject_unknown_formats(body.formats)
     square = board_unit_mm(board)
+    units = body.units if body.units is not None else session.export_units
     selected = set(body.formats)
     files: list[dict[str, object]] = []
     for target in export_targets():
         if target.id not in selected:
             continue
-        language, content = _render_target(session, target.id, square, body.units)
+        language, content = _render_target(session, target.id, square, units)
         files.append({"name": target.filename, "language": language, "content": content})
     return {"files": files}
 
 
 class ExportConfigRequest(BaseModel):
-    """Persist the export config (units + targets) so it survives a reopen."""
+    """Persist the export config (units + targets) so it survives a reopen.
+
+    ``units`` is required: setting the session preference must be explicit.
+    """
 
     formats: list[str] = []
-    units: Literal["mm", "m"] = "mm"
+    units: Literal["mm", "m"]
 
 
 @router.post("/export/config", response_model=SessionOut)
@@ -1132,34 +1277,26 @@ async def export_archive(request: Request) -> Response:
     )
 
 
-class CameraOrderRequest(BaseModel):
-    """Persist a drag-reorder: device paths in the operator's chosen order."""
-
-    device_paths: list[str]
-
-
-@router.post("/cameras/order", response_model=SessionOut)
-async def reorder_cameras(request: Request, body: CameraOrderRequest) -> SessionOut:
-    """Permute camera indices (anchor = position 0) without rebuilding configs.
-
-    Unlike /cameras/config this KEEPS calibrations (they belong to the physical
-    device); only index + position-based name change. Republishes so the track
-    names follow.
-    """
-    manager = get_manager(request)
-    try:
-        session = manager.reorder_cameras(body.device_paths)
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-
-    publish_service = get_publish_service(request)
-    if publish_service is not None:
-        await publish_service.refresh()
-    return _session_out(session, manager)
+# No /cameras/order: reordering goes through /cameras/config like every other
+# parameter (ADR-0040). A "preserving" reorder endpoint only preserved the config
+# objects — on-disk artefacts are keyed by name, so a post-calibration reorder
+# silently re-bound cam_<i>.mp4 to a different physical device.
 
 
 @router.post("/board", response_model=SessionOut)
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
+    # Fail early: calibrate_intrinsic is ChArUco-only, so accepting a single
+    # ArUco marker here would only fail at compute time, after the whole sweep.
+    if (
+        body.target == "intrinsic"
+        and body.board is not None
+        and body.board.board_type != "charuco"
+    ):
+        raise HTTPException(
+            status_code=422,
+            detail="intrinsic calibration requires a ChArUco board "
+            "(single ArUco markers are extrinsic-only)",
+        )
     manager = get_manager(request)
     try:
         board = _to_board(body.board) if body.board is not None else None

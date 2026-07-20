@@ -14,7 +14,6 @@ import {
   fetchSessions,
   importSession,
   openSession,
-  reorderCameras,
   validateExtrinsic,
   validateIntrinsic,
 } from '@/transport/httpClient';
@@ -67,13 +66,6 @@ export const confirmCameraSetupThunk = createAsyncThunk('session/confirmCameras'
 
 export const applyCameraConfig = createAsyncThunk('session/applyConfig', (request: ConfigRequest) =>
   configureCameras(request),
-);
-
-// Drag-reorder persistence (index = position, anchor = 0): unlike applyCameraConfig
-// this keeps calibrations — the backend only permutes index + position-based name.
-export const reorderCamerasThunk = createAsyncThunk(
-  'session/reorderCameras',
-  (devicePaths: string[]) => reorderCameras(devicePaths),
 );
 
 // Intrinsic sign-off: the persisted step moves to 'extrinsic_capture' and the wizard follows.
@@ -133,9 +125,6 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(applyCameraConfig.fulfilled, (state, action) => {
-        state.session = action.payload;
-      })
-      .addCase(reorderCamerasThunk.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(validateIntrinsicThunk.fulfilled, (state, action) => {

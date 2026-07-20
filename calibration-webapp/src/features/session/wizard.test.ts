@@ -40,8 +40,6 @@ function session(overrides: Partial<Session> = {}): Session {
     session_id: 'default',
     step: 'camera_setup',
     mode: 'new-realtime',
-    intrinsic_fps: 30,
-    optimization_strategy: 'coverage-aware',
     cameras: [],
     intrinsic_board: null,
     extrinsic_board: null,

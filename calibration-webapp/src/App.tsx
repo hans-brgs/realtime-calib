@@ -1,9 +1,11 @@
 import '@mantine/core/styles.css';
 import '@mantine/code-highlight/styles.css'; // after core styles (Export preview)
 import '@mantine/dropzone/styles.css'; // after core styles (import-ZIP modal)
+import '@mantine/notifications/styles.css'; // after core styles (session checklist)
 import '@livekit/components-styles';
 
 import { MantineProvider } from '@mantine/core';
+import { Notifications } from '@mantine/notifications';
 import { useEffect } from 'react';
 import { Provider } from 'react-redux';
 
@@ -11,11 +13,13 @@ import { useAppDispatch } from '@/app/hooks';
 import { store } from '@/app/store';
 import { DataChannelListener } from '@/features/connection/DataChannelListener';
 import { RoomProvider } from '@/features/connection/RoomProvider';
+import { loadDefaults } from '@/features/session/defaultsSlice';
 import { rehydrateSession } from '@/features/session/sessionSlice';
 import { WizardShell } from '@/features/session/WizardShell';
 import { theme } from '@/theme';
 
-// Rehydrate the wizard from the disk-owned session at mount (ADR-0011). The
+// Rehydrate the wizard from the disk-owned session at mount (ADR-0011), and load
+// the backend-served pipeline defaults/bounds the knobs seed from (ADR-0036). The
 // LiveKit room lives HERE, above the wizard, so navigating between steps never
 // tears down the WebRTC session (see RoomProvider); the single data-channel
 // subscription (DataChannelListener) is mounted here too so telemetry routing
@@ -24,6 +28,7 @@ function AppContent() {
   const dispatch = useAppDispatch();
   useEffect(() => {
     dispatch(rehydrateSession());
+    dispatch(loadDefaults());
   }, [dispatch]);
   return (
     <RoomProvider>
@@ -37,6 +42,9 @@ function AppContent() {
 export default function App() {
   return (
     <MantineProvider theme={theme} defaultColorScheme="dark">
+      {/* Toast host for the session checklist (ADR-0036 issues) — a regular
+          component, but it must live inside MantineProvider. */}
+      <Notifications position="bottom-right" />
       <Provider store={store}>
         <AppContent />
       </Provider>

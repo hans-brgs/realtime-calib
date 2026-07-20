@@ -14,21 +14,10 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
 import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
 import type { Board, BoardTarget, BoardType } from '@/transport/types';
-
-const DEFAULT_BOARD: Board = {
-  board_type: 'charuco',
-  dictionary: 'DICT_5X5_100',
-  columns: 7,
-  rows: 8,
-  marker_ratio: 0.75,
-  marker_id: 0,
-  square_size_mm: 40,
-  marker_size_mm: 30,
-  inverted: false,
-};
 
 // For ChArUco the operator sets the square (measured, metric scale) + a marker ratio;
 // the marker's mm size is derived from them. ArUco (single marker) is left as-is.
@@ -73,18 +62,41 @@ const INPUT_STYLES = {
   },
 } as const;
 
+// Board seeds come from the persisted session boards, else the backend-served
+// defaults (GET /defaults, ADR-0036) — no hardcoded board copy in the webapp.
+// The form only mounts once a seed exists (defaults load at app mount, so the
+// null render is a transient frame at worst).
 export function TargetConfigScreen() {
+  const session = useAppSelector(selectSession);
+  const defaults = useAppSelector(selectDefaults);
+  const intrinsicSeed = session?.intrinsic_board ?? defaults?.board ?? null;
+  if (!intrinsicSeed) {
+    return null;
+  }
+  return (
+    <TargetConfigForm
+      intrinsicSeed={intrinsicSeed}
+      extrinsicSeed={session?.extrinsic_board ?? intrinsicSeed}
+    />
+  );
+}
+
+function TargetConfigForm({
+  intrinsicSeed,
+  extrinsicSeed,
+}: {
+  intrinsicSeed: Board;
+  extrinsicSeed: Board;
+}) {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
 
-  const [dictionaries, setDictionaries] = useState<string[]>([DEFAULT_BOARD.dictionary]);
+  const [dictionaries, setDictionaries] = useState<string[]>([intrinsicSeed.dictionary]);
   const [active, setActive] = useState<BoardTarget>(
     session?.step === 'extrinsic_board_choice' ? 'extrinsic' : 'intrinsic',
   );
-  const [intrinsic, setIntrinsic] = useState<Board>(session?.intrinsic_board ?? DEFAULT_BOARD);
-  const [extrinsic, setExtrinsic] = useState<Board>(
-    session?.extrinsic_board ?? session?.intrinsic_board ?? DEFAULT_BOARD,
-  );
+  const [intrinsic, setIntrinsic] = useState<Board>(intrinsicSeed);
+  const [extrinsic, setExtrinsic] = useState<Board>(extrinsicSeed);
   const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
     session?.extrinsic_board != null,
   );
@@ -102,8 +114,8 @@ export function TargetConfigScreen() {
   useEffect(() => {
     fetchBoardDictionaries()
       .then(setDictionaries)
-      .catch(() => setDictionaries([DEFAULT_BOARD.dictionary]));
-  }, []);
+      .catch(() => setDictionaries([intrinsicSeed.dictionary]));
+  }, [intrinsicSeed.dictionary]);
 
   // Live preview: same render engine as the download (backend), debounced.
   const previewBoardValue = editingInherited ? intrinsic : board;
@@ -278,10 +290,17 @@ export function TargetConfigScreen() {
                 fullWidth
                 value={board.board_type}
                 onChange={(v) => patch({ board_type: v as BoardType })}
-                data={[
-                  { label: 'ChArUco', value: 'charuco' },
-                  { label: 'ArUco', value: 'aruco' },
-                ]}
+                // Single ArUco markers are extrinsic-only (the backend also
+                // rejects them at POST /board): the intrinsic tab simply does
+                // not offer the option — a disabled segment read as a bug.
+                data={
+                  active === 'intrinsic'
+                    ? [{ label: 'ChArUco', value: 'charuco' }]
+                    : [
+                        { label: 'ChArUco', value: 'charuco' },
+                        { label: 'ArUco', value: 'aruco' },
+                      ]
+                }
                 mb="md"
               />
 

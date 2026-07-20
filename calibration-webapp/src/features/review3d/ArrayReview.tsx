@@ -255,10 +255,16 @@ export function ArrayReview({
       const updated = await action();
       onResult(updated);
       if (report) {
+        // What the click COST in data, next to what it gained in RMSE: Minimize
+        // trades observations for error, and the trade must be visible (ADR-0036;
+        // it always re-filters from the full set, so this is not cumulative).
+        const total = updated.observations_total ?? 0;
+        const dropped = total - (updated.observations_used ?? 0);
+        const filtered = dropped > 0 ? ` · ${dropped}/${total} obs dropped` : '';
         setNotice(
           Math.abs(before - updated.error) < 0.005
-            ? `already converged · ${updated.error.toFixed(2)} px`
-            : `RMSE ${before.toFixed(2)} → ${updated.error.toFixed(2)} px`,
+            ? `already converged · ${updated.error.toFixed(2)} px${filtered}`
+            : `RMSE ${before.toFixed(2)} → ${updated.error.toFixed(2)} px${filtered}`,
         );
       }
     } catch (err) {

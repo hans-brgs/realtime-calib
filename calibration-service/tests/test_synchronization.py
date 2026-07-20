@@ -49,7 +49,7 @@ def test_stale_head_is_dropped_not_grouped() -> None:
 def test_partial_group_waits_for_stragglers_then_emits() -> None:
     # 3 live cameras; only 2 in window. Instant batching holds the emission until
     # the wait budget (wait_depth buffered frames) is exhausted, then emits >= 2.
-    sync = _sync(["cam_0", "cam_1", "cam_2"], wait_depth=3)
+    sync = _sync(["cam_0", "cam_1", "cam_2"])  # _WAIT_DEPTH = 3
     sync.add("cam_0", 10.000, "a")
     sync.add("cam_1", 10.010, "b")
     assert sync.try_emit() is None  # cam_2 may still land in this instant
@@ -97,8 +97,6 @@ def test_covisibility_counts_pairs_only_when_both_see_the_board() -> None:
     assert graph.count("cam_0", "cam_2") == 2
     assert graph.count("cam_1", "cam_2") == 1
     assert graph.board_frames == {"cam_0": 3, "cam_1": 2, "cam_2": 2}
-    assert graph.degree("cam_0") == 2
-    assert graph.degree("cam_1", min_shared=2) == 1  # only cam_0 reaches 2 shared
 
 
 def test_drain_survives_desynchronized_stretches() -> None:

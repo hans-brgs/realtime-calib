@@ -4,7 +4,9 @@ import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
 import { Topbar } from '@/components/layout/Topbar';
-import { selectSessionStatus } from '@/features/session/sessionSlice';
+import { SessionChecklist } from '@/components/SessionChecklist';
+import { SettingsModal } from '@/components/SettingsModal';
+import { selectSession, selectSessionStatus } from '@/features/session/sessionSlice';
 import {
   selectActiveView,
   selectStages,
@@ -23,10 +25,15 @@ export function WizardShell() {
   const status = useAppSelector(selectSessionStatus);
   const stages = useAppSelector(selectStages);
   const persistedView = useAppSelector(selectActiveView);
+  // Load-time anomalies (ADR-0036 fail-loud): a persistent banner + a badge on
+  // the concerned rail steps until the operator reconfigures them.
+  const issues = useAppSelector(selectSession)?.issues ?? [];
+  const alertSteps = new Set(issues.map((issue) => issue.step));
 
   const [view, setView] = useState<NavTarget>(persistedView);
   const [collapsed, setCollapsed] = useState(false);
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false);
+  const [settingsOpened, { open: openSettings, close: closeSettings }] = useDisclosure(false);
 
   // Follow server-side step transitions (and the initial rehydrate landing step).
   useEffect(() => {
@@ -45,6 +52,7 @@ export function WizardShell() {
       id: stage.id,
       label: stage.label,
       status: stage.status,
+      alert: alertSteps.has(stage.id),
     })),
   ];
 
@@ -57,7 +65,9 @@ export function WizardShell() {
 
   return (
     <Flex direction="column" style={{ height: '100dvh', overflow: 'hidden' }}>
-      <Topbar burgerOpened={drawerOpened} onBurger={toggleDrawer} />
+      <Topbar burgerOpened={drawerOpened} onBurger={toggleDrawer} onSettings={openSettings} />
+      <SettingsModal opened={settingsOpened} onClose={closeSettings} />
+      <SessionChecklist issues={issues} />
 
       <Flex style={{ flex: 1, minHeight: 0 }}>
         <Box
