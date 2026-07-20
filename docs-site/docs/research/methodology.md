@@ -17,8 +17,9 @@ OpenCV:
 
 - ChArUco corners are interpolated, then solved with `cv2.calibrateCameraExtended`
   (the ChArUco-specific `calibrateCameraCharucoExtended` was removed in OpenCV ≥ 4.7)
-- flags `CALIB_USE_INTRINSIC_GUESS + CALIB_RATIONAL_MODEL + CALIB_FIX_ASPECT_RATIO`
-  (8-coefficient rational distortion model)
+- flag `CALIB_USE_INTRINSIC_GUESS` only — no distortion-model flags, matching
+  Caliscope's plain `cv2.calibrateCamera` call: the classic **5-coefficient**
+  distortion model `[k1, k2, p1, p2, k3]`, with a free aspect ratio
 
 **Sources**
 

@@ -43,6 +43,7 @@ the rest are marked with an asterisk (\*) — see the note at the end.
 | Number of images | ~15–25\* (theoretical min 3) | OKLAB\*, MATLAB\* |
 | Lighting | 300–1000 lux\*, even, no glare | OKLAB\* |
 | Substrate | rigid & flat (aluminium / glass) | OKLAB\* |
+| Distortion model | classic 5-coefficient `[k1,k2,p1,p2,k3]` — rational 8 only for strong wide-angle | Zhang 2000 · Sun & Cooperstock 2006 |
 | Reprojection error | < 0.3 px good\* · 0.3–1.0 acceptable\* · > 1.0 investigate\* | OKLAB\* |
 
 ## Choosing a board
@@ -111,11 +112,48 @@ with distance (most in depth). [Muñoz-Salinas et al. 2018; Collins & Bartoli 20
 
 ## Distortion model
 
-Our review found **no evidence-based rule** for choosing the standard
-(`k1,k2,p1,p2,k3`) vs the rational 8-coefficient model — the one claim that "only
-k1,k2 matter" was refuted under verification. realtime-calib uses the
-**8-coefficient rational model** (following Caliscope), which OpenCV consumers accept
-like the classic 5; higher-order models simply need more observations to constrain.\*
+realtime-calib estimates the **classic 5-coefficient Brown–Conrady model**
+(`k1, k2, p1, p2, k3`) — what OpenCV computes when `calibrateCamera` is called
+without any model flag, and exactly what Caliscope does. Unusually for this
+page, this choice *is* well grounded in primary literature:
+
+- **Radial distortion dominates — and its first term dominates the rest.**
+  Zhang calibrates with `k1, k2` only, noting that "any more elaborated modeling
+  not only would not help … but also would cause numerical instability" — a
+  conclusion he takes from Tsai (who, for industrial lenses, recommends a
+  *single* radial term) and Wei & Ma. [Zhang 2000; Tsai 1987; Wei & Ma 1994]
+- **Higher-order terms are a risk, not free accuracy.** Empirically, the r⁶
+  term (`k3`) does not improve accuracy and can corrupt the lower-order
+  estimates when views are few or noisy; the radial coefficients are highly
+  correlated, and superfluous parameters weaken the solution
+  (over-parameterisation). Unconstrained polynomial fits can even turn
+  non-monotonic — an outcome OpenCV's own documentation calls "a calibration
+  failure". [Sun & Cooperstock 2006; Remondino & Fraser 2006; Heller et al.
+  2014; OpenCV calib3d docs]
+- **Tangential terms (`p1, p2`) are cheap insurance.** Decentering distortion
+  runs an order of magnitude below radial, but modelling it measurably helps —
+  most on wide-angle lenses — and "increases the likelihood of accurate
+  calibration" for a camera whose distortion is unknown. [Weng et al. 1992;
+  Sun & Cooperstock 2006; Remondino & Fraser 2006]
+- **The rational 8-coefficient model (`CALIB_RATIONAL_MODEL`) targets strong
+  wide-angle distortion.** Rational/division models were introduced for
+  extreme (wide-angle, catadioptric) optics; at low distortion the model
+  families perform about the same, so the extra denominator terms buy nothing
+  for a typical webcam — while OpenCV bug reports document rational solves
+  whose denominator misbehaves inside the image. [Claus & Fitzgibbon 2005;
+  Ricolfe-Viala & Sánchez-Salmerón 2010]
+
+We found **no peer-reviewed head-to-head** of OpenCV's 5- vs 8-coefficient
+variants specifically — but our own data agrees with the model-family
+literature: on a real 4-camera dataset, refitting the same captures with the
+rational model left the reprojection RMSE unchanged (0.30–0.32 px) while
+producing wildly inconsistent coefficients across identical cameras (`k1` from
+−0.33 to −4.0); the classic 5 recovers a consistent `k1 ≈ −0.375` everywhere.
+
+One counterpoint if you need the last drop of accuracy: *all* low-order
+parametric models are approximations, and generic per-pixel camera models
+measurably beat them on depth and pose bias [Schöps et al. 2020] — a different
+tool class, outside realtime-calib's scope.
 
 ## Evaluating results
 
@@ -157,6 +195,36 @@ realtime-calib implements this pipeline — see [Methodology](/docs/research/met
 
 - Zhang, Z. (2000). *A Flexible New Technique for Camera Calibration.* IEEE TPAMI 22(11) —
   [full text](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr98-71.pdf).
+- Brown, D.C. (1971). *Close-Range Camera Calibration.* Photogrammetric Engineering
+  37(8):855–866 — origin of the Brown–Conrady distortion model (no open copy found).
+- Tsai, R.Y. (1987). *A Versatile Camera Calibration Technique for High-Accuracy 3D Machine
+  Vision Metrology Using Off-the-Shelf TV Cameras and Lenses.* IEEE J. Robotics and
+  Automation 3(4):323–344 — doi:[10.1109/JRA.1987.1087109](https://doi.org/10.1109/JRA.1987.1087109).
+- Weng, J., Cohen, P., Herniou, M. (1992). *Camera Calibration with Distortion Models and
+  Accuracy Evaluation.* IEEE TPAMI 14(10):965–980 —
+  doi:[10.1109/34.159901](https://doi.org/10.1109/34.159901).
+- Wei, G.-Q., Ma, S.D. (1994). *Implicit and explicit camera calibration: Theory and
+  experiments.* IEEE TPAMI 16(5):469–480.
+- Claus, D., Fitzgibbon, A.W. (2005). *A Rational Function Lens Distortion Model for General
+  Cameras.* CVPR 2005 —
+  [full text](https://www.robots.ox.ac.uk/~vgg/publications/2005/Claus05a/claus05a.pdf).
+- Sun, W., Cooperstock, J.R. (2006). *An empirical evaluation of factors influencing camera
+  calibration accuracy using three publicly available techniques.* Machine Vision and
+  Applications 17(1):51–67 —
+  doi:[10.1007/s00138-006-0014-6](https://doi.org/10.1007/s00138-006-0014-6) · open WACV 2005
+  companion: [full text](https://srl.mcgill.ca/publications/papers/2005-WACV-Sun.pdf).
+- Remondino, F., Fraser, C. (2006). *Digital camera calibration methods: considerations and
+  comparisons.* ISPRS Archives XXXVI-5:266–272 —
+  [full text](https://www.isprs.org/proceedings/xxxvi/part5/paper/remo_616.pdf).
+- Ricolfe-Viala, C., Sánchez-Salmerón, A.-J. (2010). *Lens distortion models evaluation.*
+  Applied Optics 49(30):5914–5928 —
+  doi:[10.1364/AO.49.005914](https://doi.org/10.1364/AO.49.005914).
+- Heller, J., Henrion, D., Pajdla, T. (2014). *Stable radial distortion calibration by
+  polynomial matrix inequalities programming.* ACCV 2014 —
+  [arXiv:1409.5753](https://arxiv.org/abs/1409.5753).
+- Schöps, T., Larsson, V., Pollefeys, M., Sattler, T. (2020). *Why Having 10,000 Parameters in
+  Your Camera Model Is Better Than Twelve.* CVPR 2020 —
+  [open access](https://openaccess.thecvf.com/content_CVPR_2020/papers/Schops_Why_Having_10000_Parameters_in_Your_Camera_Model_Is_Better_CVPR_2020_paper.pdf).
 - Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F.J., Marín-Jiménez, M.J. (2014).
   *Automatic generation and detection of highly reliable fiducial markers under occlusion.*
   Pattern Recognition 47(6):2280–2292 —
@@ -182,7 +250,9 @@ realtime-calib implements this pipeline — see [Methodology](/docs/research/met
 **Practitioner / vendor references** (empirical, no primary sources cited — asterisked values)
 
 - OpenCV — [ChArUco calibration](https://docs.opencv.org/4.x/da/d13/tutorial_aruco_calibration.html)
-  · [ChArUco detection](https://docs.opencv.org/4.x/df/d4a/tutorial_charuco_detection.html).
+  · [ChArUco detection](https://docs.opencv.org/4.x/df/d4a/tutorial_charuco_detection.html)
+  · [calib3d module](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html) (distortion
+  model, flags, monotonicity warning).
 - calib.io — [Calibration Best Practices](https://calib.io/blogs/knowledge-base/calibration-best-practices).
 - MATLAB — [Prepare camera and capture images](https://www.mathworks.com/help/vision/ug/prepare-camera-and-capture-images-for-camera-calibration.html).
 - OKLAB — [ChArUco Calibration Boards: Complete Guide](https://www.oklab.com/blog/charuco-calibration-boards-complete-guide-to-professional-camera-calibration).

@@ -1146,7 +1146,7 @@ _EXPORT_TARGET_IDS = {"caliscope", *PLATFORM_FORMATS}
 class ExportRequest(BaseModel):
     """Targets to export (ADR-0026): all optional, none forced. 'caliscope' writes
     camera_array.toml; platform ids (threejs/blender/unity/unreal) write a JSON
-    each. ``units`` applies to the platform JSONs only (the TOML stays mm)."""
+    each. ``units`` scales the extrinsic translations of every target, TOML included."""
 
     formats: list[str] = []
     # None = the session's persisted preference (seeded from TUNING at creation).
