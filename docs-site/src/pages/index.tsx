@@ -1,11 +1,30 @@
 import type {ReactNode} from 'react';
 import clsx from 'clsx';
+import Head from '@docusaurus/Head';
 import Link from '@docusaurus/Link';
 import Layout from '@theme/Layout';
 import UsedBy from '@site/src/components/UsedBy';
 import Heading from '@theme/Heading';
 
 import styles from './index.module.css';
+
+// JSON-LD for the hero demo video (schema.org VideoObject). Declared only on
+// this page — it is the only page that embeds the video. Lets search engines
+// index it (video results, thumbnails). Keep `duration` and `uploadDate` in
+// sync if the file is re-cut.
+const videoJsonLd = {
+  '@context': 'https://schema.org',
+  '@type': 'VideoObject',
+  name: 'realtime-calib demo — real-time multi-camera calibration from any device',
+  description:
+    'A short walkthrough of realtime-calib: calibrating a rig of USB cameras in ' +
+    'real time, driven from a browser, with live feedback and engine-ready exports.',
+  thumbnailUrl: 'https://realtime-calib.hans-brgs.dev/img/hero-poster.png',
+  uploadDate: '2026-07-13T16:59:17+02:00',
+  duration: 'PT1M44S',
+  contentUrl: 'https://realtime-calib.hans-brgs.dev/img/hero.mp4',
+  isFamilyFriendly: true,
+};
 
 function HomepageHero() {
   return (
@@ -93,6 +112,9 @@ export default function Home(): ReactNode {
     <Layout
       title="Real-time multi-camera calibration"
       description="Real-time multi-camera intrinsic and extrinsic calibration with live feedback and Caliscope-compatible, engine-ready exports.">
+      <Head>
+        <script type="application/ld+json">{JSON.stringify(videoJsonLd)}</script>
+      </Head>
       <HomepageHero />
       <main>
         <UsedBy />
