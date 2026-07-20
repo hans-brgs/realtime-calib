@@ -16,10 +16,9 @@ interface CoverageHeatmapProps {
 const GREEN = [74, 222, 128] as const; // matches the gauges' success green
 
 // Redundancy ramp: alpha at index min(count, last). Discrete shades so the
-// operator reads levels, not a gradient. Tune freely after rig testing — adding
-// entries adds shades (legend + top label follow the ramp length automatically).
-// Currently 1x..10+x (rig trial): finer redundancy read-out, at the cost of
-// smaller steps between adjacent shades. Revert by shortening this array.
+// operator reads levels, not a gradient. 1x..10+x, kept after rig testing: the
+// finer read-out beats the 5-shade version even though adjacent steps are
+// closer. Length is the only knob — the legend and the "N+x" label follow it.
 const RAMP = [0, 0.12, 0.21, 0.3, 0.39, 0.48, 0.56, 0.65, 0.74, 0.83, 0.92] as const;
 
 // The legend row's own height, reserved so the canvas + legend column as a whole
