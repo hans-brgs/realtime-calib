@@ -97,7 +97,7 @@ export const faqJsonLd = {
       name: 'How accurate is the calibration?',
       acceptedAnswer: {
         '@type': 'Answer',
-        text: 'realtime-calib follows the same calibration lineage as Caliscope and OpenCV: ChArUco intrinsics with the 8-coefficient rational model, stereo-initialized extrinsics refined by bundle adjustment. In practice accuracy depends mostly on your capture — board quality, tilt, frame coverage. Public benchmarks are being assembled.',
+        text: 'realtime-calib follows the same calibration lineage as Caliscope and OpenCV: ChArUco intrinsics with the classic 5-coefficient distortion model, stereo-initialized extrinsics refined by bundle adjustment. In practice accuracy depends mostly on your capture — board quality, tilt, frame coverage. Public benchmarks are being assembled.',
       },
     },
     {
@@ -212,8 +212,8 @@ a future version.
 ## How accurate is the calibration?
 
 realtime-calib follows the same calibration lineage as Caliscope and OpenCV:
-ChArUco intrinsics with the 8-coefficient rational model, stereo-initialized
-extrinsics refined by bundle adjustment
+ChArUco intrinsics with the classic 5-coefficient distortion model,
+stereo-initialized extrinsics refined by bundle adjustment
 ([methodology and sources](/docs/research/methodology)). In practice, accuracy
 depends mostly on **your capture** — board quality, tilt, frame coverage: see
 the [best practices](/docs/reference/calibration-best-practices). Public

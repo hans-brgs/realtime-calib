@@ -74,11 +74,11 @@ fields are strictly additive. One `[cam_N]` table per camera.
 | `port` | Camera index / identifier |
 | `size` | Image size `[width, height]` at the calibration resolution |
 | `matrix` | 3×3 intrinsic matrix |
-| `distortions` | Distortion coefficients — 8 (OpenCV rational model) |
+| `distortions` | Distortion coefficients — 5, OpenCV classic model `[k1, k2, p1, p2, k3]` |
 | `rotation` | Extrinsic rotation, Rodrigues vector (world→camera) |
-| `translation` | Extrinsic translation, in millimetres |
+| `translation` | Extrinsic translation, in the selected export units (mm or m — Caliscope's own files are metre-scaled) |
 | `error` | Reprojection error (RMS) |
-| `grid_count` | Total board corners used across the keyframes |
+| `grid_count` | Number of board views (keyframes) used for the intrinsic solve |
 
 Additive, non-Caliscope extensions: `name` (operator label) and `device_path`
 (stable V4L identifier).
@@ -89,7 +89,7 @@ port = 0
 name = "cam_0"
 size = [ 1920, 1080 ]
 matrix = [ [ 1000.0, 0.0, 960.0 ], [ 0.0, 1000.0, 540.0 ], [ 0.0, 0.0, 1.0 ] ]
-distortions = [ 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0 ]
+distortions = [ 0.0, 0.0, 0.0, 0.0, 0.0 ]
 rotation = [ 0.0, 0.0, 0.0 ]
 translation = [ 0.0, 0.0, 0.0 ]
 error = 0.0

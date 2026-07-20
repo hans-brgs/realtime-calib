@@ -97,7 +97,7 @@ class CameraModel:
 
     name: str
     matrix: NDArray[np.float64]  # 3x3 K
-    distortions: NDArray[np.float64]  # rational-model coefficients
+    distortions: NDArray[np.float64]  # classic 5 coefficients [k1,k2,p1,p2,k3] (ADR-0032)
 
 
 @dataclass(frozen=True)

@@ -93,7 +93,7 @@ image position.
 
 The deviation of a real lens from the ideal pinhole model — straight lines
 bowing (radial distortion) or shifting (tangential). realtime-calib estimates
-the 8-coefficient **rational model** used by Caliscope.
+the classic **5-coefficient model** (`k1, k2, p1, p2, k3`) used by Caliscope.
 *See: [Intrinsic calibration](/docs/guides/intrinsic-calibration).*
 
 ## Metric scale

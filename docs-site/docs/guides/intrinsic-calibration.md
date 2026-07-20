@@ -38,9 +38,10 @@ realtime-calib follows Caliscope's intrinsic pipeline, adapted to current OpenCV
 - ChArUco corners are interpolated, then solved with
   **`cv2.calibrateCameraExtended`** — the ChArUco-specific
   `calibrateCameraCharucoExtended` was removed in OpenCV ≥ 4.7.
-- Caliscope flags: `CALIB_USE_INTRINSIC_GUESS + CALIB_RATIONAL_MODEL +
-  CALIB_FIX_ASPECT_RATIO` — an 8-coefficient rational distortion model, seeded
-  with a guess, with fixed aspect ratio.
+- Flag: `CALIB_USE_INTRINSIC_GUESS` only — no distortion-model flags, exactly
+  like Caliscope's plain `cv2.calibrateCamera` call. That means the classic
+  **5-coefficient** distortion model `[k1, k2, p1, p2, k3]`, seeded with a
+  guess, with a free aspect ratio.
 
 → Explanation & sources: [Methodology](/docs/research/methodology)
 
