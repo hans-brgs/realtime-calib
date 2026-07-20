@@ -461,7 +461,7 @@ class CameraPublishService:
         if session is None:
             return []  # no active session (dashboard): idle, don't touch V4L2 (ADR-0028)
         if session.mode is SessionMode.LOAD_FROM_FILES:
-            # Imported session (ADR-0031): sources are files on disk and capture is
+            # Imported session (ADR-0035): sources are files on disk and capture is
             # neutralised — never open a device, never publish a live track.
             logger.debug("load-from-files session: publisher idle")
             return []

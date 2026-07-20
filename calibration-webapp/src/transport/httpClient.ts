@@ -140,7 +140,7 @@ export const openSession = (sessionId: string): Promise<Session> =>
 export const fetchSessionsLocation = (): Promise<string> =>
   getJson<{ root: string }>('/sessions/location').then((r) => r.root);
 
-// Import a pre-recorded session archive, ZIP or tar (ADR-0031): the service
+// Import a pre-recorded session archive, ZIP or tar (ADR-0035): the service
 // ingests it into a fresh session folder (extract, validate, remux to the
 // canonical layout) and makes it the active session, landing on Target Config.
 // 409 if the name exists, 422 on a contract violation, 400 if not zip/tar.

@@ -957,7 +957,7 @@ def _detect_group_frames(
         capture = cv2.VideoCapture(str(directory / f"{name}.mkv"))
         try:
             # SEQUENTIAL walk — never CAP_PROP_POS_FRAMES. Index seeking on a VFR
-            # source (imported remuxes, ADR-0031) lands on the WRONG frame: OpenCV
+            # source (imported remuxes, ADR-0035) lands on the WRONG frame: OpenCV
             # maps the index to a time via the AVERAGE fps, drifting by whole
             # frames wherever the real cadence deviates (measured +1..+21 frames
             # on a real Caliscope import — the sole cause of a 10 px vs 3.7 px

@@ -1,4 +1,4 @@
-"""Tests for the pre-recorded session ZIP import (ADR-0031).
+"""Tests for the pre-recorded session ZIP import (ADR-0035).
 
 Pure contract checks (naming, planning, zip-slip) run everywhere; the ingest
 round-trips normalise real videos, so they are gated on ffmpeg being installed
@@ -415,7 +415,7 @@ def test_ingest_rejects_resolution_mismatch(tmp_path: Path) -> None:
 @requires_ffmpeg
 def test_ingest_aligns_disparate_cadences_without_csv(tmp_path: Path) -> None:
     # Different fps/counts no longer reject: the caliscope-parity alignment
-    # normalises every camera onto shared sync slots (ADR-0031 follow-up).
+    # normalises every camera onto shared sync slots (ADR-0035 follow-up).
     stage = tmp_path / "stage-fps"
     _make_video(stage / "intrinsics/cam_0.mkv", 4, fps=30)
     _make_video(stage / "intrinsics/cam_1.mkv", 4, fps=15)
@@ -491,7 +491,7 @@ def test_sidecar_times_rejects_non_constant_csv_ids(tmp_path: Path) -> None:
         _sidecar_times(plan, props)
 
 
-# --- Camera Setup confirmation (the import flow's "Continue", ADR-0031) -----------
+# --- Camera Setup confirmation (the import flow's "Continue", ADR-0035) -----------
 
 
 def test_confirm_camera_setup_transitions(tmp_path: Path) -> None:

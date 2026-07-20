@@ -9,7 +9,7 @@ import { errorMessage, fetchSessionsLocation } from '@/transport/httpClient';
 // Mirror of the service-side rule (calibration_service.session.manager, ADR-0028):
 // the id becomes a folder name — first char alphanumeric, then [A-Za-z0-9._-],
 // max 64. Client-side validation is UX only; the service stays the source of truth.
-// Shared with the import modal (ADR-0031), which prefills a name from the ZIP.
+// Shared with the import modal (ADR-0035), which prefills a name from the ZIP.
 export const NAME_RE = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
 
 interface NewSessionModalProps {

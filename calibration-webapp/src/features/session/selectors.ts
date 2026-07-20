@@ -98,7 +98,7 @@ export function selectStages(state: RootState): Stage[] {
 export type ViewId = StageId | 'session';
 
 // Navigation targets are exactly the rail views: session entry sub-flows (create /
-// import-from-files) are dashboard modals (ADR-0031), not views of their own.
+// import-from-files) are dashboard modals (ADR-0035), not views of their own.
 export type NavTarget = ViewId;
 
 function stepToView(step: WizardStep): ViewId {

@@ -381,7 +381,7 @@ const PHASES = [
 function IntrinsicsInner() {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
-  // Imported session (ADR-0031): capture is neutralised — the sub-wizard starts
+  // Imported session (ADR-0035): capture is neutralised — the sub-wizard starts
   // on Prepare (the recordings came with the archive) and never offers recording.
   const imported = session?.mode === 'load-from-files';
   const cameras = session?.cameras ?? [];
@@ -564,7 +564,7 @@ function IntrinsicsInner() {
         }
         stepper={
           <PhaseStepper
-            // Imported session: the capture phase does not exist (ADR-0031).
+            // Imported session: the capture phase does not exist (ADR-0035).
             phases={imported ? PHASES.filter((p) => p.key !== 'capture') : PHASES}
             current={wizard.step}
           />
@@ -699,7 +699,7 @@ function IntrinsicsInner() {
               <Button fullWidth variant="light" mt="sm" onClick={() => void transcode.run()}>
                 Recompute (tune again)
               </Button>
-              {/* No re-record on an imported session (ADR-0031): there is no live
+              {/* No re-record on an imported session (ADR-0035): there is no live
                   camera, and starting a recording would overwrite the imported video. */}
               {!imported && (
                 <Button
