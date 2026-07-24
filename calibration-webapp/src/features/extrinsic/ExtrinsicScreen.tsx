@@ -21,6 +21,7 @@ import {
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
@@ -746,8 +747,13 @@ function ExtrinsicInner() {
 // scrubber + knobs) → compute (stereo init + chaining + BA) → result (3D review).
 // The LiveKit room lives at the App level (RoomProvider) — this screen consumes it.
 export function ExtrinsicScreen() {
+  const compact = useCompactLayout();
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Extrinsics"
         subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
