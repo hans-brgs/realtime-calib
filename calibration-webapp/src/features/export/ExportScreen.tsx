@@ -21,6 +21,12 @@ import {
 import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
+import {
+  captureGridColumns,
+  HERO_MIN_HEIGHT,
+  screenHeight,
+  useCompactLayout,
+} from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { selectSession } from '@/features/session/sessionSlice';
@@ -51,6 +57,7 @@ const SECTION_LABEL = {
 export function ExportScreen() {
   const session = useAppSelector(selectSession);
   const defaults = useAppSelector(selectDefaults);
+  const compact = useCompactLayout();
   const cameras = session?.cameras ?? [];
   const posed = cameras.filter((c) => c.rotation != null).length;
   const ready = cameras.length > 0 && posed === cameras.length;
@@ -121,7 +128,7 @@ export function ExportScreen() {
 
   if (!ready) {
     return (
-      <Box p={{ base: 'md', sm: 'xl' }} h="100%">
+      <Box p={{ base: 'md', sm: 'xl' }} h={screenHeight(compact)}>
         <ScreenHeader
           title="Export"
           subtitle="Camera calibration files for Caliscope and 3D engines."
@@ -147,7 +154,11 @@ export function ExportScreen() {
   const destination = `${session?.session_dir ?? 'sessions/…'}/export/`;
 
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <Group justify="space-between" align="flex-start" wrap="nowrap">
         <ScreenHeader
           title="Export"
@@ -163,7 +174,7 @@ export function ExportScreen() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 340px',
+          gridTemplateColumns: captureGridColumns(compact),
           gap: 22,
         }}
       >
@@ -176,7 +187,9 @@ export function ExportScreen() {
             <Box
               style={{
                 flex: 1,
-                minHeight: 0,
+                // Flow: nothing above sets a height, so floor the preview or it
+                // collapses to nothing under the stacked panel (ADR-0041).
+                minHeight: compact ? HERO_MIN_HEIGHT : 0,
                 overflow: 'auto',
                 border: '1px solid var(--rc-border)',
                 borderRadius: 'var(--mantine-radius-md)',
@@ -188,6 +201,7 @@ export function ExportScreen() {
             <Center
               style={{
                 flex: 1,
+                minHeight: compact ? HERO_MIN_HEIGHT : undefined,
                 border: '1px dashed var(--rc-border)',
                 borderRadius: 'var(--mantine-radius-md)',
               }}
@@ -199,7 +213,8 @@ export function ExportScreen() {
           )}
         </Box>
 
-        {/* RIGHT — controls; the panel scrolls internally, never the page. */}
+        {/* RIGHT — controls. The action lives in a self-contained card (below), so
+            no sticky bar here; the panel keeps its own scroll in the locked regime. */}
         <Box
           style={{
             minHeight: 0,

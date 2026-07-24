@@ -77,7 +77,9 @@ function RailButton({ item, selected, collapsed, onNavigate }: RailButtonProps) 
         gap: 11,
         justifyContent: collapsed ? 'center' : 'flex-start',
         padding: '10px 11px',
-        minHeight: 42,
+        // 44px: the touch floor (ADR-0041). These are the primary navigation
+        // targets, and in the flow regime the rail is a full-page touch overlay.
+        minHeight: 44,
         borderRadius: 'var(--mantine-radius-md)',
         borderLeft: `2px solid ${selected ? 'var(--rc-accent)' : 'transparent'}`,
         background: selected ? 'rgba(167,139,250,0.12)' : 'transparent',

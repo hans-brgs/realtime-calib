@@ -1,9 +1,9 @@
 import { isTrackReference, type TrackReference, useTracks } from '@livekit/components-react';
 import { Center, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import { Track } from 'livekit-client';
 import type { CSSProperties } from 'react';
 
+import { useCompactLayout } from '@/components/layout/useCompactLayout';
 import { CameraTile } from '@/features/preview/CameraTile';
 
 // Resolves a track's display position + label from the operator's pending index order
@@ -24,7 +24,7 @@ const trackName = (ref: TrackReference): string => ref.publication.trackName;
 // (RoomProvider in App.tsx): screens never mount their own LiveKitRoom, so
 // navigating between steps never tears down the WebRTC session.
 export function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
-  const compact = useMediaQuery('(max-width: 47.99em), (orientation: portrait)') ?? false;
+  const compact = useCompactLayout();
   const trackRefs = useTracks([Track.Source.Camera], { onlySubscribed: true });
   const cameras = trackRefs.filter(isTrackReference);
 

@@ -21,6 +21,7 @@ import { Track } from 'livekit-client';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
@@ -314,6 +315,7 @@ function PreparePanel({
   onStride,
   onCap,
 }: PreparePanelProps) {
+  const compact = useCompactLayout();
   // "1 frame every N" over the trim span: what the compute will actually detect.
   const span = Math.max(0, trimEnd + 1 - trimStart);
   const analyzed = span > 0 ? Math.ceil(span / Math.max(1, stride)) : 0;
@@ -338,11 +340,23 @@ function PreparePanel({
           {trimStart}–{trimEnd}
         </Text>
       </Group>
+      {/* xs is 30px — well under the touch floor. In the flow regime the panel is
+          full width anyway, so the roomier size costs nothing (ADR-0041). */}
       <Group gap="xs" mb="lg" grow>
-        <Button size="xs" variant="light" color="gray" onClick={() => onTrimStart(frame)}>
+        <Button
+          size={compact ? 'lg' : 'xs'}
+          variant="light"
+          color="gray"
+          onClick={() => onTrimStart(frame)}
+        >
           Set in @ {frame}
         </Button>
-        <Button size="xs" variant="light" color="gray" onClick={() => onTrimEnd(frame)}>
+        <Button
+          size={compact ? 'lg' : 'xs'}
+          variant="light"
+          color="gray"
+          onClick={() => onTrimEnd(frame)}
+        >
           Set out @ {frame}
         </Button>
       </Group>
@@ -807,8 +821,13 @@ function IntrinsicsInner() {
 // Prepare, compute from the recording, then review the result + coverage. The
 // LiveKit room lives at the App level (RoomProvider) — this screen only consumes it.
 export function IntrinsicsScreen() {
+  const compact = useCompactLayout();
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Intrinsics"
         subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."

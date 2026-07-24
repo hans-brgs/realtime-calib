@@ -15,7 +15,6 @@ import {
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
 import { Box, Button, Group, Modal, Select, Text } from '@mantine/core';
-import { useMediaQuery } from '@mantine/hooks';
 import {
   IconAlertTriangle,
   IconArrowRight,
@@ -26,6 +25,11 @@ import {
 import { type ReactNode, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import {
+  captureGridColumns,
+  screenHeight,
+  useCompactLayout,
+} from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import {
   buildConfigRequest,
@@ -246,7 +250,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
   const dispatch = useAppDispatch();
   // Same responsive switch as the live CameraGrid: desktop fills the area with a
   // near-square grid (no scroll); phone/portrait scrolls a single column.
-  const compact = useMediaQuery('(max-width: 47.99em), (orientation: portrait)') ?? false;
+  const compact = useCompactLayout();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cameras = [...session.cameras].sort((a, b) => a.index - b.index);
@@ -267,7 +271,11 @@ function ImportedCameraSetup({ session }: { session: Session }) {
   };
 
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Camera Setup"
         subtitle={
@@ -285,10 +293,9 @@ function ImportedCameraSetup({ session }: { session: Session }) {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 348px',
+          gridTemplateColumns: captureGridColumns(compact),
           gap: 24,
         }}
-        className="rc-camsetup-grid"
       >
         <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <SectionLabel>Recordings · first frame</SectionLabel>
@@ -469,6 +476,7 @@ function LiveCameraSetup() {
   const session = useAppSelector(selectSession);
   // Backend-served knob defaults/bounds (ADR-0036): fps ladder + resize factors.
   const defaults = useAppSelector(selectDefaults);
+  const compact = useCompactLayout();
 
   const [prefix, setPrefix] = useState('cam');
   const [resolution, setResolution] = useState<string | null>(null);
@@ -653,7 +661,11 @@ function LiveCameraSetup() {
   const noCommon = detected.length > 0 && resolutionOptions.length === 0;
 
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       {/* Destructive-apply confirmation (ADR-0040): a rebuild drops every
           calibration result, so it never happens silently over a calibrated array. */}
       <Modal
@@ -732,10 +744,9 @@ function LiveCameraSetup() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 348px',
+          gridTemplateColumns: captureGridColumns(compact),
           gap: 24,
         }}
-        className="rc-camsetup-grid"
       >
         <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
           <SectionLabel>Preview · map physical ↔ index</SectionLabel>

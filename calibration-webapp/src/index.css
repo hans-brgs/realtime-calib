@@ -37,7 +37,6 @@
 html,
 body {
   margin: 0;
-  height: 100%;
 }
 
 body {
@@ -46,11 +45,19 @@ body {
   font-family: 'Manrope Variable', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+  /* Kept deliberately now that the page scrolls (ADR-0041): this blocks scroll
+     chaining and pull-to-refresh, so a swipe near the top of a phone screen
+     cannot reload the app mid-calibration. It does not prevent scrolling. */
   overscroll-behavior: none;
 }
 
+/* The app covers at least the viewport and grows past it when the layout is not
+   locked (ADR-0041): everywhere except landscape >= md the content flows and the
+   page scrolls. Expressed in dvh rather than the old `height: 100%` chain — a
+   percentage height needs a definite containing block, and html/body no longer
+   provide one, so `min-height: 100%` here would silently resolve to nothing. */
 #root {
-  height: 100%;
+  min-height: 100dvh;
 }
 
 /* Live numeric values (FPS, resolutions, errors) read better tabular. */
@@ -63,13 +70,6 @@ body {
 .mantine-SegmentedControl-control[data-active] .mantine-SegmentedControl-label,
 .mantine-SegmentedControl-label[data-active] {
   color: var(--rc-accent-bright);
-}
-
-/* Camera Setup: preview + settings column side by side, stacking on narrow viewports. */
-@media (max-width: 62em) {
-  .rc-camsetup-grid {
-    grid-template-columns: minmax(0, 1fr) !important;
-  }
 }
 
 /* Cool, slim scrollbars to match the dark surfaces. */
