@@ -2,7 +2,11 @@ import { Box, Burger, Group, Image, Text } from '@mantine/core';
 
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
 
-const NAV = ['Dashboard', 'Logs', 'Settings'] as const;
+// 'Dashboard' is a section indicator (the screen itself is the rail's Session item);
+// 'Settings' opens the rig-level modal. A 'Logs' tab used to sit between them with a
+// pointer cursor but no handler and no screen anywhere — removed until it exists,
+// rather than shipping an affordance that does nothing.
+const NAV = ['Dashboard', 'Settings'] as const;
 
 interface TopbarProps {
   burgerOpened: boolean;

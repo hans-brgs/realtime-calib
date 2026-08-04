@@ -1,5 +1,6 @@
 import { Box, Center, Drawer, Flex, Loader, Text } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { IconSettings } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
@@ -15,7 +16,7 @@ import {
   type ViewId,
 } from '@/features/session/selectors';
 import { StepContent } from '@/features/session/StepContent';
-import { WizardRail, type RailItem } from '@/features/session/WizardRail';
+import { RailAction, WizardRail, type RailItem } from '@/features/session/WizardRail';
 import { setCaptureView } from '@/transport/httpClient';
 
 // Top-level shell: persistent Topbar + FSM rail + scrollable main. The rail replaces
@@ -152,9 +153,17 @@ export function WizardShell() {
           }}
           padding={0}
           styles={{
-            body: { height: '100%', padding: 0 },
-            content: { background: 'var(--rc-bar)' },
-            header: { background: 'var(--rc-bar)', minHeight: 54, paddingInline: 10 },
+            // Flex column, NOT `body: height 100%`: with a header present, a body at
+            // full height overflows the panel by the header's own height and pushes
+            // whatever the rail pins to its bottom (the Settings entry) off-screen.
+            content: { background: 'var(--rc-bar)', display: 'flex', flexDirection: 'column' },
+            header: {
+              background: 'var(--rc-bar)',
+              minHeight: 54,
+              paddingInline: 10,
+              flex: '0 0 auto',
+            },
+            body: { flex: 1, minHeight: 0, padding: 0 },
           }}
           zIndex={1000}
         >
@@ -163,6 +172,22 @@ export function WizardShell() {
             activeView={railActiveView}
             onNavigate={navigate}
             collapsed={false}
+            // The topbar's section tabs are hidden in compact, so the drawer is the
+            // only route to app-level entries — without this, Settings is unreachable
+            // on a phone or a portrait tablet.
+            footer={
+              <RailAction
+                icon={IconSettings}
+                label="Settings"
+                onClick={() => {
+                  // Close FIRST: this Drawer is zIndex 1000 while Mantine's Modal
+                  // defaults to 200, so a modal opened underneath a full-page overlay
+                  // would render invisible.
+                  closeDrawer();
+                  openSettings();
+                }}
+              />
+            }
           />
         </Drawer>
       )}
