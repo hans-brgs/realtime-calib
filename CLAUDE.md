@@ -17,7 +17,7 @@ Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **table
 
 | Service | Rôle | Stack |
 | --- | --- | --- |
-| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.12, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
+| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.14, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
 | `calibration-webapp/` | Wizard opérateur + vue 3D | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei, React Compiler, yarn |
 | `livekit-token-server/` | Émission de tokens JWT LiveKit | Python (Flask) |
 | `caddy/` | Reverse proxy + terminaison TLS + statique | Caddy v2 |
