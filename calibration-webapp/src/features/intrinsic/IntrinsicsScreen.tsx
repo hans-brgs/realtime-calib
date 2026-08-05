@@ -152,11 +152,18 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
           {coverage?.grid_count ?? 0}
         </Text>
       </Group>
-      {!found && (
-        <Text fz="0.72rem" c="dark.3" mt="md">
-          No board detected — bring the printed board into view.
+      {/* Always mounted, with two lines reserved. Rendering this conditionally resized the
+          panel every time the board entered or left view (and reflowed the page in the
+          stacked layout). Swapping the copy alone would not fix it: the panel width is
+          fluid, and at its 280px floor the "not detected" line wraps to two while every
+          counterpart wording fits on one (measured) — so the space is held, not guessed. */}
+      <Box mt="md" style={{ minHeight: 'calc(0.72rem * 1.55 * 2)' }}>
+        <Text fz="0.72rem" c="dark.3">
+          {found
+            ? 'Board detected — sweep it across the whole frame.'
+            : 'No board detected — bring the printed board into view.'}
         </Text>
-      )}
+      </Box>
     </>
   );
 }
@@ -342,11 +349,16 @@ function PreparePanel({
       </Group>
       {/* xs is 30px — well under the touch floor. In the flow regime the panel is
           full width anyway, so the roomier size costs nothing (ADR-0041). */}
+      {/* `color="gray"` light-variant measured 1.03 contrast against --rc-panel — a dark
+          wash on a near-black panel, effectively invisible. On these surfaces no fill
+          buys much (the violet tint is 1.14); the EDGE is what makes a control read, so
+          the accent border carries it at 4.52. Both tokens are the design system's, and
+          the pair stays subordinate to the filled Compute below. */}
       <Group gap="xs" mb="lg" grow>
         <Button
           size={compact ? 'lg' : 'xs'}
           variant="light"
-          color="gray"
+          style={{ border: '1px solid var(--rc-accent-deep)' }}
           onClick={() => onTrimStart(frame)}
         >
           Set in @ {frame}
@@ -354,7 +366,7 @@ function PreparePanel({
         <Button
           size={compact ? 'lg' : 'xs'}
           variant="light"
-          color="gray"
+          style={{ border: '1px solid var(--rc-accent-deep)' }}
           onClick={() => onTrimEnd(frame)}
         >
           Set out @ {frame}
@@ -714,13 +726,15 @@ function IntrinsicsInner() {
                 Recompute (tune again)
               </Button>
               {/* No re-record on an imported session (ADR-0031): there is no live
-                  camera, and starting a recording would overwrite the imported video. */}
+                  camera, and starting a recording would overwrite the imported video.
+                  Same contrast fix as the trim buttons: the grey light-variant measured
+                  1.03 against --rc-panel; the accent border is what makes it read. */}
               {!imported && (
                 <Button
                   fullWidth
                   variant="light"
-                  color="gray"
                   mt="sm"
+                  style={{ border: '1px solid var(--rc-accent-deep)' }}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >
