@@ -727,14 +727,18 @@ function IntrinsicsInner() {
               </Button>
               {/* No re-record on an imported session (ADR-0031): there is no live
                   camera, and starting a recording would overwrite the imported video.
-                  Same contrast fix as the trim buttons: the grey light-variant measured
-                  1.03 against --rc-panel; the accent border is what makes it read. */}
+                  Red, not the accent: this discards the take AND its result (the
+                  confirm modal below spells that out), so it carries the same warning
+                  colour as that modal's "Discard & re-record". It also pulls the button
+                  away from the violet Recompute directly above it — a different hue
+                  rather than the same tint with a different border. */}
               {!imported && (
                 <Button
                   fullWidth
                   variant="light"
+                  color="red"
                   mt="sm"
-                  style={{ border: '1px solid var(--rc-accent-deep)' }}
+                  style={{ border: '1px solid var(--rc-error)' }}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >
