@@ -512,7 +512,9 @@ class CameraPublishService:
             self._config, identity=_PARTICIPANT_IDENTITY, room=self._config.room_name
         )
         publisher = LiveKitPublisher()
-        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None]]] = {}
+        # The target each open camera was OPENED with, kept alongside the handle: it is
+        # what tells a reorder apart from a no-op (see _reconcile_open_set).
+        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None], _PublishTarget]] = {}
         try:
             await publisher.connect(self._config.url, token)
             await publisher.await_connected()  # WebRTC handshake before media (#449)
@@ -533,7 +535,7 @@ class CameraPublishService:
             # A room drop mid-sweep must not leave N dangling video files open.
             await self.stop_extrinsic_recording()
             for name in list(open_cams):
-                _camera, task = open_cams.pop(name)
+                _camera, task, _target = open_cams.pop(name)
                 await self._stop_capture(publisher, name, task)
             await publisher.aclose()
 
@@ -601,19 +603,31 @@ class CameraPublishService:
         executor: ThreadPoolExecutor,
         publisher: LiveKitPublisher,
         by_name: dict[str, _PublishTarget],
-        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None]]],
+        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None], _PublishTarget]],
     ) -> None:
-        """Make the set of open cameras match the desired set: close leavers, open joiners."""
+        """Make the set of open cameras match the desired set: close leavers, open joiners.
+
+        A still-desired camera whose TARGET changed counts as a leaver too, so it is
+        reopened on its new device. Matching on the name alone was not enough: reordering
+        the array rebinds cam_<i> to a different ``device_node`` while the name set and the
+        preview sizes stay identical, so ``_reconcile_tracks`` publishes nothing and the
+        desired set is unchanged — cam_0 kept streaming the device it was first opened on,
+        and the reorder looked ignored until a manual reload happened to cycle the view
+        (which closed and reopened everything). The same held for a resolution or fps
+        change: the open V4L2 handle carries the values it was opened with.
+        """
         desired = self._desired_cameras(by_name)
         for name in list(open_cams):
-            if name not in desired:
-                _camera, task = open_cams.pop(name)
+            _camera, task, opened_with = open_cams[name]
+            if name not in desired or by_name.get(name) != opened_with:
+                del open_cams[name]
                 await self._stop_capture(publisher, name, task)
         joiners = [name for name in desired if name not in open_cams]
         for i, name in enumerate(joiners):
-            opened = await self._start_capture(loop, executor, publisher, by_name[name])
+            target = by_name[name]
+            opened = await self._start_capture(loop, executor, publisher, target)
             if opened is not None:
-                open_cams[name] = opened
+                open_cams[name] = (*opened, target)
             if i + 1 < len(joiners):
                 await asyncio.sleep(_OPEN_STAGGER_S)  # stagger USB negotiation
 
