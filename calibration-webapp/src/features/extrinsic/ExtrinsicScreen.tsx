@@ -37,6 +37,7 @@ import {
   validateExtrinsicThunk,
 } from '@/features/session/sessionSlice';
 import { covisibilityCleared, selectCovisibility } from '@/features/telemetry/telemetrySlice';
+import { DESTRUCTIVE_BUTTON_VARS } from '@/theme';
 import {
   errorMessage,
   type ExtrinsicGroup,
@@ -641,7 +642,8 @@ function ExtrinsicInner() {
                 <Button
                   fullWidth
                   variant="light"
-                  color="gray"
+                  color="red"
+                  style={DESTRUCTIVE_BUTTON_VARS}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >

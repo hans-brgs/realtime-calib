@@ -48,6 +48,7 @@ import {
   startIntrinsic,
   stopIntrinsic,
 } from '@/transport/httpClient';
+import { DESTRUCTIVE_BUTTON_VARS } from '@/theme';
 import type { CameraConfig } from '@/transport/types';
 
 type ResultsView = 'coverage' | 'poses';
@@ -738,7 +739,7 @@ function IntrinsicsInner() {
                   variant="light"
                   color="red"
                   mt="sm"
-                  style={{ border: '1px solid var(--rc-error)' }}
+                  style={DESTRUCTIVE_BUTTON_VARS}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >
