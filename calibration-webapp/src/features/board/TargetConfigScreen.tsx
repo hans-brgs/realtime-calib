@@ -4,6 +4,7 @@ import {
   Button,
   Group,
   NumberInput,
+  Paper,
   SegmentedControl,
   Select,
   Switch,
@@ -245,14 +246,13 @@ function TargetConfigForm({
         }}
       >
         {/* Left — preview + download (fills the column height like Camera Setup) */}
-        <Box
+        <Paper
+          radius="lg"
+          withBorder
+          p={16}
           style={{
             minWidth: 0,
             minHeight: 0,
-            border: '1px solid var(--rc-border)',
-            borderRadius: 'var(--mantine-radius-lg)',
-            background: 'var(--rc-panel)',
-            padding: 16,
             display: 'flex',
             flexDirection: 'column',
             gap: 14,
@@ -313,7 +313,7 @@ function TargetConfigForm({
               ? 'Print the PNG, then measure a printed square with a caliper and enter its real size below. The measurement — not the print scale — sets the metric scale.'
               : 'Print the PNG and calibrate the lenses with it. Its printed size is asked for at the extrinsic step: the intrinsic solve is scale-free.'}
           </Alert>
-        </Box>
+        </Paper>
 
         {/* Right — settings */}
         <Box
@@ -372,14 +372,7 @@ function TargetConfigForm({
               />
             </>
           ) : (
-            <Box
-              style={{
-                border: '1px solid var(--rc-border)',
-                borderRadius: 'var(--mantine-radius-lg)',
-                background: 'var(--rc-panel)',
-                padding: 16,
-              }}
-            >
+            <Paper radius="lg" withBorder p={16}>
               <SectionLabel>Board</SectionLabel>
               <SegmentedControl
                 fullWidth
@@ -497,7 +490,7 @@ function TargetConfigForm({
                 onChange={(e) => patch({ inverted: e.currentTarget.checked })}
                 label="Inverted (ink saving)"
               />
-            </Box>
+            </Paper>
           )}
 
           {/* Always present — the extrinsic choice (a board, or inherit) must be

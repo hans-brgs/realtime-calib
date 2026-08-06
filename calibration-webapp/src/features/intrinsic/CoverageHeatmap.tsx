@@ -1,4 +1,4 @@
-import { Box, Group, Text } from '@mantine/core';
+import { Box, ColorSwatch, Group, Text } from '@mantine/core';
 import { useEffect, useRef } from 'react';
 
 // Results heatmap (ADR-0039): the quad-accumulation count of the RETAINED
@@ -32,14 +32,14 @@ function alphaFor(count: number): number {
 function LegendChip({ color, label }: { color: string; label: string }) {
   return (
     <Group gap={5} wrap="nowrap">
-      <Box
-        style={{
-          width: 9,
-          height: 9,
-          borderRadius: 2,
-          background: color,
-          border: '1px solid rgba(255,255,255,0.08)',
-        }}
+      {/* ColorSwatch is Mantine's "displays a color" primitive; its shadow overlay is
+          off so the hairline that separates a dark swatch from the panel stays. */}
+      <ColorSwatch
+        color={color}
+        size={9}
+        radius={2}
+        withShadow={false}
+        style={{ border: '1px solid rgba(255,255,255,0.08)' }}
       />
       <Text fz="0.62rem" c="dark.3">
         {label}

@@ -23,6 +23,7 @@ import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
+import { RecordingBadge } from '@/components/RecordingBadge';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
 import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
@@ -590,23 +591,7 @@ function ExtrinsicInner() {
             <>
               <CameraGrid />
               {wizard.recording && (
-                <Group
-                  gap={6}
-                  px={10}
-                  py={5}
-                  style={{
-                    position: 'absolute',
-                    top: 12,
-                    left: 12,
-                    borderRadius: 20,
-                    background: 'rgba(9,9,11,0.7)',
-                  }}
-                >
-                  <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
-                  <Text fz="0.72rem" fw={600}>
-                    REC · all cameras
-                  </Text>
-                </Group>
+                <RecordingBadge label="REC · all cameras" style={{ top: 12, left: 12 }} />
               )}
             </>
           )

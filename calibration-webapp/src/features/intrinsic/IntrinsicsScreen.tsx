@@ -1,5 +1,6 @@
 import { isTrackReference, useTracks } from '@livekit/components-react';
 import {
+  Badge,
   Box,
   Button,
   Center,
@@ -18,11 +19,12 @@ import {
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { Track } from 'livekit-client';
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { type CSSProperties, lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
+import { RecordingBadge } from '@/components/RecordingBadge';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
 import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
@@ -87,11 +89,17 @@ function Gauge({
           {value}
         </Text>
       </Group>
-      <Box
-        style={{ height: 8, borderRadius: 6, background: 'var(--rc-input)', overflow: 'hidden' }}
-      >
-        <Box style={{ width: `${Math.round(pct * 100)}%`, height: '100%', background: color }} />
-      </Box>
+      {/* Mantine's Progress rather than a hand-rolled track + fill: it carries the
+          role="progressbar" / aria-valuenow wiring, so the value reaches a screen
+          reader instead of living only in the sibling <Text>. */}
+      <Progress
+        value={Math.round(pct * 100)}
+        color={color}
+        size={8}
+        radius={6}
+        aria-label={label}
+        styles={{ root: { background: 'var(--rc-input)' } }}
+      />
     </Box>
   );
 }
@@ -105,18 +113,22 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
         <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" style={{ letterSpacing: '0.07em' }}>
           Live gauges
         </Text>
-        <Text
-          fz="0.62rem"
-          px={8}
-          py={2}
-          style={{
-            borderRadius: 20,
-            background: 'rgba(251,191,36,0.14)',
-            color: 'var(--rc-warning)',
-          }}
+        <Badge
+          tt="none"
+          fw={400}
+          radius={20}
+          style={
+            {
+              '--badge-height': '19px',
+              '--badge-padding-x': '8px',
+              '--badge-fz': '0.62rem',
+              '--badge-bg': 'rgba(251,191,36,0.14)',
+              '--badge-color': 'var(--rc-warning)',
+            } as CSSProperties
+          }
         >
           indicative
-        </Text>
+        </Badge>
       </Group>
 
       <Gauge
@@ -668,24 +680,10 @@ function IntrinsicsInner() {
               </Center>
             )}
             {wizard.recording && wizard.step === 'capture' && (
-              <Group
-                gap={6}
-                px={10}
-                py={5}
-                style={{
-                  position: 'absolute',
-                  top: 12,
-                  left: '50%',
-                  transform: 'translateX(-50%)',
-                  borderRadius: 20,
-                  background: 'rgba(9,9,11,0.7)',
-                }}
-              >
-                <IconPlayerRecordFilled size={13} color="var(--rc-error)" />
-                <Text fz="0.72rem" fw={600}>
-                  REC
-                </Text>
-              </Group>
+              <RecordingBadge
+                label="REC"
+                style={{ top: 12, left: '50%', transform: 'translateX(-50%)' }}
+              />
             )}
           </>
         }

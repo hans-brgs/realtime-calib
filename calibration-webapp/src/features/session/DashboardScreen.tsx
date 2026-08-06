@@ -1,7 +1,17 @@
-import { Box, Group, SimpleGrid, Table, Text, Title, UnstyledButton } from '@mantine/core';
+import {
+  Badge,
+  Box,
+  Group,
+  Paper,
+  SimpleGrid,
+  Table,
+  Text,
+  Title,
+  UnstyledButton,
+} from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
 import { IconChevronRight, IconFolder, IconVideo, type IconProps } from '@tabler/icons-react';
-import { type ComponentType, useEffect, useState } from 'react';
+import { type ComponentType, type CSSProperties, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { ImportSessionModal } from '@/features/session/ImportSessionModal';
@@ -127,25 +137,30 @@ function formatDate(iso: string): string {
   });
 }
 
+// Mantine's Badge carries the pill + left-section layout; the design's geometry and
+// status colors go through Badge's own CSS variables (merged after its vars resolver),
+// and its uppercase/bold defaults are turned off since the labels are cased copy.
 function StatusChip({ status }: { status: SessionSummary['status'] }) {
   const chip = STATUS_CHIP[status];
   return (
-    <Group
-      gap={6}
-      wrap="nowrap"
-      display="inline-flex"
-      style={{
-        alignItems: 'center',
-        padding: '3px 10px 3px 8px',
-        borderRadius: 20,
-        background: chip.bg,
-      }}
+    <Badge
+      leftSection={<Box w={6} h={6} style={{ borderRadius: '50%', background: chip.fg }} />}
+      tt="none"
+      fw={400}
+      radius={20}
+      style={
+        {
+          '--badge-height': '24px',
+          '--badge-padding-x': '10px',
+          '--badge-fz': '0.72rem',
+          '--badge-section-margin': '6px',
+          '--badge-bg': chip.bg,
+          '--badge-color': chip.fg,
+        } as CSSProperties
+      }
     >
-      <Box w={6} h={6} style={{ borderRadius: '50%', background: chip.fg }} />
-      <Text fz="0.72rem" style={{ color: chip.fg }}>
-        {chip.label}
-      </Text>
-    </Group>
+      {chip.label}
+    </Badge>
   );
 }
 
@@ -221,15 +236,7 @@ export function DashboardScreen() {
           </Text>
         )}
       </Group>
-      <Box
-        mt="sm"
-        style={{
-          border: '1px solid var(--mantine-color-dark-4)',
-          borderRadius: 'var(--mantine-radius-lg)',
-          background: 'var(--rc-panel)',
-          overflow: 'hidden',
-        }}
-      >
+      <Paper mt="sm" radius="lg" withBorder style={{ overflow: 'hidden' }}>
         <Table.ScrollContainer minWidth={520}>
           <Table highlightOnHover horizontalSpacing="md" verticalSpacing="sm">
             <Table.Thead style={{ background: '#121216' }}>
@@ -280,7 +287,7 @@ export function DashboardScreen() {
             </Table.Tbody>
           </Table>
         </Table.ScrollContainer>
-      </Box>
+      </Paper>
 
       <Text mt="lg" fz="0.72rem" c="dark.3" className="rc-tnum" style={{ letterSpacing: '0.04em' }}>
         ENGINE STATUS:{' '}
