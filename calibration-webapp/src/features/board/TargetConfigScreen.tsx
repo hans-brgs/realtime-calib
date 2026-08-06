@@ -20,7 +20,6 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
-import { boardScaleRoles } from '@/features/board/boardScale';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
 import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
@@ -115,6 +114,11 @@ function TargetConfigForm({
   const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
     session?.extrinsic_board != null,
   );
+  // The measurement of an INHERITED board. Held apart from `intrinsic` rather
+  // than patched into it: clearing the field to retype would otherwise leave a
+  // zero size on the intrinsic board, which the intrinsic tab — no longer
+  // showing the field — could then try to save. Folded in on save.
+  const [inheritedSize, setInheritedSize] = useState<number>(intrinsicSeed.square_size_mm);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -126,21 +130,23 @@ function TargetConfigForm({
   const setBoard = active === 'intrinsic' ? setIntrinsic : setExtrinsic;
   const patch = (fields: Partial<Board>) => setBoard((b) => ({ ...b, ...fields }));
 
-  // Whether the printed size matters at all here (see boardScale.ts): the
-  // measurement feeds the extrinsic solve alone, so the field asks for it only
-  // on a board the extrinsic step will actually use.
-  const { edited: editedBoardSetsScale, previewed: previewedBoardSetsScale } = boardScaleRoles(
-    active,
-    extrinsicDifferent,
-  );
-  const measuredSize =
-    board.board_type === 'charuco' ? board.square_size_mm : board.marker_size_mm;
-  // Required only where it bites, so a measurement is never demanded for a
-  // number the pipeline will ignore (and never silently skipped where a wrong
-  // value would scale every exported distance).
-  const missingMeasurement = editedBoardSetsScale && !(measuredSize > 0);
+  // The printed size feeds the EXTRINSIC solve alone: the intrinsic solve runs
+  // on unit squares (the backend builds the ChArUco board with
+  // squareLength=1.0), so scaling the target leaves the camera matrix and the
+  // distortion untouched. The measurement therefore lives on the extrinsic tab
+  // only — asking for it while defining the intrinsic board implied it fed that
+  // calibration.
+  //
+  // Inheriting is the case to watch: the extrinsic step then uses the intrinsic
+  // board object itself, so the measurement taken here ends up on THAT board.
+  const measuredSize = editingInherited
+    ? inheritedSize
+    : board.board_type === 'charuco'
+      ? board.square_size_mm
+      : board.marker_size_mm;
+  const missingMeasurement = active === 'extrinsic' && !(measuredSize > 0);
   const measurementError = missingMeasurement
-    ? 'Required — this board sets the extrinsic scale.'
+    ? 'Required — this measurement sets the extrinsic scale.'
     : undefined;
 
   useEffect(() => {
@@ -181,8 +187,20 @@ function TargetConfigForm({
     const target: BoardTarget = active;
     setSaving(true);
     try {
-      // Inheriting (extrinsic tab, box unchecked) sends board=null: the backend keeps
-      // extrinsic_board null and completes Target Config.
+      if (editingInherited) {
+        // Inheriting: the extrinsic solve reads the intrinsic board itself, so
+        // the measurement taken here has to land on THAT board — persist it
+        // first, then send board=null to confirm the inheritance. Re-saving the
+        // intrinsic board does not rewind the wizard: the backend only advances
+        // the step from INTRINSIC_BOARD, and we are past it.
+        const measured = { ...intrinsic, square_size_mm: inheritedSize };
+        await dispatch(
+          applyBoardConfig({ target: 'intrinsic', board: normalizeBoard(measured) }),
+        ).unwrap();
+        setIntrinsic(measured);
+      }
+      // Inheriting sends board=null: the backend keeps extrinsic_board null and
+      // completes Target Config.
       const payload = editingInherited ? null : normalizeBoard(board);
       await dispatch(applyBoardConfig({ target, board: payload })).unwrap();
       // Saving the intrinsic board advances to the extrinsic choice — surface that tab
@@ -271,18 +289,18 @@ function TargetConfigForm({
             </Button>
           </Group>
 
-          {/* Only claim the measurement matters when it does — the same reason
-              the size field drops its asterisk for a board the extrinsic step
-              will not use. */}
+          {/* Mirrors where the measurement is asked for: assertive on the
+              extrinsic tab, silent about scale while the intrinsic board is
+              being defined. */}
           <Alert
             variant="light"
-            color={previewedBoardSetsScale ? 'yellow' : 'gray'}
-            icon={previewedBoardSetsScale ? <IconRuler size={16} /> : <IconInfoCircle size={16} />}
+            color={active === 'extrinsic' ? 'yellow' : 'gray'}
+            icon={active === 'extrinsic' ? <IconRuler size={16} /> : <IconInfoCircle size={16} />}
             styles={{ message: { fontSize: '0.78rem', lineHeight: 1.5 } }}
           >
-            {previewedBoardSetsScale
+            {active === 'extrinsic'
               ? 'Print the PNG, then measure a printed square with a caliper and enter its real size below. The measurement — not the print scale — sets the metric scale.'
-              : 'Print the PNG and calibrate the lens with it. Its printed size does not matter here: the intrinsic solve is scale-free.'}
+              : 'Print the PNG and calibrate the lenses with it. Its printed size is asked for at the extrinsic step: the intrinsic solve is scale-free.'}
           </Alert>
         </Box>
 
@@ -321,9 +339,26 @@ function TargetConfigForm({
           )}
 
           {editingInherited ? (
-            <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>
-              <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
-            </Alert>
+            <>
+              <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />} mb="md">
+                <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
+              </Alert>
+              {/* The geometry is inherited, the measurement is not: it is only
+                  needed now, and it is stored on the intrinsic board because
+                  that is the object the extrinsic solve reads in this mode. */}
+              <NumberInput
+                label="Square size (mm)"
+                withAsterisk
+                description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                error={measurementError}
+                value={inheritedSize}
+                onChange={(v) => setInheritedSize(Number(v) || 0)}
+                min={1}
+                decimalScale={2}
+                step={0.5}
+                styles={INPUT_STYLES}
+              />
+            </>
           ) : (
             <Box
               style={{
@@ -386,22 +421,23 @@ function TargetConfigForm({
                   </Group>
 
                   <Group grow mb="md" align="flex-start">
-                    <NumberInput
-                      label="Square size (mm)"
-                      withAsterisk={editedBoardSetsScale}
-                      description={
-                        editedBoardSetsScale
-                          ? 'Measure the printed square to the mm — it sets the extrinsic accuracy.'
-                          : 'Unused here: the intrinsic solve is scale-free. The extrinsic board carries the metric scale.'
-                      }
-                      error={measurementError}
-                      value={board.square_size_mm}
-                      onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
-                      min={1}
-                      decimalScale={2}
-                      step={0.5}
-                      styles={INPUT_STYLES}
-                    />
+                    {/* Absent while defining the INTRINSIC board: the intrinsic
+                        solve is scale-free, so asking for a measurement there
+                        only suggested it mattered to that calibration. */}
+                    {active === 'extrinsic' && (
+                      <NumberInput
+                        label="Square size (mm)"
+                        withAsterisk
+                        description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                        error={measurementError}
+                        value={board.square_size_mm}
+                        onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                        min={1}
+                        decimalScale={2}
+                        step={0.5}
+                        styles={INPUT_STYLES}
+                      />
+                    )}
                     <NumberInput
                       label="Marker ratio"
                       description="ArUco marker inside each white cell, as a fraction of the square (≈ 0.75)."
