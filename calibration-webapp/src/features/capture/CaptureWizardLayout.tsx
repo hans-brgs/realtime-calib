@@ -1,6 +1,7 @@
 import { Box, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
+import { STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -142,7 +143,10 @@ export function CaptureWizardLayout({
                     paddingBottom: 16,
                     background: 'var(--rc-panel)',
                     borderTop: '1px solid var(--rc-border)',
-                    zIndex: 1,
+                    // Same layer as StickyActionBar: this panel scrolls its own
+                    // SegmentedControls and Sliders under the bar, and at z-index 1
+                    // their labels and thumbs painted through it.
+                    zIndex: STICKY_ACTION_LAYER,
                   }
                 : undefined
             }

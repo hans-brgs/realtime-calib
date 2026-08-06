@@ -138,8 +138,7 @@ export function ExportScreen() {
           <Stack align="center" gap={8}>
             <IconLock size={28} color="var(--mantine-color-dark-3)" />
             <Text c="dark.3" fz="0.84rem">
-              Complete the extrinsic calibration first — the export needs every
-              camera's pose.
+              Complete the extrinsic calibration first — the export needs every camera's pose.
             </Text>
           </Stack>
         </Center>

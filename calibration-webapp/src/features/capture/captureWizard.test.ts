@@ -1,9 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import {
-  captureWizardReducer,
-  initialCaptureWizardState,
-} from '@/features/capture/captureWizard';
+import { captureWizardReducer, initialCaptureWizardState } from '@/features/capture/captureWizard';
 
 const initial = initialCaptureWizardState('capture');
 

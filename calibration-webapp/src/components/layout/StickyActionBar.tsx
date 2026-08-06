@@ -3,6 +3,22 @@ import type { ReactNode } from 'react';
 
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
 
+// Paint layer for every sticky action bar in the flow regime — shared so the two
+// implementations (this one and CaptureWizardLayout's in-panel bar) cannot drift.
+//
+// It has to clear the panel content scrolling underneath it, and that content sets
+// z-indexes the bar does not control. Mantine puts them on positioned descendants of
+// roots that are `position: relative; z-index: auto` — which create NO stacking
+// context — so they leak into whichever context the bar competes in: SegmentedControl's
+// labels and controls sit at 2, Table's sticky cells reach 5, Skeleton's shimmer 11.
+// At the old value of 1 the ChArUco/ArUco labels painted straight through the Save
+// button on Target Config. 20 clears the lot with headroom.
+//
+// The ceiling matters as much as the floor: overlays portal to <body> and MUST keep
+// painting above the bar — Mantine's Modal defaults to 200, notifications to 400, and
+// the wizard's full-page drawer is pinned at 1000. 20 stays far below all of them.
+export const STICKY_ACTION_LAYER = 20;
+
 // Pins a screen's primary action to the bottom of the viewport in the flow regime
 // (ADR-0041). There the settings panel stacks under the big view and the page scrolls,
 // so an action at the end of the panel can sit far below the fold — Start / Compute /
@@ -41,7 +57,7 @@ export function StickyActionBar({
         paddingBottom: 12,
         background: bg,
         borderTop: '1px solid var(--rc-border)',
-        zIndex: 1,
+        zIndex: STICKY_ACTION_LAYER,
       }}
     >
       {children}

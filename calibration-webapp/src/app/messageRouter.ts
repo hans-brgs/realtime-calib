@@ -12,8 +12,7 @@ import {
 // The slice actions this router can emit — one per telemetry `type`. Derived from the
 // action creators so the union stays in sync if their payloads change.
 type TelemetryAction =
-  | ReturnType<typeof coverageReceived>
-  | ReturnType<typeof covisibilityReceived>;
+  ReturnType<typeof coverageReceived> | ReturnType<typeof covisibilityReceived>;
 
 // Minimal boundary guard: an object carrying a string `type` discriminant. Once `type`
 // matches a known case the rest of the shape is trusted from the service contract

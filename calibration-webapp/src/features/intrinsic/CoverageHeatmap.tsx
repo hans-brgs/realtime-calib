@@ -74,7 +74,14 @@ export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
   const top = RAMP.length - 1;
   return (
     <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
+      <Text
+        fz="0.66rem"
+        fw={600}
+        c="dark.3"
+        tt="uppercase"
+        mb="sm"
+        style={{ letterSpacing: '0.07em' }}
+      >
         Field-of-view coverage
       </Text>
       <Box

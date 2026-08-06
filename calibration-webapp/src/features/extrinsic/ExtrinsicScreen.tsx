@@ -317,8 +317,8 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         <Group gap={5} wrap="nowrap" mb="md">
           <IconAlertTriangle size={13} color="var(--rc-warning)" style={{ flex: 'none' }} />
           <Text fz="0.66rem" c="var(--rc-warning)" style={{ lineHeight: 1.4 }}>
-            Bundle adjustment hit its iteration ceiling ({result.ba_nfev} evaluations) — these
-            poses are the best so far, not a converged optimum.
+            Bundle adjustment hit its iteration ceiling ({result.ba_nfev} evaluations) — these poses
+            are the best so far, not a converged optimum.
           </Text>
         </Group>
       )}
@@ -477,9 +477,7 @@ function ExtrinsicInner() {
         .filter((f) => f > 0);
       if (rates.length > 0) setPreviewFps(Math.max(...rates));
       setPreviewVersions(
-        Object.fromEntries(
-          Object.entries(status.cameras).map(([name, c]) => [name, c.version]),
-        ),
+        Object.fromEntries(Object.entries(status.cameras).map(([name, c]) => [name, c.version])),
       );
       wizard.toPrepare();
     },

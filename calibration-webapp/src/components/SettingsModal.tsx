@@ -113,9 +113,7 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
         setFollowFps(settings.preview_fps === null);
         // Seed the reduced-rate input even while "follow" is on, so toggling the
         // switch lands on a sensible served value rather than an empty field.
-        setPreviewFps(
-          settings.preview_fps ?? defaults?.preview_fps_options[0] ?? maxFps,
-        );
+        setPreviewFps(settings.preview_fps ?? defaults?.preview_fps_options[0] ?? maxFps);
         setLoaded(true);
       })
       .catch((cause) => alive && setError(errorMessage(cause, 'failed to load settings')));
@@ -143,8 +141,8 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
   return (
     <Modal opened={opened} onClose={onClose} title="Settings" centered size="sm">
       <Text fz="0.72rem" c="dark.2" mb="md">
-        Rig-level preferences — persisted on the service, shared by every session.
-        Changes apply live.
+        Rig-level preferences — persisted on the service, shared by every session. Changes apply
+        live.
       </Text>
 
       <SettingRow
@@ -169,8 +167,8 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
           disabled={!loaded}
         />
         <InfoPopover>
-          Full-fidelity preview. Turn it off to publish a lower frame rate and spare CPU —
-          recording and calibration are never affected.
+          Full-fidelity preview. Turn it off to publish a lower frame rate and spare CPU — recording
+          and calibration are never affected.
         </InfoPopover>
       </Group>
       {!followFps && (

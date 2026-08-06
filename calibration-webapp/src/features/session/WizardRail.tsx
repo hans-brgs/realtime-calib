@@ -255,7 +255,12 @@ export function WizardRail({
 
       {footer && (
         // Separated from the steps: these are app-level, not points in the wizard.
-        <Stack gap={3} px={10} py={8} style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}>
+        <Stack
+          gap={3}
+          px={10}
+          py={8}
+          style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}
+        >
           {footer}
         </Stack>
       )}

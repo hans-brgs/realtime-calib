@@ -43,7 +43,9 @@ describe('routeDataChannelMessage', () => {
   });
 
   it('ignores an unknown type (e.g. a not-yet-routed future message)', () => {
-    expect(routeDataChannelMessage(JSON.stringify({ type: 'camera_state', alive: true }))).toBeNull();
+    expect(
+      routeDataChannelMessage(JSON.stringify({ type: 'camera_state', alive: true })),
+    ).toBeNull();
   });
 
   it('ignores a payload without a string type discriminant', () => {
