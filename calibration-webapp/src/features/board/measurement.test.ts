@@ -34,7 +34,7 @@ describe('measurementOf', () => {
     // The seeded 40 mm is a backend default, indistinguishable from a real
     // measurement once shown — so it must never reach the input. No extrinsic
     // board exists yet at these steps, which is what keeps it out.
-    for (const step of ['entry', 'intrinsic_board', 'extrinsic_board_choice'] as WizardStep[]) {
+    for (const step of ['intrinsic_board', 'extrinsic_board_choice'] as WizardStep[]) {
       expect(measurementOf(session(step))).toBe('');
     }
     expect(measurementOf(null)).toBe('');

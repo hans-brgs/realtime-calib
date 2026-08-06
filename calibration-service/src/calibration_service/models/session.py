@@ -19,9 +19,13 @@ class WizardStep(StrEnum):
 
     Board definition comes first so the operator can print early, before wiring
     cameras (ADR-0020 workflow).
+
+    No ENTRY member: "no session" is not a step, it is the ABSENCE of an active
+    session (ADR-0028) — GET /session answers 404 and the webapp shows the
+    dashboard. The value existed but was never assigned, so it could not appear
+    in a persisted session.toml either.
     """
 
-    ENTRY = "entry"
     INTRINSIC_BOARD = "intrinsic_board"
     EXTRINSIC_BOARD_CHOICE = "extrinsic_board_choice"
     CAMERA_SETUP = "camera_setup"

@@ -1,7 +1,8 @@
 // Wire types — mirror the calibration-service HTTP schemas (snake_case on purpose).
 
+// No 'entry': "no session" is not a step but the ABSENCE of an active session
+// (ADR-0028) — the API answers 404 and the store holds `session: null`.
 export type WizardStep =
-  | 'entry'
   | 'camera_setup'
   | 'intrinsic_board'
   | 'extrinsic_board_choice'

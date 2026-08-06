@@ -43,14 +43,11 @@ logger = logging.getLogger(__name__)
 # service-side — never trust the client with a path segment (ADR-0028).
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 
-# Wizard steps that still precede a validated extrinsic board. Past them, a
-# session claiming Target Config is done without an extrinsic block is broken
-# (ADR-0045 removed the inherit-by-fallback that used to cover it).
-_BEFORE_EXTRINSIC_BOARD = (
-    WizardStep.ENTRY,
-    WizardStep.INTRINSIC_BOARD,
-    WizardStep.EXTRINSIC_BOARD_CHOICE,
-)
+# Wizard steps at which the boards are not both settled yet. Past them, a session
+# claiming Target Config is done without an extrinsic block is broken (ADR-0045
+# removed the inherit-by-fallback that used to cover it), and Camera Setup cannot
+# be confirmed without skipping the board steps.
+_BOARDS_PENDING = (WizardStep.INTRINSIC_BOARD, WizardStep.EXTRINSIC_BOARD_CHOICE)
 
 
 def inherited_board(intrinsic: CalibrationBoard, measured: CalibrationBoard) -> CalibrationBoard:
@@ -172,7 +169,7 @@ class SessionManager:
                 # which is gone. Fail loud rather than calibrate on a metric
                 # scale nobody entered — the operator revisits the step, and the
                 # block is materialized on the way through.
-                if extrinsic is None and session.step not in _BEFORE_EXTRINSIC_BOARD:
+                if extrinsic is None and session.step not in _BOARDS_PENDING:
                     problems.append(
                         "no extrinsic board defined — revisit Target Config to set the"
                         " board and its measured size"
@@ -403,11 +400,7 @@ class SessionManager:
         session = self.current()
         if not session.cameras:
             raise ValueError("no cameras to confirm")
-        if session.step in (
-            WizardStep.ENTRY,
-            WizardStep.INTRINSIC_BOARD,
-            WizardStep.EXTRINSIC_BOARD_CHOICE,
-        ):
+        if session.step in _BOARDS_PENDING:
             raise ValueError("define the calibration boards first")
         if session.step == WizardStep.CAMERA_SETUP:
             session.step = WizardStep.INTRINSIC_CAPTURE
