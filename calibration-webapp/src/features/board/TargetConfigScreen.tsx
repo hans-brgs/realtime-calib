@@ -400,29 +400,43 @@ function TargetConfigForm({
                   </Text>
                 </>
               ) : (
-                <Group grow mb="md">
-                  <Box>
-                    <FieldLabel>Marker ID</FieldLabel>
-                    <NumberInput
-                      value={board.marker_id}
-                      onChange={(v) => patch({ marker_id: Number(v) || 0 })}
-                      min={0}
-                      max={dictionaryCapacity(board.dictionary) - 1}
-                      styles={INPUT_STYLES}
-                    />
-                  </Box>
-                  <Box>
-                    <FieldLabel>Marker size (mm, measured)</FieldLabel>
-                    <NumberInput
-                      value={board.marker_size_mm}
-                      onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
-                      min={1}
-                      decimalScale={2}
-                      step={0.5}
-                      styles={INPUT_STYLES}
-                    />
-                  </Box>
-                </Group>
+                <>
+                  <Group grow mb={6}>
+                    <Box>
+                      <FieldLabel>Marker ID</FieldLabel>
+                      <NumberInput
+                        value={board.marker_id}
+                        onChange={(v) => patch({ marker_id: Number(v) || 0 })}
+                        min={0}
+                        max={dictionaryCapacity(board.dictionary) - 1}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                    <Box>
+                      <FieldLabel>Marker size (mm, measured)</FieldLabel>
+                      <NumberInput
+                        value={board.marker_size_mm}
+                        onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                        min={1}
+                        decimalScale={2}
+                        step={0.5}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
+                  </Group>
+                  {/* The solver holds the reconstructed marker to this length
+                      (ADR-0044), so it sets the world scale outright: a printing
+                      error lands 1:1 on every exported distance. Worth a line —
+                      "measured" in the label alone does not convey the stake. */}
+                  <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
+                    <Text span fw={600} inherit>
+                      Measure the printed marker
+                    </Text>{' '}
+                    — its black square edge, not the sheet or the quiet zone. Printers rarely land
+                    on the nominal size, and this length sets the scale of the whole calibration:
+                    1% off here is 1% off on every exported camera distance.
+                  </Text>
+                </>
               )}
 
               <Switch
