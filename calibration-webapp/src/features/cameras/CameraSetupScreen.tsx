@@ -14,7 +14,7 @@ import {
   verticalListSortingStrategy,
 } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
-import { Box, Button, Group, Modal, Select, Text } from '@mantine/core';
+import { ActionIcon, Box, Button, Group, Modal, Paper, Select, Text } from '@mantine/core';
 import {
   IconAlertTriangle,
   IconArrowRight,
@@ -22,7 +22,7 @@ import {
   IconInfoCircle,
   IconRefresh,
 } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
@@ -70,21 +70,28 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
+// Mantine's own label/description slots rather than hand-rolled <Text> siblings:
+// they carry the aria-labelledby / aria-describedby wiring an input needs, so a
+// screen reader announces the help text with the field instead of as loose prose.
 const SELECT_STYLES = {
   input: {
     background: 'var(--rc-input)',
     borderColor: 'var(--mantine-color-dark-4)',
     fontVariantNumeric: 'tabular-nums' as const,
   },
+  label: {
+    fontSize: '0.69rem',
+    fontWeight: 400,
+    color: 'var(--mantine-color-dark-2)',
+    marginBottom: 6,
+  },
+  description: {
+    fontSize: '0.625rem',
+    color: 'var(--mantine-color-dark-3)',
+    lineHeight: 1.5,
+    marginTop: 6,
+  },
 } as const;
-
-function FieldLabel({ children }: { children: ReactNode }) {
-  return (
-    <Text fz="0.69rem" c="dark.2" mb={6}>
-      {children}
-    </Text>
-  );
-}
 
 interface RowData {
   index: number;
@@ -99,44 +106,42 @@ function CameraRow({ row }: { row: RowData }) {
   });
 
   return (
-    <Box
+    // Paper carries the row chrome: its dark `withBorder` color IS
+    // var(--mantine-color-dark-4) and the theme's Paper background IS
+    // var(--rc-panel), so the surface is unchanged and the radius comes from the
+    // scale instead of a raw var().
+    <Paper
       ref={setNodeRef}
       p={10}
-      style={{
-        display: 'flex',
-        alignItems: 'center',
-        gap: 10,
-        borderRadius: 'var(--mantine-radius-lg)',
-        border: `1px solid ${isDragging ? 'rgba(167,139,250,0.45)' : 'var(--mantine-color-dark-4)'}`,
-        background: 'var(--rc-panel)',
-        transform: CSS.Transform.toString(transform),
-        transition,
-        zIndex: isDragging ? 1 : undefined,
-        boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.45)' : undefined,
-      }}
+      radius="lg"
+      withBorder
+      style={
+        {
+          display: 'flex',
+          alignItems: 'center',
+          gap: 10,
+          // Accent the border while dragging through Paper's own variable — a raw
+          // `border` shorthand here would outrank withBorder instead of tinting it.
+          '--paper-border-color': isDragging ? 'rgba(167,139,250,0.45)' : undefined,
+          transform: CSS.Transform.toString(transform),
+          transition,
+          zIndex: isDragging ? 1 : undefined,
+          boxShadow: isDragging ? '0 8px 24px rgba(0,0,0,0.45)' : undefined,
+        } as CSSProperties
+      }
     >
-      <Box
-        component="button"
-        type="button"
+      <ActionIcon
         {...attributes}
         {...listeners}
         aria-label="Drag to reorder"
-        style={{
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          width: 28,
-          height: 28,
-          flex: 'none',
-          border: 'none',
-          background: 'transparent',
-          color: 'var(--mantine-color-dark-3)',
-          cursor: 'grab',
-          touchAction: 'none',
-        }}
+        variant="subtle"
+        color="gray"
+        size={28}
+        c="dark.3"
+        style={{ flex: 'none', cursor: 'grab', touchAction: 'none' }}
       >
         <IconGripVertical size={15} />
-      </Box>
+      </ActionIcon>
       <Box
         style={{
           width: 26,
@@ -176,7 +181,7 @@ function CameraRow({ row }: { row: RowData }) {
           {row.devicePath}
         </Text>
       </Box>
-    </Box>
+    </Paper>
   );
 }
 
@@ -356,17 +361,12 @@ function ImportedCameraSetup({ session }: { session: Session }) {
             </SectionLabel>
             <Box style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
               {cameras.map((camera) => (
-                <Box
+                <Paper
                   key={camera.name}
                   p={10}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 10,
-                    borderRadius: 'var(--mantine-radius-lg)',
-                    border: '1px solid var(--mantine-color-dark-4)',
-                    background: 'var(--rc-panel)',
-                  }}
+                  radius="lg"
+                  withBorder
+                  style={{ display: 'flex', alignItems: 'center', gap: 10 }}
                 >
                   <Box
                     style={{
@@ -418,19 +418,12 @@ function ImportedCameraSetup({ session }: { session: Session }) {
                       {camera.width}×{camera.height} · {camera.fps} fps
                     </Text>
                   </Box>
-                </Box>
+                </Paper>
               ))}
             </Box>
           </Box>
 
-          <Box
-            p={16}
-            style={{
-              borderRadius: 'var(--mantine-radius-xl)',
-              border: '1px solid var(--mantine-color-dark-4)',
-              background: '#101014',
-            }}
-          >
+          <Paper p={16} radius="xl" withBorder>
             <SectionLabel>Imported configuration</SectionLabel>
             <Text fz="0.78rem" c="dark.2" style={{ lineHeight: 1.55 }}>
               Resolution and frame rate were read from the videos; capture and reordering are
@@ -450,7 +443,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
             >
               Continue to Intrinsics
             </Button>
-          </Box>
+          </Paper>
         </Box>
       </Box>
     </Box>
@@ -803,14 +796,7 @@ function LiveCameraSetup() {
               </Text>
             )}
           </Box>
-          <Box
-            p={16}
-            style={{
-              borderRadius: 'var(--mantine-radius-xl)',
-              border: '1px solid var(--mantine-color-dark-4)',
-              background: '#101014',
-            }}
-          >
+          <Paper p={16} radius="xl" withBorder>
             <SectionLabel>
               Capture configuration{' '}
               <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
@@ -825,27 +811,27 @@ function LiveCameraSetup() {
               </Text>
             ) : (
               <Box style={{ display: 'flex', flexDirection: 'column', gap: 13 }}>
-                <Box>
-                  <FieldLabel>
-                    Resolution{' '}
-                    <Text span c="dark.3" inherit>
-                      · V4L2 native
-                    </Text>
-                  </FieldLabel>
-                  <Select
-                    data={resolutionOptions.map((r) => ({
-                      value: r.value,
-                      label: `${r.width}×${r.height}`,
-                    }))}
-                    value={resolution}
-                    onChange={onResolutionChange}
-                    allowDeselect={false}
-                    disabled={detecting || resolutionOptions.length === 0}
-                    placeholder={detecting ? 'Detecting…' : 'Select resolution'}
-                    comboboxProps={{ withinPortal: true }}
-                    styles={SELECT_STYLES}
-                  />
-                </Box>
+                <Select
+                  label={
+                    <>
+                      Resolution{' '}
+                      <Text span c="dark.3" inherit>
+                        · V4L2 native
+                      </Text>
+                    </>
+                  }
+                  data={resolutionOptions.map((r) => ({
+                    value: r.value,
+                    label: `${r.width}×${r.height}`,
+                  }))}
+                  value={resolution}
+                  onChange={onResolutionChange}
+                  allowDeselect={false}
+                  disabled={detecting || resolutionOptions.length === 0}
+                  placeholder={detecting ? 'Detecting…' : 'Select resolution'}
+                  comboboxProps={{ withinPortal: true }}
+                  styles={SELECT_STYLES}
+                />
 
                 <Box>
                   <Group justify="space-between" align="baseline" mb={6}>
@@ -872,25 +858,22 @@ function LiveCameraSetup() {
                   />
                 </Box>
 
-                <Box>
-                  <FieldLabel>Capture FPS</FieldLabel>
-                  <Select
-                    data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}
-                    value={fps !== null ? String(fps) : null}
-                    onChange={(value) => value && setFps(Number(value))}
-                    allowDeselect={false}
-                    disabled={detecting || fpsOptions.length === 0}
-                    placeholder={detecting ? 'Detecting…' : 'Select fps'}
-                    comboboxProps={{ withinPortal: true }}
-                    styles={SELECT_STYLES}
-                  />
-                  {fpsOptions.length > 0 && (
-                    <Text fz="0.625rem" c="dark.3" mt={6} style={{ lineHeight: 1.5 }}>
-                      Rates at or below the camera's native max for this resolution. Lower rates are
-                      paced by the service (fewer frames, less USB load).
-                    </Text>
-                  )}
-                </Box>
+                <Select
+                  label="Capture FPS"
+                  description={
+                    fpsOptions.length > 0
+                      ? "Rates at or below the camera's native max for this resolution. Lower rates are paced by the service (fewer frames, less USB load)."
+                      : undefined
+                  }
+                  data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}
+                  value={fps !== null ? String(fps) : null}
+                  onChange={(value) => value && setFps(Number(value))}
+                  allowDeselect={false}
+                  disabled={detecting || fpsOptions.length === 0}
+                  placeholder={detecting ? 'Detecting…' : 'Select fps'}
+                  comboboxProps={{ withinPortal: true }}
+                  styles={SELECT_STYLES}
+                />
 
                 <Button
                   color="violet"
@@ -940,7 +923,7 @@ function LiveCameraSetup() {
                 (you will be asked to confirm).
               </Text>
             </Group>
-          </Box>
+          </Paper>
         </Box>
       </Box>
     </Box>

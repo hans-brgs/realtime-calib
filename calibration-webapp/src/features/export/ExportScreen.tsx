@@ -7,6 +7,7 @@ import {
   Center,
   Checkbox,
   Group,
+  Paper,
   SegmentedControl,
   Stack,
   Text,
@@ -299,14 +300,7 @@ export function ExportScreen() {
             </Stack>
           </Box>
 
-          <Box
-            p="md"
-            style={{
-              border: '1px solid var(--rc-border)',
-              borderRadius: 'var(--mantine-radius-lg)',
-              background: 'var(--rc-panel)',
-            }}
-          >
+          <Paper p="md" radius="lg" withBorder>
             <Text {...SECTION_LABEL} mb={4}>
               Destination
             </Text>
@@ -353,7 +347,7 @@ export function ExportScreen() {
                 <Text fz="0.72rem">{message}</Text>
               </Alert>
             )}
-          </Box>
+          </Paper>
         </Box>
       </Box>
     </Box>

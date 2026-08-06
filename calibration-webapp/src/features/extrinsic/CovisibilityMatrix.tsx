@@ -1,4 +1,4 @@
-import { Box, Group, Text } from '@mantine/core';
+import { Box, Group, Text, Tooltip } from '@mantine/core';
 
 import type { Covisibility } from '@/features/telemetry/telemetrySlice';
 
@@ -57,25 +57,39 @@ export function CovisibilityMatrix({ data }: { data: Covisibility | null }) {
                 ? (data.board_frames[row] ?? 0)
                 : pairCount(data, row, col);
               return (
-                <Box
+                // A title attribute never fires on touch, and the tablet is a
+                // first-class control surface (ADR-0010) — so the pair a cell
+                // stands for was unreachable there. Mantine's Tooltip defaults to
+                // touch: false, hence the explicit events.
+                <Tooltip
                   key={`${row}-${col}`}
-                  title={diagonal ? `${row} board frames` : `${row} × ${col}`}
-                  style={{
-                    borderRadius: 4,
-                    minHeight: 26,
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: diagonal ? 'transparent' : cellColor(count),
-                    border: diagonal
-                      ? '1px dashed var(--rc-border)'
-                      : '1px solid rgba(255,255,255,0.04)',
-                  }}
+                  label={diagonal ? `${row} board frames` : `${row} × ${col}`}
+                  events={{ hover: true, focus: false, touch: true }}
+                  withArrow
                 >
-                  <Text fz="0.68rem" fw={600} className="rc-tnum" c={diagonal ? 'dark.3' : undefined}>
-                    {count}
-                  </Text>
-                </Box>
+                  <Box
+                    style={{
+                      borderRadius: 4,
+                      minHeight: 26,
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      background: diagonal ? 'transparent' : cellColor(count),
+                      border: diagonal
+                        ? '1px dashed var(--rc-border)'
+                        : '1px solid rgba(255,255,255,0.04)',
+                    }}
+                  >
+                    <Text
+                      fz="0.68rem"
+                      fw={600}
+                      className="rc-tnum"
+                      c={diagonal ? 'dark.3' : undefined}
+                    >
+                      {count}
+                    </Text>
+                  </Box>
+                </Tooltip>
               );
             })}
           </Box>

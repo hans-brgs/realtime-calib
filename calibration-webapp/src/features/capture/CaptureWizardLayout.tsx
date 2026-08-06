@@ -1,4 +1,4 @@
-import { Box, Text } from '@mantine/core';
+import { Box, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import {
@@ -104,16 +104,15 @@ export function CaptureWizardLayout({
           {main}
         </Box>
 
-        <Box
+        <Paper
+          radius="lg"
+          withBorder
+          p={16}
           style={{
             minHeight: 0,
             // Locked: the panel is its own scroll container. Flow: the PAGE scrolls,
             // so scrolling here too would trap the settings inside a short box.
             overflowY: compact ? 'visible' : 'auto',
-            border: '1px solid var(--rc-border)',
-            borderRadius: 'var(--mantine-radius-lg)',
-            background: 'var(--rc-panel)',
-            padding: 16,
             display: 'flex',
             flexDirection: 'column',
           }}
@@ -155,7 +154,7 @@ export function CaptureWizardLayout({
             )}
             {action}
           </Box>
-        </Box>
+        </Paper>
       </Box>
     </>
   );
