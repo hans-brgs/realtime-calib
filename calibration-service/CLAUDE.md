@@ -174,9 +174,17 @@ Quand un changement structurant est demandé, consulter `realtime-calib-doc/` :
 
 ## 🧪 Ancrage Caliscope (rappel)
 
-Grounder sur le code/la doc Caliscope, pas sur des suppositions :
-- Intrinsèque : Caliscope appelle `cv2.calibrateCamera` **sans aucun flag de modèle** (vérifié sources, ADR-0032). Notre implé : `cv2.calibrateCameraExtended` + `CALIB_USE_INTRINSIC_GUESS` seul (expose `perViewErrors`).
+Grounder sur le code/la doc Caliscope, pas sur des suppositions — **et préciser la version** : l'amont a divergé entre l'ancrage historique du projet (≤ v0.5.4) et la v0.11.5 (commit `ddda95b4`, vérifiée le 2026-08-06). Détail complet dans le `CLAUDE.md` racine.
+
+Invariants (les deux époques) :
 - Distorsion : modèle 5 coefficients `[k1, k2, p1, p2, k3]`.
 - Unités Caliscope : boards saisis en cm, **monde en mètres** (translations TOML en m) ; `grid_count` = nombre de **vues**, pas de coins.
 - Rotation stockée en Rodrigues 3-vecteur par caméra ; `cv2.Rodrigues` pour passer en 3×3.
 - Extrinsèque : pairwise PnP/`stereoCalibrate`, chaînage transitif, bundle adjustment scipy sur la capture volume {caméras + points 3D}.
+
+Ce qui a changé en v0.11.5 et touche nos comparaisons :
+- Intrinsèque : désormais `CALIB_USE_INTRINSIC_GUESS` (comme nous) + sélection de frames par couverture. Le « sans aucun flag » d'ADR-0032 ne vaut que pour ≤ 0.5.4.
+- Extrinsèque : filtre percentile **2.5 % par caméra intégré au pipeline** — leur RMSE affiché est post-filtre, et exprimé à la résolution des vidéos fournies (cf. ADR-0042 avant toute comparaison de chiffres).
+- Contraintes de rigidité de la cible dans le BA (6 distances/marker, σ = 2 mm) et loss `soft_l1` sur la passe robuste.
+
+Instrument de comparaison : `tools/eval_extrinsic_session.py <session_dir>` rejoue le sweep d'une session enregistrée et sort RMSE natif **et** sortie, rigidité du board (mm — le juge physique, indépendant du solveur) et distances inter-caméras.

@@ -29,7 +29,7 @@ translations stay in squares until the export scales by ``square_size_mm``
 from __future__ import annotations
 
 import logging
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path
 
 import cv2
@@ -145,6 +145,46 @@ class ExtrinsicResult:
     # solve resets it (new world), rotate/minimize preserve it (same world).
     framed_group: int | None = None
     board_quads: list[list[list[float]] | None] = field(default_factory=list)
+    # Observations per camera behind the error fields (ADR-0042): the exact
+    # weights needed to re-aggregate the overall RMSE when per-camera errors are
+    # rescaled. Empty on payloads persisted before the field existed.
+    per_camera_observations: dict[str, int] = field(default_factory=dict)
+
+    def scaled_errors(self, factors: dict[str, float]) -> ExtrinsicResult:
+        """Express the pixel-error fields at each camera's OUTPUT resolution.
+
+        The solver works and reports at the native recording resolution; the
+        operator-facing contract is native x resize_factor (ADR-0015, extended
+        to extrinsics by ADR-0042). Rescaling a pinhole model is exact: a pixel
+        residual scales linearly with resolution, so each camera's RMSE scales
+        by its own factor and the overall RMSE is re-aggregated from the
+        per-camera terms weighted by observation counts. Legacy payloads without
+        counts fall back to ``error x factor``, exact when factors are uniform
+        (every rig so far). Geometry, pair errors (normalized, dimensionless)
+        and diagnostics are untouched.
+        """
+        per_camera = {
+            name: error * factors.get(name, 1.0)
+            for name, error in self.per_camera_error.items()
+        }
+        counts = self.per_camera_observations
+        total = sum(counts.get(name, 0) for name in per_camera)
+        if total > 0:
+            overall = float(
+                np.sqrt(
+                    sum(counts.get(name, 0) * per_camera[name] ** 2 for name in per_camera)
+                    / total
+                )
+            )
+        else:
+            uniform = {round(f, 12) for f in factors.values()} or {1.0}
+            fallback = (
+                next(iter(uniform))
+                if len(uniform) == 1
+                else sum(factors.values()) / len(factors)
+            )
+            overall = self.error * float(fallback)
+        return replace(self, error=overall, per_camera_error=per_camera)
 
 
 def _transform(
@@ -819,17 +859,14 @@ def reorient_result(result: ExtrinsicResult, transform: NDArray[np.float64]) -> 
             moved = np.asarray(quad, np.float64) @ g_rotation.T + g_translation
             quads.append([[float(v) for v in corner] for corner in moved])
 
-    return ExtrinsicResult(
-        cameras=result.cameras,
+    # dataclasses.replace: quality fields and diagnostics (ba_converged, nfev,
+    # observation counts, framed_group) carry over untouched — a rigid world
+    # change alters geometry expression only.
+    return replace(
+        result,
         rotations=rotations,
         translations=translations,
-        per_camera_error=result.per_camera_error,
-        error=result.error,
-        pair_errors=result.pair_errors,
-        group_count=result.group_count,
-        point_count=result.point_count,
         points=[[float(v) for v in point] for point in moved_points],
-        point_groups=result.point_groups,
         board_quads=quads,
     )
 
@@ -919,6 +956,10 @@ def refine_result(
         # the FULL persisted set (this run always re-filters from it).
         observations_used=int(keep.sum()),
         observations_total=len(keep),
+        per_camera_observations={
+            name: int((obs_camera[keep] == index).sum())
+            for index, name in enumerate(result.cameras)
+        },
         board_quads=_group_board_quads(
             np.asarray(result.point_groups, np.intp),
             np.asarray(ba_inputs.point_corner, np.int32),
@@ -1205,6 +1246,10 @@ def compute_extrinsic_from_sweep(
             len(detections),
             min_corners=_min_corners(board),
         ),
+        per_camera_observations={
+            name: int((triangulation.obs_camera == index).sum())
+            for index, name in enumerate(order)
+        },
     )
     ba_inputs = BAInputs(
         obs_camera=[int(v) for v in triangulation.obs_camera],
