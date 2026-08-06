@@ -7,6 +7,7 @@ import {
   Paper,
   SegmentedControl,
   Select,
+  Stack,
   Switch,
   Text,
 } from '@mantine/core';
@@ -422,7 +423,11 @@ function TargetConfigForm({
                     />
                   </Group>
 
-                  <Group grow mb="md" align="flex-start">
+                  {/* Stacked, not side by side: the measured square size is the
+                      required field carrying the extrinsic scale, so it takes the
+                      full width on top and the optional ratio follows below
+                      instead of competing with it for the eye. */}
+                  <Stack gap="md" mb="md">
                     {/* Absent while defining the INTRINSIC board: the intrinsic
                         solve is scale-free, so asking for a measurement there
                         only suggested it mattered to that calibration. */}
@@ -452,18 +457,13 @@ function TargetConfigForm({
                       step={0.05}
                       styles={INPUT_STYLES}
                     />
-                  </Group>
+                  </Stack>
                 </>
               ) : (
-                <Group grow mb="md" align="flex-start">
-                  <NumberInput
-                    label="Marker ID"
-                    value={board.marker_id}
-                    onChange={(v) => patch({ marker_id: Number(v) || 0 })}
-                    min={0}
-                    max={dictionaryCapacity(board.dictionary) - 1}
-                    styles={INPUT_STYLES}
-                  />
+                // Measurement first, ID below: the required field setting the
+                // extrinsic scale leads the stack rather than sitting in a second
+                // column where a glance skips it.
+                <Stack gap="md" mb="md">
                   <NumberInput
                     label="Marker size (mm)"
                     // A single ArUco target is extrinsic-only, so its measurement
@@ -479,7 +479,15 @@ function TargetConfigForm({
                     step={0.5}
                     styles={INPUT_STYLES}
                   />
-                </Group>
+                  <NumberInput
+                    label="Marker ID"
+                    value={board.marker_id}
+                    onChange={(v) => patch({ marker_id: Number(v) || 0 })}
+                    min={0}
+                    max={dictionaryCapacity(board.dictionary) - 1}
+                    styles={INPUT_STYLES}
+                  />
+                </Stack>
               )}
 
               <Switch
