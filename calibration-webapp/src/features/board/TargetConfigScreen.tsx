@@ -20,6 +20,7 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { boardScaleRoles } from '@/features/board/boardScale';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
 import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
@@ -124,6 +125,23 @@ function TargetConfigForm({
   const board = active === 'intrinsic' ? intrinsic : extrinsic;
   const setBoard = active === 'intrinsic' ? setIntrinsic : setExtrinsic;
   const patch = (fields: Partial<Board>) => setBoard((b) => ({ ...b, ...fields }));
+
+  // Whether the printed size matters at all here (see boardScale.ts): the
+  // measurement feeds the extrinsic solve alone, so the field asks for it only
+  // on a board the extrinsic step will actually use.
+  const { edited: editedBoardSetsScale, previewed: previewedBoardSetsScale } = boardScaleRoles(
+    active,
+    extrinsicDifferent,
+  );
+  const measuredSize =
+    board.board_type === 'charuco' ? board.square_size_mm : board.marker_size_mm;
+  // Required only where it bites, so a measurement is never demanded for a
+  // number the pipeline will ignore (and never silently skipped where a wrong
+  // value would scale every exported distance).
+  const missingMeasurement = editedBoardSetsScale && !(measuredSize > 0);
+  const measurementError = missingMeasurement
+    ? 'Required — this board sets the extrinsic scale.'
+    : undefined;
 
   useEffect(() => {
     fetchBoardDictionaries()
@@ -253,14 +271,18 @@ function TargetConfigForm({
             </Button>
           </Group>
 
+          {/* Only claim the measurement matters when it does — the same reason
+              the size field drops its asterisk for a board the extrinsic step
+              will not use. */}
           <Alert
             variant="light"
-            color="yellow"
-            icon={<IconRuler size={16} />}
+            color={previewedBoardSetsScale ? 'yellow' : 'gray'}
+            icon={previewedBoardSetsScale ? <IconRuler size={16} /> : <IconInfoCircle size={16} />}
             styles={{ message: { fontSize: '0.78rem', lineHeight: 1.5 } }}
           >
-            Print the PNG, then measure a printed square with a caliper and enter its real size below.
-            The measurement — not the print scale — sets the metric scale.
+            {previewedBoardSetsScale
+              ? 'Print the PNG, then measure a printed square with a caliper and enter its real size below. The measurement — not the print scale — sets the metric scale.'
+              : 'Print the PNG and calibrate the lens with it. Its printed size does not matter here: the intrinsic solve is scale-free.'}
           </Alert>
         </Box>
 
@@ -366,11 +388,13 @@ function TargetConfigForm({
                   <Group grow mb="md" align="flex-start">
                     <NumberInput
                       label="Square size (mm)"
-                      // The measurement is the metric scale of the extrinsic solve
-                      // (translations ship in square units, scaled at export) — it
-                      // does not enter the intrinsic solve, which runs on unit
-                      // squares. Hence "extrinsic accuracy", not "accuracy".
-                      description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                      withAsterisk={editedBoardSetsScale}
+                      description={
+                        editedBoardSetsScale
+                          ? 'Measure the printed square to the mm — it sets the extrinsic accuracy.'
+                          : 'Unused here: the intrinsic solve is scale-free. The extrinsic board carries the metric scale.'
+                      }
+                      error={measurementError}
                       value={board.square_size_mm}
                       onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
                       min={1}
@@ -403,7 +427,11 @@ function TargetConfigForm({
                   />
                   <NumberInput
                     label="Marker size (mm)"
+                    // A single ArUco target is extrinsic-only, so its measurement
+                    // always carries the scale — no conditional here.
+                    withAsterisk
                     description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
+                    error={measurementError}
                     value={board.marker_size_mm}
                     onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
                     min={1}
@@ -425,7 +453,15 @@ function TargetConfigForm({
           {/* Always present — the extrinsic choice (a board, or inherit) must be
               confirmed to complete Target Config, so it can't be skipped. */}
           <StickyActionBar>
-            <Button fullWidth mt="lg" onClick={save} loading={saving}>
+            {/* Blocked client-side rather than letting the backend's gt=0
+                rejection come back as a raw 422. */}
+            <Button
+              fullWidth
+              mt="lg"
+              onClick={save}
+              loading={saving}
+              disabled={missingMeasurement}
+            >
               Save {active} board
             </Button>
           </StickyActionBar>
