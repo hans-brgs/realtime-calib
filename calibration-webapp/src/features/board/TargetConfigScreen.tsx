@@ -14,6 +14,7 @@ import { IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { labelWithHelp } from '@/components/labelWithHelp';
 import { StickyActionBar } from '@/components/layout/StickyActionBar';
 import {
   captureGridColumns,
@@ -45,6 +46,24 @@ function dictionaryCapacity(name: string): number {
   const tail = Number(name.split('_').at(-1));
   return Number.isFinite(tail) ? tail : 50;
 }
+
+// The measured print, on whichever field carries it (ChArUco square / ArUco marker).
+// It had an always-on description that said "measure the print to the mm" — the same
+// instruction the yellow Alert already gives on this very screen, in more detail and
+// with the caliper. What the operator could NOT read anywhere was the consequence,
+// which is what this says instead.
+const MEASUREMENT_HELP = (
+  <>
+    The one number that gives the reconstruction its real-world size. Everything else about
+    the target is geometry the app already knows; this is the only measurement it cannot
+    derive.
+    <br />
+    <br />
+    Measure the <b>printed</b> target with a caliper — not the size you asked the printer
+    for. Printers scale, and a print 2% off makes every distance the array reports 2% off,
+    with nothing downstream able to detect it.
+  </>
+);
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
@@ -355,9 +374,7 @@ function TargetConfigForm({
               {/* The geometry is inherited, the measurement is not: it is asked
                   for here and stored here, on the materialized extrinsic board. */}
               <NumberInput
-                label="Square size (mm)"
-                withAsterisk
-                description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                {...labelWithHelp('Square size (mm)', MEASUREMENT_HELP, { required: true })}
                 error={measurementError}
                 placeholder="measure the print"
                 value={measurement}
@@ -390,8 +407,20 @@ function TargetConfigForm({
               />
 
               <Select
-                label="Dictionary"
-                description="NxN = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but needs more pixels."
+                {...labelWithHelp(
+                  'Dictionary',
+                  <>
+                    The ArUco family the markers are drawn from. <b>NxN</b> is the marker&apos;s bit
+                    grid: 4×4 carries fewer bits, so it stays readable from farther away or at lower
+                    resolution; 7×7 is harder to misread but needs more pixels on the marker to
+                    decode at all.
+                    <br />
+                    <br />
+                    The trailing number is how many distinct markers the family holds. The default
+                    suits every rig this app targets — change it only to match a target you already
+                    have.
+                  </>,
+                )}
                 value={board.dictionary}
                 onChange={(v) => v && patch({ dictionary: v })}
                 data={dictionaries}
@@ -428,9 +457,7 @@ function TargetConfigForm({
                         only suggested it mattered to that calibration. */}
                     {active === 'extrinsic' && (
                       <NumberInput
-                        label="Square size (mm)"
-                        withAsterisk
-                        description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                        {...labelWithHelp('Square size (mm)', MEASUREMENT_HELP, { required: true })}
                         error={measurementError}
                         placeholder="measure the print"
                         value={measurement}
@@ -442,8 +469,18 @@ function TargetConfigForm({
                       />
                     )}
                     <NumberInput
-                      label="Marker ratio"
-                      description="ArUco marker inside each white cell, as a fraction of the square (≈ 0.75)."
+                      {...labelWithHelp(
+                        'Marker ratio',
+                        <>
+                          Size of the ArUco marker printed inside each white cell, as a fraction of
+                          the square. 0.75 is the usual value and what the default board uses.
+                          <br />
+                          <br />
+                          Larger markers decode from farther away; smaller ones keep more white
+                          quiet zone around each marker, which is what the detector needs to find it
+                          at all.
+                        </>,
+                      )}
                       value={board.marker_ratio}
                       onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
                       min={0.1}
@@ -465,11 +502,9 @@ function TargetConfigForm({
                     styles={INPUT_STYLES}
                   />
                   <NumberInput
-                    label="Marker size (mm)"
+                    {...labelWithHelp('Marker size (mm)', MEASUREMENT_HELP, { required: true })}
                     // A single ArUco target is extrinsic-only, so its measurement
                     // always carries the scale — no conditional here.
-                    withAsterisk
-                    description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
                     error={measurementError}
                     placeholder="measure the print"
                     value={measurement}

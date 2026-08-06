@@ -8,9 +8,9 @@ import type { ReactNode } from 'react';
 // Popover, not Tooltip — it opens on tap and dismisses on outside-tap, so it works on
 // the touch devices the app targets (a hover Tooltip is dead weight on tablet/phone).
 //
-// Where it sits matters: next to a form control, keep the icon OUTSIDE the field's
-// <label> — nested inside, a tap would toggle a Switch or pop the numeric keyboard on
-// a NumberInput through the label's implicit control activation.
+// On a form control it normally goes on the label, via labelWithHelp below. Use it
+// bare only where there is no Mantine label to hang it on (a value row, a
+// hand-composed caption).
 export function InfoPopover({
   children,
   label = 'More information',
