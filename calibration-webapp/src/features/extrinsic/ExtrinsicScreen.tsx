@@ -307,6 +307,32 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         </Group>
       )}
       {result.ba_converged !== false && <Box mb="md" />}
+      {/* Board rigidity (ADR-0044): how far the reconstructed corners sit from
+          the physical target. Reprojection-independent, so it catches a solve
+          that lowered its residuals by deforming the board. Thresholds are the
+          constraint tolerance (2 mm) and its 2.5x. */}
+      {result.rigidity_mm != null && result.rigidity_mm > 0 && (
+        <Group justify="space-between" mb="md">
+          <Text fz="0.72rem" c="dark.2">
+            Board rigidity
+          </Text>
+          <Text
+            fz="0.78rem"
+            fw={600}
+            className="rc-tnum"
+            style={{
+              color:
+                result.rigidity_mm <= 2
+                  ? 'var(--rc-success)'
+                  : result.rigidity_mm <= 5
+                    ? 'var(--rc-warning)'
+                    : 'var(--rc-error)',
+            }}
+          >
+            {result.rigidity_mm.toFixed(2)} mm
+          </Text>
+        </Group>
+      )}
       {result.cameras.map((camera) => {
         const deviation = result.per_camera_error[camera];
         // Spec deviation highlight: green <= 0.25 px, amber <= 0.5, red above.

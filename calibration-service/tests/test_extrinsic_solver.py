@@ -657,3 +657,120 @@ def test_scaled_errors_legacy_payload_without_counts_falls_back() -> None:
     scaled = result.scaled_errors({name: 0.5 for name in result.cameras})
     assert scaled.error == pytest.approx(0.05)
     assert all(v == pytest.approx(0.05) for v in scaled.per_camera_error.values())
+
+
+def _marker_triangulation() -> tuple[object, dict[str, NDArray[np.float64]]]:
+    groups = _marker_groups(8)
+    pairs = stereo_pairwise(groups, MARKER_BOARD, min_shared=3)
+    poses = chain_from_anchor(pairs, list(POSES), "cam_0")
+    return triangulate_groups(groups, poses), poses
+
+
+def test_rigidity_constraints_cover_every_within_group_pair() -> None:
+    # ADR-0044: 4 marker corners -> 6 distances per group (4 sides + 2 diagonals),
+    # each pinned to the physical geometry and never crossing group boundaries.
+    from calibration_service.calibration.extrinsic import build_rigidity_constraints
+
+    tri, _ = _marker_triangulation()
+    constraints = build_rigidity_constraints(
+        tri.point_group, tri.point_corner, MARKER_BOARD, focal_median=800.0, sigma_mm=2.0
+    )
+    assert constraints is not None
+    assert len(constraints) == 8 * 6
+    assert np.all(tri.point_group[constraints.point_a] == tri.point_group[constraints.point_b])
+    # A canonical marker has side 1.0 and diagonal sqrt(2) in board units.
+    sides = np.isclose(constraints.distance, 1.0).sum()
+    diagonals = np.isclose(constraints.distance, np.sqrt(2.0)).sum()
+    assert sides == 8 * 4 and diagonals == 8 * 2
+    # Whitening: sigma expressed in board units, one pixel as the yardstick.
+    sigma_units = 2.0 / MARKER_BOARD.marker_size_mm
+    assert np.allclose(constraints.weight, (1.0 / 800.0) / sigma_units)
+
+
+def test_rigidity_constraints_absent_for_charuco() -> None:
+    # The ChArUco path opts out (quadratic pair blow-up; its 40+ corners already
+    # constrain the fit) — a non-regression guard on the board-type gate.
+    from calibration_service.calibration.extrinsic import _sweep_rigidity
+
+    models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in POSES]
+    charuco = triangulate_groups(_groups(3), POSES)
+    assert _sweep_rigidity(charuco.point_group, charuco.point_corner, BOARD, models) is None
+    marker, _ = _marker_triangulation()
+    assert (
+        _sweep_rigidity(marker.point_group, marker.point_corner, MARKER_BOARD, models) is not None
+    )
+
+
+def test_rigidity_constraints_reject_corner_ids_outside_the_board() -> None:
+    # Fail loud: ChArUco corner ids against a 4-corner marker geometry means the
+    # observations and the board disagree — never silently tie wrong distances.
+    from calibration_service.calibration.extrinsic import build_rigidity_constraints
+
+    charuco = triangulate_groups(_groups(3), POSES)
+    with pytest.raises(ValueError, match="exceeds the board geometry"):
+        build_rigidity_constraints(
+            charuco.point_group,
+            charuco.point_corner,
+            MARKER_BOARD,
+            focal_median=800.0,
+            sigma_mm=2.0,
+        )
+
+
+def test_rigidity_constraints_hold_the_board_shape_under_noise() -> None:
+    # The claim behind ADR-0044: with noisy observations the free BA deforms the
+    # target to absorb residuals; the constrained BA does not.
+    from calibration_service.calibration.extrinsic import (
+        _sweep_rigidity,
+        rigidity_mm,
+    )
+
+    tri, poses = _marker_triangulation()
+    rng = np.random.default_rng(11)
+    # ~0.4 px of corner noise at this fixture's focal — the regime a real sweep
+    # sits in with CONTOUR refinement (ADR-0043). Heavier noise makes the
+    # two-stage solve run to the nfev ceiling with OR without constraints, so it
+    # would test the fixture rather than the feature.
+    noisy_norm = tri.obs_norm + rng.normal(0.0, 0.0005, tri.obs_norm.shape)
+    models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in POSES]
+    constraints = _sweep_rigidity(tri.point_group, tri.point_corner, MARKER_BOARD, models)
+    assert constraints is not None
+
+    args = (tri.camera_order, poses, tri.points3d, tri.obs_camera, tri.obs_point)
+    _, free_points, free_status = bundle_adjust(*args, noisy_norm, "cam_0")
+    _, tied_points, tied_status = bundle_adjust(*args, noisy_norm, "cam_0", constraints)
+
+    free_mm = rigidity_mm(free_points, tri.point_group, tri.point_corner, MARKER_BOARD)
+    tied_mm = rigidity_mm(tied_points, tri.point_group, tri.point_corner, MARKER_BOARD)
+    assert free_status.converged and tied_status.converged
+    # Constraints also condition the problem: the tied solve needs no more
+    # iterations than the free one.
+    assert tied_status.nfev <= free_status.nfev
+    assert tied_mm < 0.6 * free_mm
+
+
+def test_solve_reports_rigidity_and_reprojection_stays_reprojection_only() -> None:
+    # The reported RMSE must remain a pure reprojection number even though the
+    # solver minimises reprojection + rigidity (ADR-0044 reporting contract).
+    from calibration_service.calibration.extrinsic import _sweep_rigidity, rigidity_mm
+
+    tri, poses = _marker_triangulation()
+    models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in POSES]
+    constraints = _sweep_rigidity(tri.point_group, tri.point_corner, MARKER_BOARD, models)
+    solved, points, _ = bundle_adjust(
+        tri.camera_order,
+        poses,
+        tri.points3d,
+        tri.obs_camera,
+        tri.obs_point,
+        tri.obs_norm,
+        "cam_0",
+        constraints,
+    )
+    by_name = {model.name: model for model in models}
+    _, overall = pixel_errors(
+        tri.camera_order, solved, points, tri.obs_camera, tri.obs_point, tri.obs_px, by_name
+    )
+    # Exact synthetic data: both the residuals and the board shape are satisfied.
+    assert overall < 0.1
+    assert rigidity_mm(points, tri.point_group, tri.point_corner, MARKER_BOARD) < 0.1

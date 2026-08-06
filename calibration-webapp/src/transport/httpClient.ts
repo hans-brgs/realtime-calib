@@ -342,6 +342,12 @@ export interface ExtrinsicResultPayload {
   ba_nfev?: number;
   observations_used?: number;
   observations_total?: number;
+  // RMS deviation (mm) between the reconstructed board corners and the physical
+  // target (ADR-0044). Independent of the reprojection error — a solve can lower
+  // its residuals by deforming the board, and this number does not follow — so it
+  // is the metric that catches a result which looks good and is not. Absent on
+  // results persisted before ADR-0044; 0 when the board type emits no constraint.
+  rigidity_mm?: number;
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
