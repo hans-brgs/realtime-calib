@@ -52,19 +52,26 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function FieldLabel({ children }: { children: ReactNode }) {
-  return (
-    <Text fz="0.69rem" c="dark.2" mb={6}>
-      {children}
-    </Text>
-  );
-}
-
+// Mantine's own label/description slots rather than hand-rolled <Text> siblings:
+// they carry the aria-labelledby / aria-describedby wiring an input needs, and
+// keep the help text tied to its field when a Group reflows on narrow screens.
 const INPUT_STYLES = {
   input: {
     background: 'var(--rc-input)',
     borderColor: 'var(--mantine-color-dark-4)',
     fontVariantNumeric: 'tabular-nums' as const,
+  },
+  label: {
+    fontSize: '0.69rem',
+    fontWeight: 400,
+    color: 'var(--mantine-color-dark-2)',
+    marginBottom: 6,
+  },
+  description: {
+    fontSize: '0.68rem',
+    color: 'var(--mantine-color-dark-3)',
+    lineHeight: 1.5,
+    marginTop: 6,
   },
 } as const;
 
@@ -323,120 +330,88 @@ function TargetConfigForm({
                 mb="md"
               />
 
-              <FieldLabel>Dictionary</FieldLabel>
               <Select
+                label="Dictionary"
+                description="NxN = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but needs more pixels."
                 value={board.dictionary}
                 onChange={(v) => v && patch({ dictionary: v })}
                 data={dictionaries}
                 allowDeselect={false}
                 comboboxProps={{ withinPortal: true }}
                 styles={INPUT_STYLES}
-                mb={6}
+                mb="md"
               />
-              <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
-                <Text span fw={600} inherit>
-                  NxN
-                </Text>{' '}
-                = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but
-                needs more pixels.
-              </Text>
 
               {board.board_type === 'charuco' ? (
                 <>
                   <Group grow mb="md">
-                    <Box>
-                      <FieldLabel>Columns</FieldLabel>
-                      <NumberInput
-                        value={board.columns}
-                        onChange={(v) => patch({ columns: Number(v) || 0 })}
-                        min={2}
-                        max={30}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
-                    <Box>
-                      <FieldLabel>Rows</FieldLabel>
-                      <NumberInput
-                        value={board.rows}
-                        onChange={(v) => patch({ rows: Number(v) || 0 })}
-                        min={2}
-                        max={30}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
+                    <NumberInput
+                      label="Columns"
+                      value={board.columns}
+                      onChange={(v) => patch({ columns: Number(v) || 0 })}
+                      min={2}
+                      max={30}
+                      styles={INPUT_STYLES}
+                    />
+                    <NumberInput
+                      label="Rows"
+                      value={board.rows}
+                      onChange={(v) => patch({ rows: Number(v) || 0 })}
+                      min={2}
+                      max={30}
+                      styles={INPUT_STYLES}
+                    />
                   </Group>
 
-                  <Group grow mb={6}>
-                    <Box>
-                      <FieldLabel>Square size (mm, measured)</FieldLabel>
-                      <NumberInput
-                        value={board.square_size_mm}
-                        onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
-                        min={1}
-                        decimalScale={2}
-                        step={0.5}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
-                    <Box>
-                      <FieldLabel>Marker ratio</FieldLabel>
-                      <NumberInput
-                        value={board.marker_ratio}
-                        onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
-                        min={0.1}
-                        max={0.95}
-                        decimalScale={2}
-                        step={0.05}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
+                  <Group grow mb="md" align="flex-start">
+                    <NumberInput
+                      label="Square size (mm)"
+                      // The measurement is the metric scale of the extrinsic solve
+                      // (translations ship in square units, scaled at export) — it
+                      // does not enter the intrinsic solve, which runs on unit
+                      // squares. Hence "extrinsic accuracy", not "accuracy".
+                      description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                      value={board.square_size_mm}
+                      onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                      min={1}
+                      decimalScale={2}
+                      step={0.5}
+                      styles={INPUT_STYLES}
+                    />
+                    <NumberInput
+                      label="Marker ratio"
+                      description="ArUco marker inside each white cell, as a fraction of the square (≈ 0.75)."
+                      value={board.marker_ratio}
+                      onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
+                      min={0.1}
+                      max={0.95}
+                      decimalScale={2}
+                      step={0.05}
+                      styles={INPUT_STYLES}
+                    />
                   </Group>
-                  <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
-                    <Text span fw={600} inherit>
-                      Square
-                    </Text>{' '}
-                    = checkerboard cell — the metric scale you measure. The ArUco marker printed
-                    inside each white cell is that ratio of it (≈ 0.75).
-                  </Text>
                 </>
               ) : (
-                <>
-                  <Group grow mb={6}>
-                    <Box>
-                      <FieldLabel>Marker ID</FieldLabel>
-                      <NumberInput
-                        value={board.marker_id}
-                        onChange={(v) => patch({ marker_id: Number(v) || 0 })}
-                        min={0}
-                        max={dictionaryCapacity(board.dictionary) - 1}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
-                    <Box>
-                      <FieldLabel>Marker size (mm, measured)</FieldLabel>
-                      <NumberInput
-                        value={board.marker_size_mm}
-                        onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
-                        min={1}
-                        decimalScale={2}
-                        step={0.5}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
-                  </Group>
-                  {/* The solver holds the reconstructed marker to this length
-                      (ADR-0044), so it sets the world scale outright: a printing
-                      error lands 1:1 on every exported distance. Worth a line —
-                      "measured" in the label alone does not convey the stake. */}
-                  <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
-                    <Text span fw={600} inherit>
-                      Measure the printed marker
-                    </Text>{' '}
-                    — its black square edge, not the sheet or the quiet zone. Printers rarely land
-                    on the nominal size, and this length sets the scale of the whole calibration:
-                    1% off here is 1% off on every exported camera distance.
-                  </Text>
-                </>
+                <Group grow mb="md" align="flex-start">
+                  <NumberInput
+                    label="Marker ID"
+                    value={board.marker_id}
+                    onChange={(v) => patch({ marker_id: Number(v) || 0 })}
+                    min={0}
+                    max={dictionaryCapacity(board.dictionary) - 1}
+                    styles={INPUT_STYLES}
+                  />
+                  <NumberInput
+                    label="Marker size (mm)"
+                    description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
+                    value={board.marker_size_mm}
+                    onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                    min={1}
+                    decimalScale={2}
+                    step={0.5}
+                    styles={INPUT_STYLES}
+                  />
+                </Group>
               )}
 
               <Switch
