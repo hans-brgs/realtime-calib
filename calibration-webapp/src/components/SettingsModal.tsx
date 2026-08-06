@@ -1,19 +1,9 @@
-import {
-  ActionIcon,
-  Alert,
-  Box,
-  Button,
-  Group,
-  Modal,
-  NumberInput,
-  Popover,
-  Switch,
-  Text,
-} from '@mantine/core';
-import { IconAlertTriangle, IconInfoCircle } from '@tabler/icons-react';
+import { Alert, Box, Button, Group, Modal, NumberInput, Switch, Text } from '@mantine/core';
+import { IconAlertTriangle } from '@tabler/icons-react';
 import { useEffect, useState, type ReactNode } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
+import { InfoPopover } from '@/components/InfoPopover';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { errorMessage, fetchSettings, saveSettings } from '@/transport/httpClient';
 
@@ -24,43 +14,6 @@ import { errorMessage, fetchSettings, saveSettings } from '@/transport/httpClien
 interface SettingsModalProps {
   opened: boolean;
   onClose: () => void;
-}
-
-// An info affordance next to a field label: tapping the icon opens a Popover with the
-// help text, replacing the always-on `description` line. Popover, not Tooltip — it opens
-// on tap and dismisses on outside-tap, so it works on the touch devices the app targets
-// (a hover Tooltip is dead weight on tablet/phone). The icon lives OUTSIDE the field's
-// <label> on purpose: nested inside, a tap would toggle the Switch / pop the numeric
-// keyboard on a NumberInput via the label's implicit control activation.
-function InfoPopover({ children }: { children: ReactNode }) {
-  return (
-    <Popover
-      width={260}
-      position="top-end"
-      shadow="md"
-      // Explicit opaque surface: the theme's default dropdown background is
-      // see-through here, so the help text bled into the modal content behind it.
-      // A raised surface (rc-input) also reads as "floating above" the modal.
-      styles={{ dropdown: { background: 'var(--rc-input)', border: '1px solid var(--rc-border)' } }}
-    >
-      <Popover.Target>
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size="sm"
-          radius="xl"
-          aria-label="More information"
-        >
-          <IconInfoCircle size={16} />
-        </ActionIcon>
-      </Popover.Target>
-      <Popover.Dropdown>
-        <Text fz="0.72rem" c="dark.1" style={{ lineHeight: 1.5 }}>
-          {children}
-        </Text>
-      </Popover.Dropdown>
-    </Popover>
-  );
 }
 
 // Label row + info icon above a control rendered WITHOUT its built-in label (it carries
