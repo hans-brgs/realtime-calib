@@ -22,9 +22,10 @@ import {
   IconInfoCircle,
   IconRefresh,
 } from '@tabler/icons-react';
-import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
+import { type CSSProperties, type ReactNode, useEffect, useId, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { FieldHint, HintedLabel } from '@/components/FieldHint';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -70,9 +71,11 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-// Mantine's own label/description slots rather than hand-rolled <Text> siblings:
-// they carry the aria-labelledby / aria-describedby wiring an input needs, so a
-// screen reader announces the help text with the field instead of as loose prose.
+// Mantine's own label slot rather than hand-rolled <Text> siblings: it carries the
+// label/for wiring an input needs, so a screen reader announces the field by its name.
+// Shared with `HintedLabel`, which reuses `label` from here so a hinted label and a
+// plain one render identically. No `description` slot: the one help text on this screen
+// moved behind a hint icon.
 const SELECT_STYLES = {
   input: {
     background: 'var(--rc-input)',
@@ -84,12 +87,6 @@ const SELECT_STYLES = {
     fontWeight: 400,
     color: 'var(--mantine-color-dark-2)',
     marginBottom: 6,
-  },
-  description: {
-    fontSize: '0.625rem',
-    color: 'var(--mantine-color-dark-3)',
-    lineHeight: 1.5,
-    marginTop: 6,
   },
 } as const;
 
@@ -479,6 +476,10 @@ function LiveCameraSetup() {
   const defaults = useAppSelector(selectDefaults);
   const compact = useCompactLayout();
 
+  // The hinted fields render their own <label>, so they need a stable id to point it at.
+  const fpsId = useId();
+  const resizeId = useId();
+
   const [prefix, setPrefix] = useState('cam');
   const [resolution, setResolution] = useState<string | null>(null);
   const [resizeFactor, setResizeFactor] = useState<number>(1);
@@ -834,10 +835,20 @@ function LiveCameraSetup() {
                 />
 
                 <Box>
-                  <Group justify="space-between" align="baseline" mb={6}>
-                    <Text fz="0.69rem" c="dark.2">
-                      Resize factor · s
-                    </Text>
+                  <Group justify="space-between" align="center" mb={6}>
+                    <Group gap={6} wrap="nowrap" align="center">
+                      <Text component="label" htmlFor={resizeId} fz="0.69rem" c="dark.2">
+                        Resize factor · s
+                      </Text>
+                      {/* Where the export-scaling rule lives now — it used to sit in the
+                          always-on note below, three lines away from the control it
+                          describes. */}
+                      <FieldHint about="Resize factor">
+                        A software downscale of the captured frame: it keeps the full field of view
+                        and just lowers the pixel count. Calibration runs on the native pixels — the
+                        factor applies on export (K_out = s·K).
+                      </FieldHint>
+                    </Group>
                     {output && (
                       <Text fz="0.69rem" c="var(--rc-accent)" className="rc-tnum">
                         output → {output.width}×{output.height}
@@ -845,6 +856,7 @@ function LiveCameraSetup() {
                     )}
                   </Group>
                   <Select
+                    id={resizeId}
                     data={(defaults?.resize_factors ?? [1]).map((s) => ({
                       value: String(s),
                       label: `s = ${s.toFixed(2)}`,
@@ -858,22 +870,26 @@ function LiveCameraSetup() {
                   />
                 </Box>
 
-                <Select
-                  label="Capture FPS"
-                  description={
-                    fpsOptions.length > 0
-                      ? "Rates at or below the camera's native max for this resolution. Lower rates are paced by the service (fewer frames, less USB load)."
-                      : undefined
-                  }
-                  data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}
-                  value={fps !== null ? String(fps) : null}
-                  onChange={(value) => value && setFps(Number(value))}
-                  allowDeselect={false}
-                  disabled={detecting || fpsOptions.length === 0}
-                  placeholder={detecting ? 'Detecting…' : 'Select fps'}
-                  comboboxProps={{ withinPortal: true }}
-                  styles={SELECT_STYLES}
-                />
+                <Box>
+                  <HintedLabel
+                    htmlFor={fpsId}
+                    labelStyle={SELECT_STYLES.label}
+                    hint="Rates at or below the camera's native max for this resolution. Lower rates are paced by the service — fewer frames, less USB load."
+                  >
+                    Capture FPS
+                  </HintedLabel>
+                  <Select
+                    id={fpsId}
+                    data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}
+                    value={fps !== null ? String(fps) : null}
+                    onChange={(value) => value && setFps(Number(value))}
+                    allowDeselect={false}
+                    disabled={detecting || fpsOptions.length === 0}
+                    placeholder={detecting ? 'Detecting…' : 'Select fps'}
+                    comboboxProps={{ withinPortal: true }}
+                    styles={SELECT_STYLES}
+                  />
+                </Box>
 
                 <Button
                   color="violet"
@@ -917,10 +933,12 @@ function LiveCameraSetup() {
                 color="var(--rc-accent)"
                 style={{ flex: 'none', marginTop: 1 }}
               />
+              {/* Kept always-on: it warns about losing work, so it must be read before
+                  Apply is pressed, not tapped for. The export-scaling half of this note
+                  moved onto the resize factor field itself. */}
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
-                Calibrated in native; the factor applies on export (K_out = s·K). Applying a
-                changed configuration rebuilds the cameras — completed calibrations are discarded
-                (you will be asked to confirm).
+                Applying a changed configuration rebuilds the cameras — completed calibrations are
+                discarded (you will be asked to confirm).
               </Text>
             </Group>
           </Paper>

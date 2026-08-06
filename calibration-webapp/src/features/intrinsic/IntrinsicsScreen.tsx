@@ -19,9 +19,10 @@ import {
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { Track } from 'livekit-client';
-import { type CSSProperties, lazy, Suspense, useEffect, useState } from 'react';
+import { type CSSProperties, lazy, Suspense, useEffect, useId, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { HintedLabel } from '@/components/FieldHint';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { RecordingBadge } from '@/components/RecordingBadge';
@@ -336,6 +337,8 @@ function PreparePanel({
   onCap,
 }: PreparePanelProps) {
   const compact = useCompactLayout();
+  // The hinted field renders its own <label>, so it needs a stable id to point it at.
+  const capId = useId();
   // "1 frame every N" over the trim span: what the compute will actually detect.
   const span = Math.max(0, trimEnd + 1 - trimStart);
   const analyzed = span > 0 ? Math.ceil(span / Math.max(1, stride)) : 0;
@@ -395,17 +398,21 @@ function PreparePanel({
         max={strideBounds[1]}
         mb="md"
       />
+      {/* The trade-off used to hang under both fields as loose prose, reading as if it
+          applied to the stride too. It belongs to this field, on demand. */}
+      <HintedLabel
+        htmlFor={capId}
+        hint="Fewer keyframes → faster compute, potentially lower coverage. The selection keeps the most diverse views, not the first ones."
+      >
+        Keyframe cap (max kept)
+      </HintedLabel>
       <NumberInput
-        label="Keyframe cap (max kept)"
+        id={capId}
         value={keyframeCap}
         onChange={(v) => onCap(Math.max(capBounds[0], Number(v) || capBounds[0]))}
         min={capBounds[0]}
         max={capBounds[1]}
-        mb="md"
       />
-      <Text fz="0.66rem" c="dark.3">
-        Fewer keyframes → faster compute, potentially lower coverage.
-      </Text>
     </>
   );
 }

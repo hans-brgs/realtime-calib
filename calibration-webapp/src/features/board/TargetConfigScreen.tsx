@@ -11,9 +11,10 @@ import {
   Text,
 } from '@mantine/core';
 import { IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
-import { type ReactNode, useEffect, useRef, useState } from 'react';
+import { type ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { HintedLabel } from '@/components/FieldHint';
 import { StickyActionBar } from '@/components/layout/StickyActionBar';
 import {
   captureGridColumns,
@@ -54,9 +55,11 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-// Mantine's own label/description slots rather than hand-rolled <Text> siblings:
-// they carry the aria-labelledby / aria-describedby wiring an input needs, and
-// keep the help text tied to its field when a Group reflows on narrow screens.
+// Mantine's own label/error slots rather than hand-rolled <Text> siblings: they carry
+// the aria wiring an input needs, and keep the text tied to its field when a Group
+// reflows on narrow screens. No `description` slot left — the two texts worth keeping
+// moved behind a `HintedLabel` icon, which reuses `label` from here so a hinted label
+// and a plain one render identically.
 const INPUT_STYLES = {
   input: {
     background: 'var(--rc-input)',
@@ -68,12 +71,6 @@ const INPUT_STYLES = {
     fontWeight: 400,
     color: 'var(--mantine-color-dark-2)',
     marginBottom: 6,
-  },
-  description: {
-    fontSize: '0.68rem',
-    color: 'var(--mantine-color-dark-3)',
-    lineHeight: 1.5,
-    marginTop: 6,
   },
 } as const;
 
@@ -109,6 +106,10 @@ function TargetConfigForm({
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
   const compact = useCompactLayout();
+
+  // The two hinted fields render their own <label>, so they need a stable id to point it at.
+  const dictionaryId = useId();
+  const markerRatioId = useId();
 
   const [dictionaries, setDictionaries] = useState<string[]>([intrinsicSeed.dictionary]);
   const [active, setActive] = useState<BoardTarget>(
@@ -353,11 +354,13 @@ function TargetConfigForm({
                 <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
               </Alert>
               {/* The geometry is inherited, the measurement is not: it is asked
-                  for here and stored here, on the materialized extrinsic board. */}
+                  for here and stored here, on the materialized extrinsic board.
+                  No description: the caliper instruction and what the measurement
+                  buys are the subject of the Alert in the left column, and the
+                  asterisk plus the empty-field error carry the requirement. */}
               <NumberInput
                 label="Square size (mm)"
                 withAsterisk
-                description="Measure the printed square to the mm — it sets the extrinsic accuracy."
                 error={measurementError}
                 placeholder="measure the print"
                 value={measurement}
@@ -389,17 +392,24 @@ function TargetConfigForm({
                 mb="md"
               />
 
-              <Select
-                label="Dictionary"
-                description="NxN = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but needs more pixels."
-                value={board.dictionary}
-                onChange={(v) => v && patch({ dictionary: v })}
-                data={dictionaries}
-                allowDeselect={false}
-                comboboxProps={{ withinPortal: true }}
-                styles={INPUT_STYLES}
-                mb="md"
-              />
+              <Box mb="md">
+                <HintedLabel
+                  htmlFor={dictionaryId}
+                  labelStyle={INPUT_STYLES.label}
+                  hint="Pick the smallest dictionary that supplies the markers your board needs — fewer patterns means more distance between them, so fewer false detections. N×N is the marker's bit grid: 4×4 reads from farther away or at lower resolution, 7×7 is more robust but needs more pixels."
+                >
+                  Dictionary
+                </HintedLabel>
+                <Select
+                  id={dictionaryId}
+                  value={board.dictionary}
+                  onChange={(v) => v && patch({ dictionary: v })}
+                  data={dictionaries}
+                  allowDeselect={false}
+                  comboboxProps={{ withinPortal: true }}
+                  styles={INPUT_STYLES}
+                />
+              </Box>
 
               {board.board_type === 'charuco' ? (
                 <>
@@ -430,7 +440,6 @@ function TargetConfigForm({
                       <NumberInput
                         label="Square size (mm)"
                         withAsterisk
-                        description="Measure the printed square to the mm — it sets the extrinsic accuracy."
                         error={measurementError}
                         placeholder="measure the print"
                         value={measurement}
@@ -441,17 +450,25 @@ function TargetConfigForm({
                         styles={INPUT_STYLES}
                       />
                     )}
-                    <NumberInput
-                      label="Marker ratio"
-                      description="ArUco marker inside each white cell, as a fraction of the square (≈ 0.75)."
-                      value={board.marker_ratio}
-                      onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
-                      min={0.1}
-                      max={0.95}
-                      decimalScale={2}
-                      step={0.05}
-                      styles={INPUT_STYLES}
-                    />
+                    <Box>
+                      <HintedLabel
+                        htmlFor={markerRatioId}
+                        labelStyle={INPUT_STYLES.label}
+                        hint="The ArUco marker inside each white cell, as a fraction of the square. 0.6–0.75 is the usual range (default 0.75) — it changes the printed board, not the calibration."
+                      >
+                        Marker ratio
+                      </HintedLabel>
+                      <NumberInput
+                        id={markerRatioId}
+                        value={board.marker_ratio}
+                        onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
+                        min={0.1}
+                        max={0.95}
+                        decimalScale={2}
+                        step={0.05}
+                        styles={INPUT_STYLES}
+                      />
+                    </Box>
                   </Group>
                 </>
               ) : (
@@ -469,7 +486,6 @@ function TargetConfigForm({
                     // A single ArUco target is extrinsic-only, so its measurement
                     // always carries the scale — no conditional here.
                     withAsterisk
-                    description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
                     error={measurementError}
                     placeholder="measure the print"
                     value={measurement}
