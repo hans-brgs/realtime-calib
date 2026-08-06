@@ -112,7 +112,12 @@ describe('captureOptions', () => {
     });
     expect(request.prefix).toBe('cam');
     expect(request.cameras).toHaveLength(2);
-    expect(request.cameras[0]).toMatchObject({ index: 0, width: 1920, resize_factor: 0.5, fps: 30 });
+    expect(request.cameras[0]).toMatchObject({
+      index: 0,
+      width: 1920,
+      resize_factor: 0.5,
+      fps: 30,
+    });
     expect(request.cameras[1].index).toBe(1);
   });
 });

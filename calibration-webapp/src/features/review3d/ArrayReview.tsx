@@ -405,7 +405,9 @@ export function ArrayReview({
               variant="light"
               leftSection={<IconCrosshair size={13} />}
               disabled={busy || quad === null}
-              onClick={() => void mutate(() => orientExtrinsic({ op: 'set_frame', group: current }))}
+              onClick={() =>
+                void mutate(() => orientExtrinsic({ op: 'set_frame', group: current }))
+              }
             >
               Set frame on board
             </Button>

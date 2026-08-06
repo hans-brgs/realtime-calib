@@ -38,13 +38,21 @@ export function PoseScene({ quads }: { quads: number[][][] }) {
   const boards = quads.map((q) => q.map((p) => [p[0], p[1], p[2]] as Vec3));
   const meanDepth =
     boards.length > 0
-      ? boards.reduce((sum, b) => sum + b.reduce((a, p) => a + p[2], 0) / b.length, 0) / boards.length
+      ? boards.reduce((sum, b) => sum + b.reduce((a, p) => a + p[2], 0) / b.length, 0) /
+        boards.length
       : 10;
   const frustum = Math.max(1, Math.abs(meanDepth) * 0.15);
 
   return (
     <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
-      <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb="sm" style={{ letterSpacing: '0.07em' }}>
+      <Text
+        fz="0.66rem"
+        fw={600}
+        c="dark.3"
+        tt="uppercase"
+        mb="sm"
+        style={{ letterSpacing: '0.07em' }}
+      >
         3D pose of calibrated boards
       </Text>
       <Canvas

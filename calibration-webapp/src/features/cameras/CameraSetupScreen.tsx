@@ -918,9 +918,9 @@ function LiveCameraSetup() {
                 style={{ flex: 'none', marginTop: 1 }}
               />
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
-                Calibrated in native; the factor applies on export (K_out = s·K). Applying a
-                changed configuration rebuilds the cameras — completed calibrations are discarded
-                (you will be asked to confirm).
+                Calibrated in native; the factor applies on export (K_out = s·K). Applying a changed
+                configuration rebuilds the cameras — completed calibrations are discarded (you will
+                be asked to confirm).
               </Text>
             </Group>
           </Paper>

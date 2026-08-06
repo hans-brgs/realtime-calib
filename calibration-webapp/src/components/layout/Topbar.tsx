@@ -69,9 +69,7 @@ export function Topbar({ burgerOpened, onBurger, onSettings }: TopbarProps) {
           </Group>
         )}
 
-        {compact && (
-          <Burger opened={burgerOpened} onClick={onBurger} size="sm" aria-label="Menu" />
-        )}
+        {compact && <Burger opened={burgerOpened} onClick={onBurger} size="sm" aria-label="Menu" />}
       </Group>
     </Box>
   );

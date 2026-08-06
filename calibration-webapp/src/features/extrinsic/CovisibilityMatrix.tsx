@@ -15,9 +15,8 @@ function cellColor(count: number): string {
 
 function pairCount(data: Covisibility, a: string, b: string): number {
   return (
-    data.pairs.find(
-      (pair) => (pair.a === a && pair.b === b) || (pair.a === b && pair.b === a),
-    )?.count ?? 0
+    data.pairs.find((pair) => (pair.a === a && pair.b === b) || (pair.a === b && pair.b === a))
+      ?.count ?? 0
   );
 }
 
@@ -53,9 +52,7 @@ export function CovisibilityMatrix({ data }: { data: Covisibility | null }) {
             </Text>
             {cameras.map((col) => {
               const diagonal = row === col;
-              const count = diagonal
-                ? (data.board_frames[row] ?? 0)
-                : pairCount(data, row, col);
+              const count = diagonal ? (data.board_frames[row] ?? 0) : pairCount(data, row, col);
               return (
                 // A title attribute never fires on touch, and the tablet is a
                 // first-class control surface (ADR-0010) — so the pair a cell

@@ -99,7 +99,9 @@ export function PrepareScrubber({
         color="violet"
         size="lg"
         aria-label={playing ? 'Pause' : 'Play'}
-        style={compact ? { color: '#fff', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))' } : undefined}
+        style={
+          compact ? { color: '#fff', filter: 'drop-shadow(0 1px 2px rgba(0,0,0,0.8))' } : undefined
+        }
         onClick={() => setPlaying((p) => !p)}
       >
         {playing ? <IconPlayerPauseFilled size={18} /> : <IconPlayerPlayFilled size={18} />}
@@ -165,7 +167,9 @@ export function PrepareScrubber({
       >
         <video
           ref={video}
-          src={version ? `${intrinsicPreviewUrl(camera)}?v=${version}` : intrinsicPreviewUrl(camera)}
+          src={
+            version ? `${intrinsicPreviewUrl(camera)}?v=${version}` : intrinsicPreviewUrl(camera)
+          }
           muted
           playsInline
           preload="auto"

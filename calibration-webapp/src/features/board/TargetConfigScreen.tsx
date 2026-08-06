@@ -49,7 +49,14 @@ function dictionaryCapacity(name: string): number {
 
 function SectionLabel({ children }: { children: ReactNode }) {
   return (
-    <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" mb={11} style={{ letterSpacing: '0.07em' }}>
+    <Text
+      fz="0.66rem"
+      fw={600}
+      c="dark.3"
+      tt="uppercase"
+      mb={11}
+      style={{ letterSpacing: '0.07em' }}
+    >
       {children}
     </Text>
   );
@@ -503,13 +510,7 @@ function TargetConfigForm({
           <StickyActionBar>
             {/* Blocked client-side rather than letting the backend's gt=0
                 rejection come back as a raw 422. */}
-            <Button
-              fullWidth
-              mt="lg"
-              onClick={save}
-              loading={saving}
-              disabled={missingMeasurement}
-            >
+            <Button fullWidth mt="lg" onClick={save} loading={saving} disabled={missingMeasurement}>
               Save {active} board
             </Button>
           </StickyActionBar>
