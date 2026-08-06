@@ -2,13 +2,16 @@ import { Bounds, Html, Line, TrackballControls } from '@react-three/drei';
 import { Canvas } from '@react-three/fiber';
 import { ActionIcon, Box, Button, Group, Slider, Text } from '@mantine/core';
 import {
+  IconAdjustments,
   IconCrosshair,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
   IconWand,
+  IconX,
 } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
+import { useCompactLayout } from '@/components/layout/useCompactLayout';
 import {
   type ExtrinsicResultPayload,
   minimizeExtrinsic,
@@ -133,12 +136,18 @@ function Frustum({
         <Line key={i} points={[apex, c]} color={color} lineWidth={anchor ? 2 : 1.2} />
       ))}
       <Line points={[...corners, corners[0]]} color={color} lineWidth={anchor ? 2.4 : 1.6} />
-      {/* distanceFactor compensates the halved frustum size: labels stay legible. */}
-      <Html position={apex} center distanceFactor={size * 20} style={{ pointerEvents: 'none' }}>
+      {/* Fixed screen-size tag. No distanceFactor: it scales the label like a 3D
+          object, so the nearest camera wore a giant name plate covering its own
+          frustum — worst on the small mobile canvas. And no `center`: anchored on
+          the apex it hid the very point it labels; the screen-space offset parks it
+          up-right of the camera, whatever the scene orientation. zIndexRange [1,0]:
+          above the canvas, below the World-frame panel (z 2) and every app overlay. */}
+      <Html position={apex} zIndexRange={[1, 0]} style={{ pointerEvents: 'none' }}>
         <div
           style={{
-            padding: '2px 7px',
-            borderRadius: 10,
+            transform: 'translate(9px, calc(-100% - 6px))',
+            padding: '1px 6px',
+            borderRadius: 8,
             background: 'rgba(9,9,11,0.78)',
             border: `1px solid ${color}`,
             color: '#e4e4e7',
@@ -157,7 +166,7 @@ function Frustum({
 // Tiny billboard letter at an axis tip — the RGB code alone was not readable.
 function AxisLabel({ position, text, color }: { position: Vec3; text: string; color: string }) {
   return (
-    <Html position={position} center style={{ pointerEvents: 'none' }}>
+    <Html position={position} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none' }}>
       <span style={{ color, fontSize: 11, fontWeight: 700, textShadow: '0 0 4px #000' }}>
         {text}
       </span>
@@ -241,6 +250,14 @@ export function ArrayReview({
   const [busy, setBusy] = useState(false);
   const [mutateError, setMutateError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  // The World-frame controls are a 190px overlay — a third of a phone's 3D view. On
+  // compact they collapse to a corner button and open on demand (ADR-0041); on desktop
+  // they stay pinned open, where the space is free.
+  const compact = useCompactLayout();
+  const [controlsOpen, setControlsOpen] = useState(false);
+  const showControls = !compact || controlsOpen;
+  // Roomier hit targets once the panel is a deliberate touch surface (ADR-0041).
+  const controlSize = compact ? 'sm' : 'compact-xs';
   const maxGroup = Math.max(0, result.group_count - 1);
 
   // Mutating review actions (spec 3d-extrinsic-review): reorient the stored world
@@ -309,7 +326,18 @@ export function ArrayReview({
         flexDirection: 'column',
       }}
     >
-      <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      {/* overflow hidden: a label whose 3D anchor projects outside the view is an
+          absolutely-positioned DOM node, not a canvas pixel — unclipped it paints
+          over whatever surrounds the scene. Radius matches the canvas corner. */}
+      <Box
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
+          borderRadius: 'var(--mantine-radius-md)',
+        }}
+      >
         <Canvas
           camera={{ position: initialCamera, up: VIEW_UP, fov: 50 }}
           style={{
@@ -338,84 +366,118 @@ export function ArrayReview({
               poles), which fights a reoriented world — free 360° tumbling. */}
           <TrackballControls makeDefault noPan rotateSpeed={3} />
         </Canvas>
-        <Box
-          style={{
-            position: 'absolute',
-            top: 10,
-            left: 10,
-            zIndex: 2,
-            padding: 8,
-            borderRadius: 8,
-            background: 'rgba(9,9,11,0.72)',
-            backdropFilter: 'blur(6px)',
-            border: '1px solid var(--rc-border)',
-            width: 190,
-          }}
-        >
-          <Text fz="0.62rem" c="dark.3" mb={6}>
-            World frame
-          </Text>
-          {/* Single framing gesture (ADR-0026): origin on the board + its normal on
-              the up axis, so a floor-laid board lands level in every export. */}
-          <Button
-            size="compact-xs"
-            fullWidth
-            variant="light"
-            leftSection={<IconCrosshair size={13} />}
-            disabled={busy || quad === null}
-            onClick={() => void mutate(() => orientExtrinsic({ op: 'set_frame', group: current }))}
+        {showControls ? (
+          <Box
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              zIndex: 2,
+              padding: compact ? 10 : 8,
+              borderRadius: 8,
+              background: 'rgba(9,9,11,0.72)',
+              backdropFilter: 'blur(6px)',
+              border: '1px solid var(--rc-border)',
+              width: compact ? 230 : 190,
+            }}
           >
-            Set frame on board
-          </Button>
-          <Group gap={4} mt={6} grow>
-            {(['x', 'y', 'z'] as const).map((axis) => (
-              <Box key={axis} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  disabled={busy}
-                  onClick={() =>
-                    void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: 90 }))
-                  }
+            <Group justify="space-between" wrap="nowrap" mb={6}>
+              <Text fz="0.62rem" c="dark.3">
+                World frame
+              </Text>
+              {compact && (
+                <ActionIcon
+                  size="sm"
+                  variant="subtle"
+                  color="gray"
+                  aria-label="Hide world-frame controls"
+                  onClick={() => setControlsOpen(false)}
                 >
-                  +{axis}
-                </Button>
-                <Button
-                  size="compact-xs"
-                  variant="default"
-                  disabled={busy}
-                  onClick={() =>
-                    void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: -90 }))
-                  }
-                >
-                  −{axis}
-                </Button>
-              </Box>
-            ))}
-          </Group>
-          <Button
-            size="compact-xs"
-            fullWidth
-            mt={6}
-            variant="light"
-            color="violet"
-            loading={busy}
-            leftSection={<IconWand size={13} />}
-            onClick={() => void mutate(() => minimizeExtrinsic(), true)}
+                  <IconX size={15} />
+                </ActionIcon>
+              )}
+            </Group>
+            {/* Single framing gesture (ADR-0026): origin on the board + its normal on
+                the up axis, so a floor-laid board lands level in every export. */}
+            <Button
+              size={controlSize}
+              fullWidth
+              variant="light"
+              leftSection={<IconCrosshair size={13} />}
+              disabled={busy || quad === null}
+              onClick={() => void mutate(() => orientExtrinsic({ op: 'set_frame', group: current }))}
+            >
+              Set frame on board
+            </Button>
+            <Group gap={4} mt={6} grow>
+              {(['x', 'y', 'z'] as const).map((axis) => (
+                <Box key={axis} style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  <Button
+                    size={controlSize}
+                    variant="default"
+                    disabled={busy}
+                    onClick={() =>
+                      void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: 90 }))
+                    }
+                  >
+                    +{axis}
+                  </Button>
+                  <Button
+                    size={controlSize}
+                    variant="default"
+                    disabled={busy}
+                    onClick={() =>
+                      void mutate(() => orientExtrinsic({ op: 'rotate', axis, degrees: -90 }))
+                    }
+                  >
+                    −{axis}
+                  </Button>
+                </Box>
+              ))}
+            </Group>
+            <Button
+              size={controlSize}
+              fullWidth
+              mt={6}
+              variant="light"
+              color="violet"
+              loading={busy}
+              leftSection={<IconWand size={13} />}
+              onClick={() => void mutate(() => minimizeExtrinsic(), true)}
+            >
+              Minimize (re-BA)
+            </Button>
+            {notice && (
+              <Text fz="0.6rem" c="teal.4" mt={4}>
+                {notice}
+              </Text>
+            )}
+            {mutateError && (
+              <Text fz="0.6rem" c="var(--rc-error)" mt={4}>
+                {mutateError}
+              </Text>
+            )}
+          </Box>
+        ) : (
+          // Compact + collapsed: a corner button that gives the 3D view back its space.
+          <ActionIcon
+            size="lg"
+            variant="default"
+            aria-label="World-frame controls"
+            onClick={() => setControlsOpen(true)}
+            style={{
+              position: 'absolute',
+              top: 10,
+              left: 10,
+              zIndex: 2,
+              background: 'rgba(9,9,11,0.72)',
+              backdropFilter: 'blur(6px)',
+              border: '1px solid var(--rc-border)',
+            }}
           >
-            Minimize (re-BA)
-          </Button>
-          {notice && (
-            <Text fz="0.6rem" c="teal.4" mt={4}>
-              {notice}
-            </Text>
-          )}
-          {mutateError && (
-            <Text fz="0.6rem" c="var(--rc-error)" mt={4}>
-              {mutateError}
-            </Text>
-          )}
-        </Box>
+            <IconAdjustments size={18} />
+          </ActionIcon>
+        )}
         {/* No convention selector (ADR-0026): the review shows the fixed physical
             frame; the convention is an export codec, chosen at the Export step. */}
       </Box>
@@ -462,15 +524,16 @@ export function ArrayReview({
               : undefined
           }
         />
+        {/* Worst-case width (tabular digits): no "group" prefix, no flat 110px — but
+            fully natural width made the slider breathe as the counter gains digits. */}
         <Text
           className="rc-tnum"
           fz="0.72rem"
           c="dark.2"
-          w={110}
           ta="right"
-          style={{ flex: 'none' }}
+          style={{ flex: 'none', minWidth: `${`${maxGroup} / ${maxGroup}`.length}ch` }}
         >
-          group {current} / {maxGroup}
+          {current} / {maxGroup}
         </Text>
       </Group>
     </Box>

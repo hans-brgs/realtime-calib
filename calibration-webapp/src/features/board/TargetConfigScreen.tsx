@@ -13,6 +13,12 @@ import { IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { StickyActionBar } from '@/components/layout/StickyActionBar';
+import {
+  captureGridColumns,
+  screenHeight,
+  useCompactLayout,
+} from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
@@ -90,6 +96,7 @@ function TargetConfigForm({
 }) {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
+  const compact = useCompactLayout();
 
   const [dictionaries, setDictionaries] = useState<string[]>([intrinsicSeed.dictionary]);
   const [active, setActive] = useState<BoardTarget>(
@@ -164,19 +171,22 @@ function TargetConfigForm({
   };
 
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Target Config"
         subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
       />
 
       <Box
-        className="rc-camsetup-grid"
         style={{
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: 'minmax(0, 1fr) 380px',
+          gridTemplateColumns: captureGridColumns(compact),
           gap: 22,
         }}
       >
@@ -248,7 +258,16 @@ function TargetConfigForm({
         </Box>
 
         {/* Right — settings */}
-        <Box style={{ minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column' }}>
+        <Box
+          style={{
+            minHeight: 0,
+            // Flow: the page scrolls, so the sticky Save bar sticks to the viewport;
+            // an internal scroll here would trap it in a non-scrolling box (ADR-0041).
+            overflowY: compact ? 'visible' : 'auto',
+            display: 'flex',
+            flexDirection: 'column',
+          }}
+        >
           <SegmentedControl
             fullWidth
             color="violet"
@@ -416,9 +435,11 @@ function TargetConfigForm({
 
           {/* Always present — the extrinsic choice (a board, or inherit) must be
               confirmed to complete Target Config, so it can't be skipped. */}
-          <Button fullWidth mt="lg" onClick={save} loading={saving}>
-            Save {active} board
-          </Button>
+          <StickyActionBar>
+            <Button fullWidth mt="lg" onClick={save} loading={saving}>
+              Save {active} board
+            </Button>
+          </StickyActionBar>
         </Box>
       </Box>
     </Box>

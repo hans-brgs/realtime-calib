@@ -21,6 +21,7 @@ import {
 import { lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
@@ -36,6 +37,7 @@ import {
   validateExtrinsicThunk,
 } from '@/features/session/sessionSlice';
 import { covisibilityCleared, selectCovisibility } from '@/features/telemetry/telemetrySlice';
+import { DESTRUCTIVE_BUTTON_VARS } from '@/theme';
 import {
   errorMessage,
   type ExtrinsicGroup,
@@ -122,6 +124,7 @@ function GroupScrubber({
   onIndex: (i: number) => void;
 }) {
   const [playing, setPlaying] = useState(false);
+  const compact = useCompactLayout();
   const max = Math.max(0, groups.length - 1);
   const current = groups[Math.min(index, max)];
 
@@ -202,39 +205,68 @@ function GroupScrubber({
           );
         })}
       </Box>
-      <Group mt="sm" gap="sm" wrap="nowrap">
-        <ActionIcon
-          variant="light"
-          color="violet"
-          size="lg"
-          aria-label={playing ? 'Pause' : 'Play'}
-          onClick={() => setPlaying((p) => !p)}
-        >
-          {playing ? <IconPlayerPauseFilled size={16} /> : <IconPlayerPlayFilled size={16} />}
-        </ActionIcon>
-        <Slider
-          flex={1}
-          min={0}
-          max={max}
-          value={Math.min(index, max)}
-          onChange={(value) => {
-            setPlaying(false);
-            onIndex(value);
-          }}
-          label={null}
-          color="violet"
-        />
-        <Text
-          className="rc-tnum"
-          fz="0.72rem"
-          c="dark.2"
-          w={150}
-          ta="right"
-          style={{ flex: 'none' }}
-        >
-          group {Math.min(index, max)} / {max} · {current.spread_ms.toFixed(1)} ms
-        </Text>
-      </Group>
+      {(() => {
+        const play = (
+          <ActionIcon
+            variant="light"
+            color="violet"
+            size="lg"
+            aria-label={playing ? 'Pause' : 'Play'}
+            onClick={() => setPlaying((p) => !p)}
+          >
+            {playing ? <IconPlayerPauseFilled size={16} /> : <IconPlayerPlayFilled size={16} />}
+          </ActionIcon>
+        );
+        const slider = (
+          <Slider
+            flex={1}
+            min={0}
+            max={max}
+            value={Math.min(index, max)}
+            onChange={(value) => {
+              setPlaying(false);
+              onIndex(value);
+            }}
+            label={null}
+            color="violet"
+          />
+        );
+        // Width reserved for the WORST case (digits are tabular, so ch units line up):
+        // natural width made the slider breathe with every digit-count change during
+        // playback, while the old flat 150px squeezed it on phones for nothing.
+        const readout = (
+          <Text
+            className="rc-tnum"
+            fz="0.72rem"
+            c="dark.2"
+            ta="right"
+            style={{ flex: 'none', minWidth: `${`${max} / ${max} · 88.8 ms`.length}ch` }}
+          >
+            {Math.min(index, max)} / {max} · {current.spread_ms.toFixed(1)} ms
+          </Text>
+        );
+        // Compact: the readout is ~19ch — sharing one row left the slider a stub on a
+        // phone even with the reservation. Play stays beside the track (transport
+        // controls belong together); only the readout drops below, right-aligned.
+        // Desktop keeps the single roomy row.
+        return compact ? (
+          <Box mt="sm">
+            <Group gap="sm" wrap="nowrap">
+              {play}
+              {slider}
+            </Group>
+            <Group justify="flex-end" mt={4}>
+              {readout}
+            </Group>
+          </Box>
+        ) : (
+          <Group mt="sm" gap="sm" wrap="nowrap">
+            {play}
+            {slider}
+            {readout}
+          </Group>
+        );
+      })()}
     </Box>
   );
 }
@@ -474,6 +506,9 @@ function ExtrinsicInner() {
   return (
     <>
       <CaptureWizardLayout
+        // Review is the 3D array viewport (shapeless -> floored); capture and prepare
+        // lay several cameras out at once and stack.
+        compactHero={wizard.step === 'review' ? 'scene' : 'stack'}
         stepper={
           <PhaseStepper
             // Imported session: the capture phase does not exist (ADR-0035).
@@ -640,7 +675,8 @@ function ExtrinsicInner() {
                 <Button
                   fullWidth
                   variant="light"
-                  color="gray"
+                  color="red"
+                  style={DESTRUCTIVE_BUTTON_VARS}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >
@@ -746,8 +782,13 @@ function ExtrinsicInner() {
 // scrubber + knobs) → compute (stereo init + chaining + BA) → result (3D review).
 // The LiveKit room lives at the App level (RoomProvider) — this screen consumes it.
 export function ExtrinsicScreen() {
+  const compact = useCompactLayout();
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Extrinsics"
         subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."

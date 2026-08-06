@@ -67,7 +67,7 @@ graph LR
 
 | Service | Role | Stack |
 | --- | --- | --- |
-| `calibration-service` | Capture, board detection, overlay burn-in, LiveKit publishing, calibration solves (intrinsic / extrinsic / bundle adjustment), HTTP API, session state | Python 3.12, FastAPI + asyncio, OpenCV, SciPy, LiveKit SDK |
+| `calibration-service` | Capture, board detection, overlay burn-in, LiveKit publishing, calibration solves (intrinsic / extrinsic / bundle adjustment), HTTP API, session state | Python 3.14, FastAPI + asyncio, OpenCV, SciPy, LiveKit SDK |
 | `calibration-webapp` | Operator wizard + 3D review, served as static files by Caddy | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei |
 | `livekit-token-server` | Issues subscribe-only LiveKit JWTs to the web app | Python (Flask) |
 | `caddy` | Reverse proxy, TLS termination, static serving — the **only host-exposed entry point** | Caddy v2 |

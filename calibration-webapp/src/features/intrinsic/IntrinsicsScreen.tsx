@@ -21,6 +21,7 @@ import { Track } from 'livekit-client';
 import { lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
@@ -47,6 +48,7 @@ import {
   startIntrinsic,
   stopIntrinsic,
 } from '@/transport/httpClient';
+import { DESTRUCTIVE_BUTTON_VARS } from '@/theme';
 import type { CameraConfig } from '@/transport/types';
 
 type ResultsView = 'coverage' | 'poses';
@@ -151,11 +153,18 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
           {coverage?.grid_count ?? 0}
         </Text>
       </Group>
-      {!found && (
-        <Text fz="0.72rem" c="dark.3" mt="md">
-          No board detected — bring the printed board into view.
+      {/* Always mounted, with two lines reserved. Rendering this conditionally resized the
+          panel every time the board entered or left view (and reflowed the page in the
+          stacked layout). Swapping the copy alone would not fix it: the panel width is
+          fluid, and at its 280px floor the "not detected" line wraps to two while every
+          counterpart wording fits on one (measured) — so the space is held, not guessed. */}
+      <Box mt="md" style={{ minHeight: 'calc(0.72rem * 1.55 * 2)' }}>
+        <Text fz="0.72rem" c="dark.3">
+          {found
+            ? 'Board detected — sweep it across the whole frame.'
+            : 'No board detected — bring the printed board into view.'}
         </Text>
-      )}
+      </Box>
     </>
   );
 }
@@ -314,6 +323,7 @@ function PreparePanel({
   onStride,
   onCap,
 }: PreparePanelProps) {
+  const compact = useCompactLayout();
   // "1 frame every N" over the trim span: what the compute will actually detect.
   const span = Math.max(0, trimEnd + 1 - trimStart);
   const analyzed = span > 0 ? Math.ceil(span / Math.max(1, stride)) : 0;
@@ -338,11 +348,28 @@ function PreparePanel({
           {trimStart}–{trimEnd}
         </Text>
       </Group>
+      {/* `color="gray"` light-variant measured 1.03 contrast against --rc-panel — a dark
+          wash on a near-black panel, effectively invisible. On these surfaces no fill
+          buys much (the violet tint is 1.14); the EDGE is what makes a control read, so
+          the accent border carries it at 4.52. Both tokens are the design system's, and
+          the pair stays subordinate to the filled Compute below.
+          Compact sizing: sm (36px) — operator-tuned on device; md and lg both read as
+          oversized pills. A deliberate exception to the 44px touch floor. */}
       <Group gap="xs" mb="lg" grow>
-        <Button size="xs" variant="light" color="gray" onClick={() => onTrimStart(frame)}>
+        <Button
+          size={compact ? 'sm' : 'xs'}
+          variant="light"
+          style={{ border: '1px solid var(--rc-accent-deep)' }}
+          onClick={() => onTrimStart(frame)}
+        >
           Set in @ {frame}
         </Button>
-        <Button size="xs" variant="light" color="gray" onClick={() => onTrimEnd(frame)}>
+        <Button
+          size={compact ? 'sm' : 'xs'}
+          variant="light"
+          style={{ border: '1px solid var(--rc-accent-deep)' }}
+          onClick={() => onTrimEnd(frame)}
+        >
           Set out @ {frame}
         </Button>
       </Group>
@@ -549,6 +576,12 @@ function IntrinsicsInner() {
   return (
     <>
       <CaptureWizardLayout
+        // Review is 'scene' for BOTH toggle positions, not just the 3D poses: keying
+        // the box on the toggle made it jump ~170px <-> ~470px on every switch, and
+        // the heatmap carries its own chrome (title + legend) whose container-query
+        // sizing starved the map in the short frame box (~210px wide on a phone).
+        // One stable box; each view centers inside it.
+        compactHero={wizard.step === 'review' ? 'scene' : 'frame'}
         top={
           <SegmentedControl
             color="violet"
@@ -700,13 +733,19 @@ function IntrinsicsInner() {
                 Recompute (tune again)
               </Button>
               {/* No re-record on an imported session (ADR-0035): there is no live
-                  camera, and starting a recording would overwrite the imported video. */}
+                  camera, and starting a recording would overwrite the imported video.
+                  Red, not the accent: this discards the take AND its result (the
+                  confirm modal below spells that out), so it carries the same warning
+                  colour as that modal's "Discard & re-record". It also pulls the button
+                  away from the violet Recompute directly above it — a different hue
+                  rather than the same tint with a different border. */}
               {!imported && (
                 <Button
                   fullWidth
                   variant="light"
-                  color="gray"
+                  color="red"
                   mt="sm"
+                  style={DESTRUCTIVE_BUTTON_VARS}
                   leftSection={<IconPlayerRecordFilled size={15} />}
                   onClick={wizard.reRecord}
                 >
@@ -807,8 +846,13 @@ function IntrinsicsInner() {
 // Prepare, compute from the recording, then review the result + coverage. The
 // LiveKit room lives at the App level (RoomProvider) — this screen only consumes it.
 export function IntrinsicsScreen() {
+  const compact = useCompactLayout();
   return (
-    <Box p={{ base: 'md', sm: 'xl' }} h="100%" style={{ display: 'flex', flexDirection: 'column' }}>
+    <Box
+      p={{ base: 'md', sm: 'xl' }}
+      h={screenHeight(compact)}
+      style={{ display: 'flex', flexDirection: 'column' }}
+    >
       <ScreenHeader
         title="Intrinsics"
         subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."

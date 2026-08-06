@@ -1,4 +1,5 @@
 import { Button, Card, createTheme, Paper, Progress, SegmentedControl } from '@mantine/core';
+import type { CSSProperties } from 'react';
 
 // realtime-calib design system (imported from Claude Design "Design System.dc.html").
 // Dark, violet-accented language: Sora for display, Manrope for body + tabular values,
@@ -124,3 +125,20 @@ export const theme = createTheme({
     }),
   },
 });
+
+// Secondary action that DESTROYS work (the "Re-record" buttons: a new take overwrites
+// the recording and discards its calibration result). Red carries the same warning as
+// the confirm modal each of them opens, and separates them from the safe violet action
+// they sit under.
+//
+// Not Mantine's `color="red" variant="light"` as-is: that fill is a solid rgb(101,21,21)
+// block, far heavier than everything around it. This is a thin wash in the alpha family
+// used for tinted surfaces elsewhere (rail selection 0.12, segmented indicator 0.16).
+// Applied through the component's CSS variables, NOT raw `background`/`border`: an inline
+// background would outrank Mantine's hover rule and kill the hover state.
+export const DESTRUCTIVE_BUTTON_VARS = {
+  '--button-bg': 'rgba(248, 113, 113, 0.10)',
+  '--button-hover': 'rgba(248, 113, 113, 0.18)',
+  '--button-color': 'var(--rc-error)',
+  '--button-bd': '1px solid rgba(248, 113, 113, 0.45)',
+} as CSSProperties;

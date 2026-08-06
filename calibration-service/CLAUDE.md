@@ -52,7 +52,7 @@ Modules (cible) sous `src/` :
 
 ## 🧱 Stack et tooling
 
-- Python 3.12 (verrouillé par le Dockerfile et `pyproject.toml`).
+- Python 3.14 (verrouillé par le Dockerfile — `python:3.14-slim-trixie` — et `pyproject.toml` — `requires-python = ">=3.14"`).
 - `uv` pour les dépendances (`pyproject.toml` + `uv.lock`).
 - `multiprocessing` (capture par caméra + calcul, CPU-bound) ; `asyncio` (orchestration, I/O).
 - Dépendances clés : `opencv-python` (mainline ≥ 4.8 pour `CharucoDetector` ; ArUco/ChArUco intégrés depuis 4.7), `numpy`, `scipy` (bundle adjustment `least_squares`), `rtoml` (config TOML façon Caliscope), `livekit`/`livekit-api` (publication + data channel), serveur HTTP (`fastapi` + `uvicorn` recommandé). Envisager `numba` si le BA devient un goulot (comme Caliscope). **Liste exacte : `pyproject.toml`.**

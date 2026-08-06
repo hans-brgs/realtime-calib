@@ -235,6 +235,87 @@ def test_refresh_signals_the_session_without_reconnecting(tmp_path: Path) -> Non
     asyncio.run(scenario())
 
 
+async def _open_set_harness(
+    service: CameraPublishService,
+) -> tuple[list[_PublishTarget], list[str]]:
+    """Stub the device-level open/close so the reconcile can be driven without V4L2."""
+    opened: list[_PublishTarget] = []
+    stopped: list[str] = []
+
+    async def fake_start(
+        _loop: object, _executor: object, _publisher: object, target: _PublishTarget
+    ) -> tuple[_FakeCamera, asyncio.Task[None]]:
+        opened.append(target)
+        return _FakeCamera(), await _done_task()
+
+    async def fake_stop(_publisher: object, name: str, _task: object) -> None:
+        stopped.append(name)
+
+    service._start_capture = fake_start  # type: ignore[method-assign, assignment]
+    service._stop_capture = fake_stop  # type: ignore[method-assign, assignment]
+    return opened, stopped
+
+
+def test_reorder_reopens_each_camera_on_its_new_device(tmp_path: Path) -> None:
+    # Reordering the array rebinds cam_<i> to a DIFFERENT device_node while the name set
+    # and the preview sizes stay identical — so the track reconcile publishes nothing and
+    # the desired set is unchanged. The open set must still notice, or cam_0 keeps
+    # streaming the device it was first opened on and the reorder looks ignored (it only
+    # took effect after a manual reload happened to cycle the view).
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        opened, stopped = await _open_set_harness(service)
+        loop = asyncio.get_running_loop()
+        open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
+
+        by_name = _targets("cam_0", "cam_1")  # cam_0 -> video0, cam_1 -> video1
+        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        # Sets, not lists: the desired set is a `set`, so the open ORDER is not guaranteed.
+        assert {t.device_node for t in opened} == {"/dev/video0", "/dev/video1"}
+        assert stopped == []
+
+        # Idempotence: an unchanged config must not churn the devices.
+        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        assert len(opened) == 2
+        assert stopped == []
+
+        # Reorder: the two devices swap names. Same names, same sizes, same desired set.
+        swapped = {
+            "cam_0": _PublishTarget("cam_0", 0, "/dev/video1", 1920, 1080, 30),
+            "cam_1": _PublishTarget("cam_1", 1, "/dev/video0", 1920, 1080, 30),
+        }
+        await service._reconcile_open_set(loop, None, None, swapped, open_cams)  # type: ignore[arg-type]
+        assert sorted(stopped) == ["cam_0", "cam_1"]  # both closed...
+        assert {t.device_node for t in opened[2:]} == {"/dev/video1", "/dev/video0"}  # ...reopened
+        # What actually matters: each NAME is now bound to the other device.
+        assert {name: entry[2].device_node for name, entry in open_cams.items()} == {
+            "cam_0": "/dev/video1",
+            "cam_1": "/dev/video0",
+        }
+
+    asyncio.run(scenario())
+
+
+def test_fps_change_reopens_the_camera(tmp_path: Path) -> None:
+    # Same root cause as the reorder: an fps change leaves the preview size untouched, so
+    # the track reconcile does nothing — but the open V4L2 handle carries the old rate.
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        opened, stopped = await _open_set_harness(service)
+        loop = asyncio.get_running_loop()
+        open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
+
+        await service._reconcile_open_set(loop, None, None, _targets("cam_0"), open_cams)  # type: ignore[arg-type]
+        assert [t.fps for t in opened] == [30]
+
+        retuned = {"cam_0": _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 15)}
+        await service._reconcile_open_set(loop, None, None, retuned, open_cams)  # type: ignore[arg-type]
+        assert stopped == ["cam_0"]
+        assert [t.fps for t in opened] == [30, 15]
+
+    asyncio.run(scenario())
+
+
 def test_reconfigure_reconciles_tracks_in_place(tmp_path: Path) -> None:
     # ADR-0029: on reconfiguration the track set is reconciled in place — a new camera's
     # track is published (muted), a removed camera's track is muted (never unpublished,

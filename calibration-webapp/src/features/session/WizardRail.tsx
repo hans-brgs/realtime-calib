@@ -14,7 +14,7 @@ import {
   IconTopologyStar3,
   type IconProps,
 } from '@tabler/icons-react';
-import type { ComponentType } from 'react';
+import type { ComponentType, ReactNode } from 'react';
 
 import type { StageStatus, ViewId } from '@/features/session/selectors';
 
@@ -77,7 +77,9 @@ function RailButton({ item, selected, collapsed, onNavigate }: RailButtonProps) 
         gap: 11,
         justifyContent: collapsed ? 'center' : 'flex-start',
         padding: '10px 11px',
-        minHeight: 42,
+        // 44px: the touch floor (ADR-0041). These are the primary navigation
+        // targets, and in the flow regime the rail is a full-page touch overlay.
+        minHeight: 44,
         borderRadius: 'var(--mantine-radius-md)',
         borderLeft: `2px solid ${selected ? 'var(--rc-accent)' : 'transparent'}`,
         background: selected ? 'rgba(167,139,250,0.12)' : 'transparent',
@@ -128,12 +130,50 @@ function RailButton({ item, selected, collapsed, onNavigate }: RailButtonProps) 
   );
 }
 
+// An app-level entry that is NOT a wizard step: it opens a modal instead of
+// navigating, so it carries no FSM status glyph and never reads as "current". Shares
+// the rail item's geometry (44px touch target) so the drawer reads as one list.
+export function RailAction({
+  icon: Icon,
+  label,
+  onClick,
+}: {
+  icon: ComponentType<IconProps>;
+  label: string;
+  onClick: () => void;
+}) {
+  return (
+    <UnstyledButton
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 11,
+        padding: '10px 11px',
+        minHeight: 44,
+        borderRadius: 'var(--mantine-radius-md)',
+        borderLeft: '2px solid transparent',
+        color: 'var(--mantine-color-dark-2)',
+        cursor: 'pointer',
+      }}
+    >
+      <Icon size={18} stroke={1.8} color="var(--mantine-color-dark-2)" />
+      <Text fz="0.84rem" style={{ flex: 1, whiteSpace: 'nowrap' }} inherit>
+        {label}
+      </Text>
+    </UnstyledButton>
+  );
+}
+
 interface WizardRailProps {
   items: RailItem[];
   activeView: ViewId;
   onNavigate: (id: ViewId) => void;
   collapsed: boolean;
   onToggleCollapse?: () => void;
+  // App-level entries pinned below the wizard steps. Used by the compact drawer, where
+  // the topbar's section tabs are hidden and this is the only route to them.
+  footer?: ReactNode;
 }
 
 // Persistent FSM navigation rail (replaces the horizontal Stepper). Status is derived
@@ -146,6 +186,7 @@ export function WizardRail({
   onNavigate,
   collapsed,
   onToggleCollapse,
+  footer,
 }: WizardRailProps) {
   return (
     <Box
@@ -211,6 +252,13 @@ export function WizardRail({
           />
         ))}
       </Stack>
+
+      {footer && (
+        // Separated from the steps: these are app-level, not points in the wizard.
+        <Stack gap={3} px={10} py={8} style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}>
+          {footer}
+        </Stack>
+      )}
     </Box>
   );
 }

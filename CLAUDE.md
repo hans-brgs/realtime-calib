@@ -17,7 +17,7 @@ Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **table
 
 | Service | Rôle | Stack |
 | --- | --- | --- |
-| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.12, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
+| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.14, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
 | `calibration-webapp/` | Wizard opérateur + vue 3D | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei, React Compiler, yarn |
 | `livekit-token-server/` | Émission de tokens JWT LiveKit | Python (Flask) |
 | `caddy/` | Reverse proxy + terminaison TLS + statique | Caddy v2 |
@@ -79,6 +79,7 @@ Pas de Makefile ni de justfile — les commandes `docker compose` sont la source
 - **Langue** : les `README.md` (racine et par service) et **tous les commentaires dans le code** sont rédigés en **anglais** — par cohérence, les commentaires des fichiers de config committés (`.gitignore`, `.env.example`, `Dockerfile`, `docker-compose.yml`, `Caddyfile`…) aussi. Le reste de la documentation (specs, ADRs, `CLAUDE.md`, journal d'ingénierie) reste en **français**.
 - **LiveKit** : avant tout développement temps-réel touchant LiveKit (publication de tracks, data channel, tokens JWT, configuration réseau/ICE), consulter **https://docs.livekit.io/llms-full.txt** (doc LiveKit optimisée pour LLM) pour les bonnes pratiques et l'API à jour.
 - **Pas de commentaires de signature ASCII** dans les nouveaux fichiers.
+- **Markdown — RÈGLE ABSOLUE : jamais de retour chariot en milieu de phrase.** Dans **tout** fichier `.md` produit ou modifié (ADRs, specs, `README.md`, `CLAUDE.md`, journal d'ingénierie, doc du vault `realtime-calib-doc/`), un paragraphe s'écrit sur **une seule ligne logique** et c'est l'éditeur qui gère le retour à la ligne visuel. **Ne jamais hard-wrapper** à 72 / 80 / 100 colonnes, même si des fichiers existants alentour le font — ne pas imiter ce style. Les seuls sauts de ligne autorisés séparent des blocs : paragraphes, items de liste, titres, blocs de code, lignes de tableau.
 
 ---
 
