@@ -82,6 +82,13 @@ class PipelineTuning:
     # section if the rescue scenario proves common).
     min_shared: int = 5
     min_shared_bounds: tuple[int, int] = (2, 30)
+    # Board-rigidity constraints in the bundle adjustment (ADR-0044): the
+    # tolerated deviation between a reconstructed corner pair and the physical
+    # distance the target mandates. Caliscope's value; it is what a carefully
+    # printed and measured target actually holds. Read as: 2 mm of deformation
+    # costs the same as ~1 px of reprojection, so the solver stops trading board
+    # shape for residuals. Only the single-marker path uses it today.
+    rigidity_sigma_mm: float = 2.0
 
     # --- Board & export ---
     board: BoardDefaults = field(default_factory=BoardDefaults)

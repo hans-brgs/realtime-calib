@@ -20,6 +20,7 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { measurementOf, withMeasurement } from '@/features/board/measurement';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
 import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
@@ -52,19 +53,26 @@ function SectionLabel({ children }: { children: ReactNode }) {
   );
 }
 
-function FieldLabel({ children }: { children: ReactNode }) {
-  return (
-    <Text fz="0.69rem" c="dark.2" mb={6}>
-      {children}
-    </Text>
-  );
-}
-
+// Mantine's own label/description slots rather than hand-rolled <Text> siblings:
+// they carry the aria-labelledby / aria-describedby wiring an input needs, and
+// keep the help text tied to its field when a Group reflows on narrow screens.
 const INPUT_STYLES = {
   input: {
     background: 'var(--rc-input)',
     borderColor: 'var(--mantine-color-dark-4)',
     fontVariantNumeric: 'tabular-nums' as const,
+  },
+  label: {
+    fontSize: '0.69rem',
+    fontWeight: 400,
+    color: 'var(--mantine-color-dark-2)',
+    marginBottom: 6,
+  },
+  description: {
+    fontSize: '0.68rem',
+    color: 'var(--mantine-color-dark-3)',
+    lineHeight: 1.5,
+    marginTop: 6,
   },
 } as const;
 
@@ -83,6 +91,7 @@ export function TargetConfigScreen() {
     <TargetConfigForm
       intrinsicSeed={intrinsicSeed}
       extrinsicSeed={session?.extrinsic_board ?? intrinsicSeed}
+      measurementSeed={measurementOf(session)}
     />
   );
 }
@@ -90,9 +99,11 @@ export function TargetConfigScreen() {
 function TargetConfigForm({
   intrinsicSeed,
   extrinsicSeed,
+  measurementSeed,
 }: {
   intrinsicSeed: Board;
   extrinsicSeed: Board;
+  measurementSeed: number | '';
 }) {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
@@ -107,6 +118,11 @@ function TargetConfigForm({
   const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
     session?.extrinsic_board != null,
   );
+  // One measurement for all three size fields (inherited board, separate ChArUco,
+  // separate marker) — it is the same physical question each time. Held apart
+  // from the board objects so the field can start empty without putting a zero
+  // size on a board, and so clearing it to retype cannot corrupt one.
+  const [measurement, setMeasurement] = useState<number | ''>(measurementSeed);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -117,6 +133,27 @@ function TargetConfigForm({
   const board = active === 'intrinsic' ? intrinsic : extrinsic;
   const setBoard = active === 'intrinsic' ? setIntrinsic : setExtrinsic;
   const patch = (fields: Partial<Board>) => setBoard((b) => ({ ...b, ...fields }));
+
+  // The printed size feeds the EXTRINSIC solve alone: the intrinsic solve runs
+  // on unit squares (the backend builds the ChArUco board with
+  // squareLength=1.0), so scaling the target leaves the camera matrix and the
+  // distortion untouched. The measurement therefore lives on the extrinsic tab
+  // only — asking for it while defining the intrinsic board implied it fed that
+  // calibration.
+  //
+  // Inheriting is the case to watch: the extrinsic step then uses the intrinsic
+  // board object itself, so the measurement taken here ends up on THAT board.
+  const missingMeasurement =
+    active === 'extrinsic' && !(typeof measurement === 'number' && measurement > 0);
+  const measurementError = missingMeasurement
+    ? 'Required — this measurement sets the extrinsic scale.'
+    : undefined;
+  // Mantine hands back '' for an emptied field; keep it empty rather than
+  // coercing to 0, so "not measured yet" stays distinct from "measured zero".
+  const onMeasurementChange = (value: number | string) => {
+    const next = typeof value === 'number' ? value : Number(value);
+    setMeasurement(value === '' || !Number.isFinite(next) ? '' : next);
+  };
 
   useEffect(() => {
     fetchBoardDictionaries()
@@ -156,9 +193,26 @@ function TargetConfigForm({
     const target: BoardTarget = active;
     setSaving(true);
     try {
-      // Inheriting (extrinsic tab, box unchecked) sends board=null: the backend keeps
-      // extrinsic_board null and completes Target Config.
-      const payload = editingInherited ? null : normalizeBoard(board);
+      // Guarded by the disabled Save, so on the extrinsic tab this is a number.
+      const mm = typeof measurement === 'number' ? measurement : 0;
+      if (editingInherited) {
+        // Inheriting: the extrinsic solve reads the intrinsic board itself, so
+        // the measurement taken here has to land on THAT board — persist it
+        // first, then send board=null to confirm the inheritance. Re-saving the
+        // intrinsic board does not rewind the wizard: the backend only advances
+        // the step from INTRINSIC_BOARD, and we are past it.
+        const measured = withMeasurement(intrinsic, mm);
+        await dispatch(
+          applyBoardConfig({ target: 'intrinsic', board: normalizeBoard(measured) }),
+        ).unwrap();
+        setIntrinsic(measured);
+      }
+      // Inheriting sends board=null: the backend keeps extrinsic_board null and
+      // completes Target Config. The intrinsic tab carries no measurement — its
+      // board keeps whatever size it already had, unread by that calibration.
+      const payload = editingInherited
+        ? null
+        : normalizeBoard(target === 'extrinsic' ? withMeasurement(board, mm) : board);
       await dispatch(applyBoardConfig({ target, board: payload })).unwrap();
       // Saving the intrinsic board advances to the extrinsic choice — surface that tab
       // (the backend now stops at extrinsic_board_choice, so the view stays here).
@@ -246,14 +300,18 @@ function TargetConfigForm({
             </Button>
           </Group>
 
+          {/* Mirrors where the measurement is asked for: assertive on the
+              extrinsic tab, silent about scale while the intrinsic board is
+              being defined. */}
           <Alert
             variant="light"
-            color="yellow"
-            icon={<IconRuler size={16} />}
+            color={active === 'extrinsic' ? 'yellow' : 'gray'}
+            icon={active === 'extrinsic' ? <IconRuler size={16} /> : <IconInfoCircle size={16} />}
             styles={{ message: { fontSize: '0.78rem', lineHeight: 1.5 } }}
           >
-            Print the PNG, then measure a printed square with a caliper and enter its real size below.
-            The measurement — not the print scale — sets the metric scale.
+            {active === 'extrinsic'
+              ? 'Print the PNG, then measure a printed square with a caliper and enter its real size below. The measurement — not the print scale — sets the metric scale.'
+              : 'Print the PNG and calibrate the lenses with it. Its printed size is asked for at the extrinsic step: the intrinsic solve is scale-free.'}
           </Alert>
         </Box>
 
@@ -292,9 +350,27 @@ function TargetConfigForm({
           )}
 
           {editingInherited ? (
-            <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />}>
-              <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
-            </Alert>
+            <>
+              <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />} mb="md">
+                <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
+              </Alert>
+              {/* The geometry is inherited, the measurement is not: it is only
+                  needed now, and it is stored on the intrinsic board because
+                  that is the object the extrinsic solve reads in this mode. */}
+              <NumberInput
+                label="Square size (mm)"
+                withAsterisk
+                description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                error={measurementError}
+                placeholder="measure the print"
+                value={measurement}
+                onChange={onMeasurementChange}
+                min={1}
+                decimalScale={2}
+                step={0.5}
+                styles={INPUT_STYLES}
+              />
+            </>
           ) : (
             <Box
               style={{
@@ -323,105 +399,96 @@ function TargetConfigForm({
                 mb="md"
               />
 
-              <FieldLabel>Dictionary</FieldLabel>
               <Select
+                label="Dictionary"
+                description="NxN = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but needs more pixels."
                 value={board.dictionary}
                 onChange={(v) => v && patch({ dictionary: v })}
                 data={dictionaries}
                 allowDeselect={false}
                 comboboxProps={{ withinPortal: true }}
                 styles={INPUT_STYLES}
-                mb={6}
+                mb="md"
               />
-              <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
-                <Text span fw={600} inherit>
-                  NxN
-                </Text>{' '}
-                = marker bit grid: 4×4 reads from farther / lower resolution, 7×7 is more robust but
-                needs more pixels.
-              </Text>
 
               {board.board_type === 'charuco' ? (
                 <>
                   <Group grow mb="md">
-                    <Box>
-                      <FieldLabel>Columns</FieldLabel>
-                      <NumberInput
-                        value={board.columns}
-                        onChange={(v) => patch({ columns: Number(v) || 0 })}
-                        min={2}
-                        max={30}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
-                    <Box>
-                      <FieldLabel>Rows</FieldLabel>
-                      <NumberInput
-                        value={board.rows}
-                        onChange={(v) => patch({ rows: Number(v) || 0 })}
-                        min={2}
-                        max={30}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
+                    <NumberInput
+                      label="Columns"
+                      value={board.columns}
+                      onChange={(v) => patch({ columns: Number(v) || 0 })}
+                      min={2}
+                      max={30}
+                      styles={INPUT_STYLES}
+                    />
+                    <NumberInput
+                      label="Rows"
+                      value={board.rows}
+                      onChange={(v) => patch({ rows: Number(v) || 0 })}
+                      min={2}
+                      max={30}
+                      styles={INPUT_STYLES}
+                    />
                   </Group>
 
-                  <Group grow mb={6}>
-                    <Box>
-                      <FieldLabel>Square size (mm, measured)</FieldLabel>
+                  <Group grow mb="md" align="flex-start">
+                    {/* Absent while defining the INTRINSIC board: the intrinsic
+                        solve is scale-free, so asking for a measurement there
+                        only suggested it mattered to that calibration. */}
+                    {active === 'extrinsic' && (
                       <NumberInput
-                        value={board.square_size_mm}
-                        onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                        label="Square size (mm)"
+                        withAsterisk
+                        description="Measure the printed square to the mm — it sets the extrinsic accuracy."
+                        error={measurementError}
+                        placeholder="measure the print"
+                        value={measurement}
+                        onChange={onMeasurementChange}
                         min={1}
                         decimalScale={2}
                         step={0.5}
                         styles={INPUT_STYLES}
                       />
-                    </Box>
-                    <Box>
-                      <FieldLabel>Marker ratio</FieldLabel>
-                      <NumberInput
-                        value={board.marker_ratio}
-                        onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
-                        min={0.1}
-                        max={0.95}
-                        decimalScale={2}
-                        step={0.05}
-                        styles={INPUT_STYLES}
-                      />
-                    </Box>
+                    )}
+                    <NumberInput
+                      label="Marker ratio"
+                      description="ArUco marker inside each white cell, as a fraction of the square (≈ 0.75)."
+                      value={board.marker_ratio}
+                      onChange={(v) => patch({ marker_ratio: Number(v) || 0 })}
+                      min={0.1}
+                      max={0.95}
+                      decimalScale={2}
+                      step={0.05}
+                      styles={INPUT_STYLES}
+                    />
                   </Group>
-                  <Text fz="0.68rem" c="dark.3" mb="md" style={{ lineHeight: 1.5 }}>
-                    <Text span fw={600} inherit>
-                      Square
-                    </Text>{' '}
-                    = checkerboard cell — the metric scale you measure. The ArUco marker printed
-                    inside each white cell is that ratio of it (≈ 0.75).
-                  </Text>
                 </>
               ) : (
-                <Group grow mb="md">
-                  <Box>
-                    <FieldLabel>Marker ID</FieldLabel>
-                    <NumberInput
-                      value={board.marker_id}
-                      onChange={(v) => patch({ marker_id: Number(v) || 0 })}
-                      min={0}
-                      max={dictionaryCapacity(board.dictionary) - 1}
-                      styles={INPUT_STYLES}
-                    />
-                  </Box>
-                  <Box>
-                    <FieldLabel>Marker size (mm, measured)</FieldLabel>
-                    <NumberInput
-                      value={board.marker_size_mm}
-                      onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
-                      min={1}
-                      decimalScale={2}
-                      step={0.5}
-                      styles={INPUT_STYLES}
-                    />
-                  </Box>
+                <Group grow mb="md" align="flex-start">
+                  <NumberInput
+                    label="Marker ID"
+                    value={board.marker_id}
+                    onChange={(v) => patch({ marker_id: Number(v) || 0 })}
+                    min={0}
+                    max={dictionaryCapacity(board.dictionary) - 1}
+                    styles={INPUT_STYLES}
+                  />
+                  <NumberInput
+                    label="Marker size (mm)"
+                    // A single ArUco target is extrinsic-only, so its measurement
+                    // always carries the scale — no conditional here.
+                    withAsterisk
+                    description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
+                    error={measurementError}
+                    placeholder="measure the print"
+                    value={measurement}
+                    onChange={onMeasurementChange}
+                    min={1}
+                    decimalScale={2}
+                    step={0.5}
+                    styles={INPUT_STYLES}
+                  />
                 </Group>
               )}
 
@@ -436,7 +503,15 @@ function TargetConfigForm({
           {/* Always present — the extrinsic choice (a board, or inherit) must be
               confirmed to complete Target Config, so it can't be skipped. */}
           <StickyActionBar>
-            <Button fullWidth mt="lg" onClick={save} loading={saving}>
+            {/* Blocked client-side rather than letting the backend's gt=0
+                rejection come back as a raw 422. */}
+            <Button
+              fullWidth
+              mt="lg"
+              onClick={save}
+              loading={saving}
+              disabled={missingMeasurement}
+            >
               Save {active} board
             </Button>
           </StickyActionBar>

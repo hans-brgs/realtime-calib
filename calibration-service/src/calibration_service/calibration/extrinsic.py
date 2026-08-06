@@ -44,6 +44,7 @@ from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
 from calibration_service.synchronization import SyncFrame, SyncGroup
 from calibration_service.synchronization.window import sync_window
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -149,6 +150,10 @@ class ExtrinsicResult:
     # weights needed to re-aggregate the overall RMSE when per-camera errors are
     # rescaled. Empty on payloads persisted before the field existed.
     per_camera_observations: dict[str, int] = field(default_factory=dict)
+    # RMS deviation (mm) of the reconstructed corner pairs from the physical
+    # board (ADR-0044): the reprojection-INDEPENDENT quality judge the operator
+    # reads next to the RMSE. 0.0 when no group has two triangulated corners.
+    rigidity_mm: float = 0.0
 
     def scaled_errors(self, factors: dict[str, float]) -> ExtrinsicResult:
         """Express the pixel-error fields at each camera's OUTPUT resolution.
@@ -517,6 +522,119 @@ def triangulate_groups(
 
 
 @dataclass(frozen=True)
+class RigidityConstraints:
+    """Known distances between reconstructed corner pairs (ADR-0044).
+
+    The BA otherwise treats a group's corners as independent 3D points and is
+    free to deform the target to absorb detection/sync noise. Each row pins one
+    pair to the distance the physical board mandates:
+    ``residual = (||P_i - P_j|| - distance) * weight``.
+
+    Units: ``distance`` in board units (the solver's world scale); ``weight``
+    already whitened for the normalized residual space so these rows are
+    commensurable with the reprojection ones.
+    """
+
+    point_a: NDArray[np.intp]  # (C,) index into points3d
+    point_b: NDArray[np.intp]  # (C,)
+    distance: NDArray[np.float64]  # (C,) expected separation, board units
+    weight: NDArray[np.float64]  # (C,)
+
+    def __len__(self) -> int:
+        return len(self.point_a)
+
+
+def build_rigidity_constraints(
+    point_group: NDArray[np.intp],
+    point_corner: NDArray[np.int32],
+    board: CalibrationBoard,
+    focal_median: float,
+    *,
+    sigma_mm: float,
+) -> RigidityConstraints | None:
+    """Every within-group corner pair, tied to its physical board distance.
+
+    Weights follow Caliscope: ``(1 px / f_median) / sigma_units`` — one pixel of
+    reprojection is the yardstick, so a deviation of ``sigma`` costs about one
+    pixel. ``sigma_mm`` is converted to board units via the board's physical
+    unit, keeping the whole residual vector dimensionless.
+
+    Returns ``None`` when the target's geometry cannot pin anything (fewer than
+    two corners triangulated in every group).
+    """
+    reference = board_object_points(board)
+    unit_mm = board_unit_mm(board)
+    if unit_mm <= 0.0 or focal_median <= 0.0:
+        return None
+    # Fail loud (ADR-0036): corner ids indexing past the board's geometry mean
+    # the points came from a DIFFERENT board than the one constraining them —
+    # silently tying corners to wrong distances would mis-calibrate while
+    # reporting success.
+    if len(point_corner) and int(point_corner.max()) >= len(reference):
+        raise ValueError(
+            f"corner id {int(point_corner.max())} exceeds the board geometry "
+            f"({len(reference)} points): observations and board disagree"
+        )
+    sigma_units = sigma_mm / unit_mm
+    weight = (1.0 / focal_median) / sigma_units
+
+    a_list: list[int] = []
+    b_list: list[int] = []
+    distances: list[float] = []
+    for group in np.unique(point_group):
+        members = np.flatnonzero(point_group == group)
+        if len(members) < 2:
+            continue
+        corners = point_corner[members]
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                a_list.append(int(members[i]))
+                b_list.append(int(members[j]))
+                distances.append(
+                    float(np.linalg.norm(reference[corners[i]] - reference[corners[j]]))
+                )
+    if not a_list:
+        return None
+    return RigidityConstraints(
+        point_a=np.asarray(a_list, np.intp),
+        point_b=np.asarray(b_list, np.intp),
+        distance=np.asarray(distances, np.float64),
+        weight=np.full(len(a_list), weight, np.float64),
+    )
+
+
+def rigidity_mm(
+    points3d: NDArray[np.float64],
+    point_group: NDArray[np.intp],
+    point_corner: NDArray[np.int32],
+    board: CalibrationBoard,
+) -> float:
+    """RMS deviation (mm) of the reconstructed corner pairs from the real board.
+
+    The reprojection-independent quality judge (ADR-0044): a BA can always lower
+    its residuals by deforming the target, and this number does not move when it
+    does. Scale-sensitive too — a world 2% too large shows up here. Returns 0.0
+    when no group has two triangulated corners.
+    """
+    reference = board_object_points(board) * board_unit_mm(board)
+    scaled = points3d * board_unit_mm(board)
+    deviations: list[float] = []
+    for group in np.unique(point_group):
+        members = np.flatnonzero(point_group == group)
+        if len(members) < 2:
+            continue
+        corners = point_corner[members]
+        for i in range(len(members)):
+            for j in range(i + 1, len(members)):
+                expected = float(np.linalg.norm(reference[corners[i]] - reference[corners[j]]))
+                measured = float(np.linalg.norm(scaled[members[i]] - scaled[members[j]]))
+                deviations.append(measured - expected)
+    if not deviations:
+        return 0.0
+    return float(np.sqrt(np.mean(np.asarray(deviations, np.float64) ** 2)))
+
+
+@dataclass(frozen=True)
 class BAStatus:
     """Bundle-adjustment outcome (ADR-0036 observability).
 
@@ -537,6 +655,7 @@ def bundle_adjust(
     obs_point: NDArray[np.intp],
     obs_norm: NDArray[np.float64],
     anchor: str,
+    rigidity: RigidityConstraints | None = None,
 ) -> tuple[dict[str, NDArray[np.float64]], NDArray[np.float64], BAStatus]:
     """Jointly refine non-anchor poses + 3D points on normalized reprojection error.
 
@@ -546,6 +665,12 @@ def bundle_adjust(
     Residuals in normalized coords (undistorted upstream), projected with K=I —
     Caliscope's ``use_normalized`` mode (Triggs et al. conditioning). Also returns
     a :class:`BAStatus` so a truncated solve never passes for a converged one.
+
+    ``rigidity`` (ADR-0044) appends one whitened distance residual per known
+    corner pair, so the target cannot deform to absorb noise. Those rows also
+    make the world SCALE observable, removing the last gauge mode of the
+    unconstrained problem (see the module docstring). ``None`` keeps the pure
+    reprojection behaviour.
     """
     free = [name for name in camera_order if name != anchor]
     free_slot = {name: i for i, name in enumerate(free)}
@@ -587,9 +712,16 @@ def bundle_adjust(
                 points[obs_point[mask]], rvec, tvec, identity_k, None
             )
             projected[mask] = image_points.reshape(-1, 2)
-        return np.asarray((projected - obs_norm).ravel(), np.float64)
+        reprojection = (projected - obs_norm).ravel()
+        if rigidity is None:
+            return np.asarray(reprojection, np.float64)
+        spans = points[rigidity.point_a] - points[rigidity.point_b]
+        measured = np.linalg.norm(spans, axis=1)
+        deviation = (measured - rigidity.distance) * rigidity.weight
+        return np.asarray(np.concatenate([reprojection, deviation]), np.float64)
 
-    sparsity = lil_matrix((2 * n_obs, len(x0)), dtype=int)
+    n_rigid = 0 if rigidity is None else len(rigidity)
+    sparsity = lil_matrix((2 * n_obs + n_rigid, len(x0)), dtype=int)
     rows = np.arange(n_obs)
     for cam, name in enumerate(camera_order):
         if name == anchor:
@@ -602,6 +734,14 @@ def bundle_adjust(
     for k in range(3):
         sparsity[2 * rows, n_cam_params + 3 * obs_point + k] = 1
         sparsity[2 * rows + 1, n_cam_params + 3 * obs_point + k] = 1
+    if rigidity is not None:
+        # A distance residual sees only its two points' xyz — no camera params:
+        # rigidity constrains the point cloud's SHAPE, and the poses follow
+        # through the reprojection rows.
+        rigid_rows = 2 * n_obs + np.arange(n_rigid)
+        for point_index in (rigidity.point_a, rigidity.point_b):
+            for k in range(3):
+                sparsity[rigid_rows, n_cam_params + 3 * point_index + k] = 1
 
     # Two-stage solve: a linear pass first (full gradients converge the geometry
     # from the chained init), then a Huber pass from that solution so residual
@@ -918,8 +1058,20 @@ def refine_result(
     keep = _filter_observations(obs_camera, obs_point, residuals, _REFINE_FILTER_FRACTION)
     logger.info("minimize: %d/%d observations kept", int(keep.sum()), len(keep))
 
+    point_group = np.asarray(result.point_groups, np.intp)
+    point_corner = np.asarray(ba_inputs.point_corner, np.int32)
+    # Same constraints as the initial solve (ADR-0044): the physical board did
+    # not change because observations were filtered.
+    rigidity = _sweep_rigidity(point_group, point_corner, board, models)
     solved, refined, ba_status = bundle_adjust(
-        result.cameras, poses, points3d, obs_camera[keep], obs_point[keep], obs_norm[keep], anchor
+        result.cameras,
+        poses,
+        points3d,
+        obs_camera[keep],
+        obs_point[keep],
+        obs_norm[keep],
+        anchor,
+        rigidity,
     )
     per_camera, overall = pixel_errors(
         result.cameras,
@@ -960,9 +1112,10 @@ def refine_result(
             name: int((obs_camera[keep] == index).sum())
             for index, name in enumerate(result.cameras)
         },
+        rigidity_mm=rigidity_mm(refined, point_group, point_corner, board),
         board_quads=_group_board_quads(
-            np.asarray(result.point_groups, np.intp),
-            np.asarray(ba_inputs.point_corner, np.int32),
+            point_group,
+            point_corner,
             refined,
             chess,
             result.group_count,
@@ -1129,6 +1282,32 @@ def sweep_groups(
     return groups
 
 
+def _sweep_rigidity(
+    point_group: NDArray[np.intp],
+    point_corner: NDArray[np.int32],
+    board: CalibrationBoard,
+    models: list[CameraModel],
+) -> RigidityConstraints | None:
+    """Rigidity rows for a solve, or ``None`` when the board path opts out.
+
+    Single-ArUco only for now (ADR-0044): its 4 coplanar corners give 6 crisp
+    distances per view, whereas a ChArUco view would emit a quadratic blow-up of
+    pairs for a target whose 40+ corners already constrain the fit through sheer
+    count. The weight yardstick is the array's MEDIAN focal (Caliscope), so one
+    camera's outlier intrinsics cannot set the whole scale.
+    """
+    if board.board_type is BoardType.CHARUCO:
+        return None
+    focal_median = float(np.median([model.matrix[0, 0] for model in models]))
+    return build_rigidity_constraints(
+        point_group,
+        point_corner,
+        board,
+        focal_median,
+        sigma_mm=TUNING.rigidity_sigma_mm,
+    )
+
+
 def compute_extrinsic_from_sweep(
     directory: Path,
     board: CalibrationBoard,
@@ -1195,6 +1374,9 @@ def compute_extrinsic_from_sweep(
     poses = chain_from_anchor(pairs, names, anchor)
     triangulation = triangulate_groups(detections, poses)
     order = triangulation.camera_order
+    rigidity = _sweep_rigidity(
+        triangulation.point_group, triangulation.point_corner, board, models
+    )
     solved, points_opt, ba_status = bundle_adjust(
         order,
         poses,
@@ -1203,6 +1385,7 @@ def compute_extrinsic_from_sweep(
         triangulation.obs_point,
         triangulation.obs_norm,
         anchor,
+        rigidity,
     )
     per_camera, overall = pixel_errors(
         order,
@@ -1250,6 +1433,9 @@ def compute_extrinsic_from_sweep(
             name: int((triangulation.obs_camera == index).sum())
             for index, name in enumerate(order)
         },
+        rigidity_mm=rigidity_mm(
+            points_opt, triangulation.point_group, triangulation.point_corner, board
+        ),
     )
     ba_inputs = BAInputs(
         obs_camera=[int(v) for v in triangulation.obs_camera],

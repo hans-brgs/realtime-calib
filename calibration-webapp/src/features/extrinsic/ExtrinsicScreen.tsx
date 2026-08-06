@@ -66,6 +66,21 @@ const PHASES = [
 
 const PLAY_FPS = 8;
 
+// Per-camera deviation highlight, in pixels AT THE OUTPUT RESOLUTION — the unit
+// every reported extrinsic error now carries (ADR-0042). A bare pixel threshold
+// means nothing without that reference: the same rig at 4K and at 720p would be
+// judged on the same number.
+//
+// Anchored on the corner-detection floor rather than a round figure. A single
+// ArUco target's corners are measured to ~0.74 px RMS per axis at native
+// resolution (ADR-0043), i.e. ~0.52 px euclidean once halved to a 0.5-factor
+// output — no solve can go below that, so flagging it would be noise. "Good" sits
+// just above the floor and "watch" at roughly twice it, where the error is no
+// longer explained by detection alone. A ChArUco target refines its corners with
+// cornerSubPix and therefore sits well under both.
+const DEVIATION_GOOD_PX = 0.6;
+const DEVIATION_WATCH_PX = 1.2;
+
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
 // One camera's frame of a synchronized group, shown by seeking its CFR-retimed
@@ -307,15 +322,40 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         </Group>
       )}
       {result.ba_converged !== false && <Box mb="md" />}
+      {/* Board rigidity (ADR-0044): how far the reconstructed corners sit from
+          the physical target. Reprojection-independent, so it catches a solve
+          that lowered its residuals by deforming the board. Thresholds are the
+          constraint tolerance (2 mm) and its 2.5x. */}
+      {result.rigidity_mm != null && result.rigidity_mm > 0 && (
+        <Group justify="space-between" mb="md">
+          <Text fz="0.72rem" c="dark.2">
+            Board rigidity
+          </Text>
+          <Text
+            fz="0.78rem"
+            fw={600}
+            className="rc-tnum"
+            style={{
+              color:
+                result.rigidity_mm <= 2
+                  ? 'var(--rc-success)'
+                  : result.rigidity_mm <= 5
+                    ? 'var(--rc-warning)'
+                    : 'var(--rc-error)',
+            }}
+          >
+            {result.rigidity_mm.toFixed(2)} mm
+          </Text>
+        </Group>
+      )}
       {result.cameras.map((camera) => {
         const deviation = result.per_camera_error[camera];
-        // Spec deviation highlight: green <= 0.25 px, amber <= 0.5, red above.
         const color =
           deviation == null
             ? undefined
-            : deviation <= 0.25
+            : deviation <= DEVIATION_GOOD_PX
               ? 'var(--rc-success)'
-              : deviation <= 0.5
+              : deviation <= DEVIATION_WATCH_PX
                 ? 'var(--rc-warning)'
                 : 'var(--rc-error)';
         return (
