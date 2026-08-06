@@ -115,6 +115,8 @@ def _extrinsic_ready_client(tmp_path: Path) -> tuple[TestClient, SessionManager]
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_4X4_100"}
     client.post("/board", json={"target": "intrinsic", "board": board})
+    # The extrinsic step materializes the board the solve reads (ADR-0045).
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
     client.post(
         "/cameras/config",
         json={

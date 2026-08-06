@@ -63,14 +63,14 @@ function isComplete(id: StageId, session: Session | null): boolean {
 
 export function selectStages(state: RootState): Stage[] {
   const session = state.session.session;
-  const step = session?.step ?? 'entry';
+  const step = session?.step ?? null;
   const stages: Stage[] = [];
   // No active session (ADR-0028): prerequisites start unmet so EVERY stage locks —
   // the operator must first create or open a session from the dashboard.
   let prerequisitesMet = session !== null;
 
   for (const def of STAGES) {
-    const active = def.steps.includes(step);
+    const active = step !== null && def.steps.includes(step);
     const complete = isComplete(def.id, session);
     let status: StageStatus;
     if (active) {
@@ -101,14 +101,12 @@ export type ViewId = StageId | 'session';
 // import-from-files) are dashboard modals (ADR-0035), not views of their own.
 export type NavTarget = ViewId;
 
-function stepToView(step: WizardStep): ViewId {
-  if (step === 'entry') {
-    return 'session';
-  }
-  const def = STAGES.find((s) => s.steps.includes(step));
+// No session (or a step no stage claims) lands on the dashboard.
+function stepToView(step: WizardStep | null): ViewId {
+  const def = step === null ? undefined : STAGES.find((s) => s.steps.includes(step));
   return def ? def.id : 'session';
 }
 
 export function selectActiveView(state: RootState): ViewId {
-  return stepToView(state.session.session?.step ?? 'entry');
+  return stepToView(state.session.session?.step ?? null);
 }

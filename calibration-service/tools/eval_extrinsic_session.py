@@ -138,7 +138,7 @@ def main(argv: list[str] | None = None) -> int:
 
     directory: Path = args.session_dir
     session = _load_session(directory)
-    _, extrinsic_board, issues = load_board_config(directory.parent, directory.name)
+    _, extrinsic_board, _inherited, issues = load_board_config(directory.parent, directory.name)
     if extrinsic_board is None:
         raise SystemExit(f"no usable extrinsic board in config.toml: {'; '.join(issues)}")
 

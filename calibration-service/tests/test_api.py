@@ -574,11 +574,14 @@ def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> 
 def _configured_client(
     tmp_path: Path, *, intrinsic_done: bool
 ) -> tuple[TestClient, SessionManager]:
-    """App with 2 configured cameras (+ board), optionally intrinsically calibrated."""
+    """App with 2 configured cameras (+ boards), optionally intrinsically calibrated."""
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
+    # Walk the extrinsic step too: it materializes the board the solve reads, and
+    # there is no inherit-by-fallback to stand in for it (ADR-0045).
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
     client.post(
         "/cameras/config",
         json={

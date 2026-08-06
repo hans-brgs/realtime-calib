@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import re
+from dataclasses import replace
 from pathlib import Path
 
 from calibration_service.calibration import ExtrinsicResult, IntrinsicResult
@@ -41,6 +42,34 @@ logger = logging.getLogger(__name__)
 # (forbids ".", "..", hidden dirs), then [A-Za-z0-9._-], max 64. Validated
 # service-side — never trust the client with a path segment (ADR-0028).
 _SESSION_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+
+# Wizard steps at which the boards are not both settled yet. Past them, a session
+# claiming Target Config is done without an extrinsic block is broken (ADR-0045
+# removed the inherit-by-fallback that used to cover it), and Camera Setup cannot
+# be confirmed without skipping the board steps.
+_BOARDS_PENDING = (WizardStep.INTRINSIC_BOARD, WizardStep.EXTRINSIC_BOARD_CHOICE)
+
+
+def inherited_board(intrinsic: CalibrationBoard, measured: CalibrationBoard) -> CalibrationBoard:
+    """The intrinsic geometry, carrying the extrinsic block's measurement (ADR-0045).
+
+    Only the scale-carrying size is kept from ``measured``; everything else
+    follows ``intrinsic``, so a block flagged inherited can never claim a geometry
+    it does not have — whatever a client submits. Same function on both paths
+    (saving the extrinsic step, re-syncing after an intrinsic edit), so the two
+    cannot drift apart.
+
+    ``marker_size_mm`` is RE-DERIVED, not copied: ``validate_board`` rejects
+    marker >= square, so keeping the intrinsic board's nominal marker size would
+    refuse every measurement below it.
+    """
+    if intrinsic.board_type is not BoardType.CHARUCO:
+        return replace(intrinsic, marker_size_mm=measured.marker_size_mm)
+    return replace(
+        intrinsic,
+        square_size_mm=measured.square_size_mm,
+        marker_size_mm=intrinsic.marker_ratio * measured.square_size_mm,
+    )
 
 
 class NoActiveSessionError(RuntimeError):
@@ -123,7 +152,7 @@ class SessionManager:
             exists = (session_dir(self._sessions_dir, self._session_id) / SESSION_FILE).is_file()
             if exists:
                 session = load_session(self._sessions_dir, self._session_id)
-                intrinsic, extrinsic, problems = load_board_config(
+                intrinsic, extrinsic, inherited, problems = load_board_config(
                     self._sessions_dir, self._session_id
                 )
                 # Legacy sessions may carry a single-ArUco intrinsic board; the
@@ -135,8 +164,19 @@ class SessionManager:
                         " — reconfigure it as a ChArUco board"
                     )
                     intrinsic = None
+                # No extrinsic block on a session that claims Target Config is
+                # done: sessions written before ADR-0045 inherited by fallback,
+                # which is gone. Fail loud rather than calibrate on a metric
+                # scale nobody entered — the operator revisits the step, and the
+                # block is materialized on the way through.
+                if extrinsic is None and session.step not in _BOARDS_PENDING:
+                    problems.append(
+                        "no extrinsic board defined — revisit Target Config to set the"
+                        " board and its measured size"
+                    )
                 session.intrinsic_board = intrinsic
                 session.extrinsic_board = extrinsic
+                session.extrinsic_inherited = inherited
                 session.issues = [SessionIssue(step="boards", message=m) for m in problems]
                 for issue in session.issues:
                     logger.warning("session issue: %s", issue.message)
@@ -183,26 +223,53 @@ class SessionManager:
         return sorted(result, key=lambda s: s.modified_at, reverse=True)
 
     def define_board(
-        self, target: str, board: CalibrationBoard | None
+        self, target: str, board: CalibrationBoard | None, inherited: bool = False
     ) -> CalibrationSession:
         """Set the intrinsic or extrinsic board, advance the FSM, and persist config.toml.
 
         ``target`` is ``"intrinsic"`` or ``"extrinsic"``. Defining the intrinsic board
         advances Target Config to the extrinsic-board choice; confirming the extrinsic
-        board — a real board, or ``None`` to inherit the intrinsic one — completes Target
-        Config and unlocks Camera Setup (board-first flow, spec wizard-navigation). Both
-        steps are walked so the extrinsic choice can't be skipped.
+        board completes Target Config and unlocks Camera Setup (board-first flow, spec
+        wizard-navigation). Both steps are walked so the extrinsic choice can't be
+        skipped.
+
+        The extrinsic board is always MATERIALIZED (ADR-0045): ``inherited=True``
+        stores a copy of the intrinsic geometry carrying the submitted measurement,
+        rebuilt service-side so a client cannot desynchronize it. ``board=None``
+        clears the block — the extrinsic step goes back to "not validated" — and no
+        longer means "inherit".
         """
         session = self.current()
         if target == "intrinsic":
             if board is None:
                 raise ValueError("intrinsic board is required")
             session.intrinsic_board = board
+            if session.extrinsic_inherited and session.extrinsic_board is not None:
+                # Re-sync: while inheriting, the extrinsic block tracks the
+                # intrinsic geometry and keeps only its own measurement. Without
+                # this, editing the grid after confirming the inheritance would
+                # leave the extrinsic solve on the old geometry, silently.
+                session.extrinsic_board = inherited_board(board, session.extrinsic_board)
             if session.step == WizardStep.INTRINSIC_BOARD:
                 session.step = WizardStep.EXTRINSIC_BOARD_CHOICE
         elif target == "extrinsic":
-            session.extrinsic_board = board  # None = inherit the intrinsic board
-            if session.step in (WizardStep.INTRINSIC_BOARD, WizardStep.EXTRINSIC_BOARD_CHOICE):
+            if inherited:
+                if board is None:
+                    raise ValueError("inheriting requires the measured board size")
+                if session.intrinsic_board is None:
+                    raise ValueError("define the intrinsic board before inheriting it")
+                if board.board_type is not session.intrinsic_board.board_type:
+                    # The measurement is read from the key its TYPE carries the
+                    # scale in; a mismatch would silently pick up a default size.
+                    raise ValueError("an inherited board must match the intrinsic board type")
+                session.extrinsic_board = inherited_board(session.intrinsic_board, board)
+            else:
+                session.extrinsic_board = board
+            session.extrinsic_inherited = inherited
+            if session.extrinsic_board is not None and session.step in (
+                WizardStep.INTRINSIC_BOARD,
+                WizardStep.EXTRINSIC_BOARD_CHOICE,
+            ):
                 session.step = WizardStep.CAMERA_SETUP
         else:
             raise ValueError(f"unknown board target: {target!r}")
@@ -212,6 +279,7 @@ class SessionManager:
             self._require_session_id(),
             session.intrinsic_board,
             session.extrinsic_board,
+            session.extrinsic_inherited,
         )
         save_session(self._sessions_dir, session)
         # A fresh definition resolves any load-time board anomaly (ADR-0036).
@@ -332,11 +400,7 @@ class SessionManager:
         session = self.current()
         if not session.cameras:
             raise ValueError("no cameras to confirm")
-        if session.step in (
-            WizardStep.ENTRY,
-            WizardStep.INTRINSIC_BOARD,
-            WizardStep.EXTRINSIC_BOARD_CHOICE,
-        ):
+        if session.step in _BOARDS_PENDING:
             raise ValueError("define the calibration boards first")
         if session.step == WizardStep.CAMERA_SETUP:
             session.step = WizardStep.INTRINSIC_CAPTURE

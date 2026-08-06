@@ -32,18 +32,26 @@ function session(step: WizardStep, boards: Partial<Session> = {}): Session {
 describe('measurementOf', () => {
   it('leaves the field empty while Target Config is still being defined', () => {
     // The seeded 40 mm is a backend default, indistinguishable from a real
-    // measurement once shown — so it must never reach the input.
-    for (const step of ['entry', 'intrinsic_board', 'extrinsic_board_choice'] as WizardStep[]) {
+    // measurement once shown — so it must never reach the input. No extrinsic
+    // board exists yet at these steps, which is what keeps it out.
+    for (const step of ['intrinsic_board', 'extrinsic_board_choice'] as WizardStep[]) {
       expect(measurementOf(session(step))).toBe('');
     }
     expect(measurementOf(null)).toBe('');
   });
 
+  it('never reads the intrinsic board, whose size is a nominal value nothing uses', () => {
+    // A session past Target Config with no extrinsic block predates the
+    // materialization: its intrinsic 40 mm is not a measurement anyone took.
+    expect(measurementOf(session('camera_setup'))).toBe('');
+    expect(measurementOf(session('export'))).toBe('');
+  });
+
   it('shows the stored size once the operator has confirmed the step', () => {
     // Past Target Config the persisted value IS their own measurement; blanking
     // it would force a needless re-measure on every revisit.
-    expect(measurementOf(session('camera_setup'))).toBe(40);
-    expect(measurementOf(session('export'))).toBe(40);
+    const s = session('camera_setup', { extrinsic_board: { ...CHARUCO, square_size_mm: 41.5 } });
+    expect(measurementOf(s)).toBe(41.5);
   });
 
   it('reads the separate extrinsic board when there is one', () => {
@@ -51,10 +59,12 @@ describe('measurementOf', () => {
     expect(measurementOf(s)).toBe(297.5);
   });
 
-  it('falls back to the intrinsic board when the extrinsic step inherits it', () => {
+  it('reads an inherited board, which is materialized like any other', () => {
+    // Inheriting no longer means "no extrinsic board": it is a copy of the
+    // intrinsic geometry carrying the measurement, flagged extrinsic_inherited.
     const s = session('camera_setup', {
-      intrinsic_board: { ...CHARUCO, square_size_mm: 41.5 },
-      extrinsic_board: null,
+      extrinsic_board: { ...CHARUCO, square_size_mm: 41.5 },
+      extrinsic_inherited: true,
     });
     expect(measurementOf(s)).toBe(41.5);
   });

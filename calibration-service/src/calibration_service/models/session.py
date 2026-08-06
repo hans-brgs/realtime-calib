@@ -19,9 +19,13 @@ class WizardStep(StrEnum):
 
     Board definition comes first so the operator can print early, before wiring
     cameras (ADR-0020 workflow).
+
+    No ENTRY member: "no session" is not a step, it is the ABSENCE of an active
+    session (ADR-0028) — GET /session answers 404 and the webapp shows the
+    dashboard. The value existed but was never assigned, so it could not appear
+    in a persisted session.toml either.
     """
 
-    ENTRY = "entry"
     INTRINSIC_BOARD = "intrinsic_board"
     EXTRINSIC_BOARD_CHOICE = "extrinsic_board_choice"
     CAMERA_SETUP = "camera_setup"
@@ -100,7 +104,15 @@ class CalibrationSession:
     mode: SessionMode = SessionMode.NEW_REALTIME
     cameras: list[CameraConfig] = field(default_factory=list)
     intrinsic_board: CalibrationBoard | None = None
+    # Always set once Target Config is done — inheriting the intrinsic board
+    # MATERIALIZES a copy of it here rather than leaving this None (ADR-0045), so
+    # `None` has a single meaning: the extrinsic step has not been validated.
     extrinsic_board: CalibrationBoard | None = None
+    # Whether that copy is an inherited one. Explicit rather than inferred from
+    # equal geometries: an operator may deliberately configure a separate board
+    # that happens to be identical. Drives the webapp's "different board" toggle
+    # and the re-sync of the copy when the intrinsic board is edited.
+    extrinsic_inherited: bool = False
     # Persisted export config (ADR-0026): restored on reopen. The truth (poses)
     # lives in result.json; this is a lightweight "how I export" preference,
     # seeded from TUNING (Caliscope-native metres) for sessions that never chose.
@@ -111,10 +123,6 @@ class CalibrationSession:
     # intrinsic board). Each names the wizard stage to revisit; the webapp shows
     # a banner + a badge on that rail step.
     issues: list[SessionIssue] = field(default_factory=list)
-
-    def effective_extrinsic_board(self) -> CalibrationBoard | None:
-        """Extrinsic board, inheriting the intrinsic one when not set explicitly."""
-        return self.extrinsic_board or self.intrinsic_board
 
 
 @dataclass(frozen=True)
