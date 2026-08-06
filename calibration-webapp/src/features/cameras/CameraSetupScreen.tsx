@@ -27,6 +27,7 @@ import { type ReactNode, useEffect, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import {
   captureGridColumns,
+  HERO_MEDIA_CEILING,
   screenHeight,
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
@@ -327,7 +328,14 @@ function ImportedCameraSetup({ session }: { session: Session }) {
                   key={camera.name}
                   style={
                     compact
-                      ? { width: '100%', aspectRatio: '16 / 9', flex: '0 0 auto' }
+                      ? // Mirrors the live CameraGrid's compact tile: capped so each
+                        // thumbnail fits the landscape viewport (see PreviewGrid).
+                        {
+                          width: '100%',
+                          aspectRatio: '16 / 9',
+                          maxHeight: HERO_MEDIA_CEILING,
+                          flex: '0 0 auto',
+                        }
                       : { minWidth: 0, minHeight: 0 }
                   }
                 >

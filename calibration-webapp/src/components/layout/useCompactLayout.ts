@@ -54,8 +54,14 @@ export function captureGridColumns(compact: boolean): string {
   return compact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) clamp(280px, 26%, 360px)';
 }
 
-// Floor for the hero (live view, replay scrubber, coverage heatmap, 3D scene) in the
-// flow regime. There it has no parent height to inherit — its ancestors are all auto —
-// so without a floor it collapses to nothing and the operator scrolls past an empty
-// box. 56vh keeps it dominant on a phone while leaving the panel below it visible.
-export const HERO_MIN_HEIGHT = 'min(56vh, 520px)';
+// FLOOR for hero content with no intrinsic size (a code preview, a stack of camera
+// tiles) in the flow regime, where no ancestor has a height to inherit — without it
+// the box collapses to nothing. 56vh keeps the panel below it within reach.
+export const HERO_VIEWPORT_BUDGET = 'min(56vh, 520px)';
+
+// CEILING for the single-media hero box (live tile, scrubber, heatmap, 3D scene).
+// It only ever bites in landscape, where a full-width 16:9 box is taller than the
+// viewport: the box keeps its width, the frame pillarboxes inside it, and at 90dvh
+// the image spends nearly the whole screen height (the panel scrolls in below).
+// Portrait is untouched — there the aspect height is always well under this.
+export const HERO_MEDIA_CEILING = '90dvh';

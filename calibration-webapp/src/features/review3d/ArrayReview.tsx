@@ -136,12 +136,18 @@ function Frustum({
         <Line key={i} points={[apex, c]} color={color} lineWidth={anchor ? 2 : 1.2} />
       ))}
       <Line points={[...corners, corners[0]]} color={color} lineWidth={anchor ? 2.4 : 1.6} />
-      {/* distanceFactor compensates the halved frustum size: labels stay legible. */}
-      <Html position={apex} center distanceFactor={size * 20} style={{ pointerEvents: 'none' }}>
+      {/* Fixed screen-size tag. No distanceFactor: it scales the label like a 3D
+          object, so the nearest camera wore a giant name plate covering its own
+          frustum — worst on the small mobile canvas. And no `center`: anchored on
+          the apex it hid the very point it labels; the screen-space offset parks it
+          up-right of the camera, whatever the scene orientation. zIndexRange [1,0]:
+          above the canvas, below the World-frame panel (z 2) and every app overlay. */}
+      <Html position={apex} zIndexRange={[1, 0]} style={{ pointerEvents: 'none' }}>
         <div
           style={{
-            padding: '2px 7px',
-            borderRadius: 10,
+            transform: 'translate(9px, calc(-100% - 6px))',
+            padding: '1px 6px',
+            borderRadius: 8,
             background: 'rgba(9,9,11,0.78)',
             border: `1px solid ${color}`,
             color: '#e4e4e7',
@@ -160,7 +166,7 @@ function Frustum({
 // Tiny billboard letter at an axis tip — the RGB code alone was not readable.
 function AxisLabel({ position, text, color }: { position: Vec3; text: string; color: string }) {
   return (
-    <Html position={position} center style={{ pointerEvents: 'none' }}>
+    <Html position={position} center zIndexRange={[1, 0]} style={{ pointerEvents: 'none' }}>
       <span style={{ color, fontSize: 11, fontWeight: 700, textShadow: '0 0 4px #000' }}>
         {text}
       </span>
@@ -320,7 +326,18 @@ export function ArrayReview({
         flexDirection: 'column',
       }}
     >
-      <Box style={{ flex: 1, minHeight: 0, position: 'relative' }}>
+      {/* overflow hidden: a label whose 3D anchor projects outside the view is an
+          absolutely-positioned DOM node, not a canvas pixel — unclipped it paints
+          over whatever surrounds the scene. Radius matches the canvas corner. */}
+      <Box
+        style={{
+          flex: 1,
+          minHeight: 0,
+          position: 'relative',
+          overflow: 'hidden',
+          borderRadius: 'var(--mantine-radius-md)',
+        }}
+      >
         <Canvas
           camera={{ position: initialCamera, up: VIEW_UP, fov: 50 }}
           style={{
@@ -507,15 +524,16 @@ export function ArrayReview({
               : undefined
           }
         />
+        {/* Worst-case width (tabular digits): no "group" prefix, no flat 110px — but
+            fully natural width made the slider breathe as the counter gains digits. */}
         <Text
           className="rc-tnum"
           fz="0.72rem"
           c="dark.2"
-          w={110}
           ta="right"
-          style={{ flex: 'none' }}
+          style={{ flex: 'none', minWidth: `${`${maxGroup} / ${maxGroup}`.length}ch` }}
         >
-          group {current} / {maxGroup}
+          {current} / {maxGroup}
         </Text>
       </Group>
     </Box>

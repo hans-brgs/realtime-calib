@@ -348,16 +348,16 @@ function PreparePanel({
           {trimStart}–{trimEnd}
         </Text>
       </Group>
-      {/* xs is 30px — well under the touch floor. In the flow regime the panel is
-          full width anyway, so the roomier size costs nothing (ADR-0041). */}
       {/* `color="gray"` light-variant measured 1.03 contrast against --rc-panel — a dark
           wash on a near-black panel, effectively invisible. On these surfaces no fill
           buys much (the violet tint is 1.14); the EDGE is what makes a control read, so
           the accent border carries it at 4.52. Both tokens are the design system's, and
-          the pair stays subordinate to the filled Compute below. */}
+          the pair stays subordinate to the filled Compute below.
+          Compact sizing: sm (36px) — operator-tuned on device; md and lg both read as
+          oversized pills. A deliberate exception to the 44px touch floor. */}
       <Group gap="xs" mb="lg" grow>
         <Button
-          size={compact ? 'lg' : 'xs'}
+          size={compact ? 'sm' : 'xs'}
           variant="light"
           style={{ border: '1px solid var(--rc-accent-deep)' }}
           onClick={() => onTrimStart(frame)}
@@ -365,7 +365,7 @@ function PreparePanel({
           Set in @ {frame}
         </Button>
         <Button
-          size={compact ? 'lg' : 'xs'}
+          size={compact ? 'sm' : 'xs'}
           variant="light"
           style={{ border: '1px solid var(--rc-accent-deep)' }}
           onClick={() => onTrimEnd(frame)}
@@ -576,6 +576,12 @@ function IntrinsicsInner() {
   return (
     <>
       <CaptureWizardLayout
+        // Review is 'scene' for BOTH toggle positions, not just the 3D poses: keying
+        // the box on the toggle made it jump ~170px <-> ~470px on every switch, and
+        // the heatmap carries its own chrome (title + legend) whose container-query
+        // sizing starved the map in the short frame box (~210px wide on a phone).
+        // One stable box; each view centers inside it.
+        compactHero={wizard.step === 'review' ? 'scene' : 'frame'}
         top={
           <SegmentedControl
             color="violet"

@@ -3,7 +3,7 @@ import { Center, Text } from '@mantine/core';
 import { Track } from 'livekit-client';
 import type { CSSProperties } from 'react';
 
-import { useCompactLayout } from '@/components/layout/useCompactLayout';
+import { HERO_MEDIA_CEILING, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { CameraTile } from '@/features/preview/CameraTile';
 
 // Resolves a track's display position + label from the operator's pending index order
@@ -66,7 +66,13 @@ export function CameraGrid({ arrange }: { arrange?: TrackArrangement }) {
         overflow: 'hidden',
       };
   const cellStyle: CSSProperties = compact
-    ? { width: '100%', aspectRatio: '16 / 9', flex: '0 0 auto' }
+    ? // Same treatment as the single-media hero (ADR-0041): full width, 16:9, capped
+      // by the media ceiling. In landscape a full-width 16:9 tile is TALLER than the
+      // viewport (~474px on a 402px-high phone), so without the cap no tile ever fits
+      // on screen; capped, each tile pillarboxes its frame between black side bands.
+      // The explicit width matters: with it left auto, the max-height would transfer
+      // into a max-width through the aspect ratio and shrink + left-align the tile.
+      { width: '100%', aspectRatio: '16 / 9', maxHeight: HERO_MEDIA_CEILING, flex: '0 0 auto' }
     : { minWidth: 0, minHeight: 0 };
 
   return (

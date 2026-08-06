@@ -23,7 +23,7 @@ import { useEffect, useState } from 'react';
 import { useAppSelector } from '@/app/hooks';
 import {
   captureGridColumns,
-  HERO_MIN_HEIGHT,
+  HERO_VIEWPORT_BUDGET,
   screenHeight,
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
@@ -189,7 +189,7 @@ export function ExportScreen() {
                 flex: 1,
                 // Flow: nothing above sets a height, so floor the preview or it
                 // collapses to nothing under the stacked panel (ADR-0041).
-                minHeight: compact ? HERO_MIN_HEIGHT : 0,
+                minHeight: compact ? HERO_VIEWPORT_BUDGET : 0,
                 overflow: 'auto',
                 border: '1px solid var(--rc-border)',
                 borderRadius: 'var(--mantine-radius-md)',
@@ -201,7 +201,7 @@ export function ExportScreen() {
             <Center
               style={{
                 flex: 1,
-                minHeight: compact ? HERO_MIN_HEIGHT : undefined,
+                minHeight: compact ? HERO_VIEWPORT_BUDGET : undefined,
                 border: '1px dashed var(--rc-border)',
                 borderRadius: 'var(--mantine-radius-md)',
               }}
