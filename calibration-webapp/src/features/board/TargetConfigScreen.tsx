@@ -20,6 +20,7 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { measurementOf, withMeasurement } from '@/features/board/measurement';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
 import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
@@ -90,6 +91,7 @@ export function TargetConfigScreen() {
     <TargetConfigForm
       intrinsicSeed={intrinsicSeed}
       extrinsicSeed={session?.extrinsic_board ?? intrinsicSeed}
+      measurementSeed={measurementOf(session)}
     />
   );
 }
@@ -97,9 +99,11 @@ export function TargetConfigScreen() {
 function TargetConfigForm({
   intrinsicSeed,
   extrinsicSeed,
+  measurementSeed,
 }: {
   intrinsicSeed: Board;
   extrinsicSeed: Board;
+  measurementSeed: number | '';
 }) {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
@@ -114,11 +118,11 @@ function TargetConfigForm({
   const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
     session?.extrinsic_board != null,
   );
-  // The measurement of an INHERITED board. Held apart from `intrinsic` rather
-  // than patched into it: clearing the field to retype would otherwise leave a
-  // zero size on the intrinsic board, which the intrinsic tab — no longer
-  // showing the field — could then try to save. Folded in on save.
-  const [inheritedSize, setInheritedSize] = useState<number>(intrinsicSeed.square_size_mm);
+  // One measurement for all three size fields (inherited board, separate ChArUco,
+  // separate marker) — it is the same physical question each time. Held apart
+  // from the board objects so the field can start empty without putting a zero
+  // size on a board, and so clearing it to retype cannot corrupt one.
+  const [measurement, setMeasurement] = useState<number | ''>(measurementSeed);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
@@ -139,15 +143,17 @@ function TargetConfigForm({
   //
   // Inheriting is the case to watch: the extrinsic step then uses the intrinsic
   // board object itself, so the measurement taken here ends up on THAT board.
-  const measuredSize = editingInherited
-    ? inheritedSize
-    : board.board_type === 'charuco'
-      ? board.square_size_mm
-      : board.marker_size_mm;
-  const missingMeasurement = active === 'extrinsic' && !(measuredSize > 0);
+  const missingMeasurement =
+    active === 'extrinsic' && !(typeof measurement === 'number' && measurement > 0);
   const measurementError = missingMeasurement
     ? 'Required — this measurement sets the extrinsic scale.'
     : undefined;
+  // Mantine hands back '' for an emptied field; keep it empty rather than
+  // coercing to 0, so "not measured yet" stays distinct from "measured zero".
+  const onMeasurementChange = (value: number | string) => {
+    const next = typeof value === 'number' ? value : Number(value);
+    setMeasurement(value === '' || !Number.isFinite(next) ? '' : next);
+  };
 
   useEffect(() => {
     fetchBoardDictionaries()
@@ -187,21 +193,26 @@ function TargetConfigForm({
     const target: BoardTarget = active;
     setSaving(true);
     try {
+      // Guarded by the disabled Save, so on the extrinsic tab this is a number.
+      const mm = typeof measurement === 'number' ? measurement : 0;
       if (editingInherited) {
         // Inheriting: the extrinsic solve reads the intrinsic board itself, so
         // the measurement taken here has to land on THAT board — persist it
         // first, then send board=null to confirm the inheritance. Re-saving the
         // intrinsic board does not rewind the wizard: the backend only advances
         // the step from INTRINSIC_BOARD, and we are past it.
-        const measured = { ...intrinsic, square_size_mm: inheritedSize };
+        const measured = withMeasurement(intrinsic, mm);
         await dispatch(
           applyBoardConfig({ target: 'intrinsic', board: normalizeBoard(measured) }),
         ).unwrap();
         setIntrinsic(measured);
       }
       // Inheriting sends board=null: the backend keeps extrinsic_board null and
-      // completes Target Config.
-      const payload = editingInherited ? null : normalizeBoard(board);
+      // completes Target Config. The intrinsic tab carries no measurement — its
+      // board keeps whatever size it already had, unread by that calibration.
+      const payload = editingInherited
+        ? null
+        : normalizeBoard(target === 'extrinsic' ? withMeasurement(board, mm) : board);
       await dispatch(applyBoardConfig({ target, board: payload })).unwrap();
       // Saving the intrinsic board advances to the extrinsic choice — surface that tab
       // (the backend now stops at extrinsic_board_choice, so the view stays here).
@@ -351,8 +362,9 @@ function TargetConfigForm({
                 withAsterisk
                 description="Measure the printed square to the mm — it sets the extrinsic accuracy."
                 error={measurementError}
-                value={inheritedSize}
-                onChange={(v) => setInheritedSize(Number(v) || 0)}
+                placeholder="measure the print"
+                value={measurement}
+                onChange={onMeasurementChange}
                 min={1}
                 decimalScale={2}
                 step={0.5}
@@ -430,8 +442,9 @@ function TargetConfigForm({
                         withAsterisk
                         description="Measure the printed square to the mm — it sets the extrinsic accuracy."
                         error={measurementError}
-                        value={board.square_size_mm}
-                        onChange={(v) => patch({ square_size_mm: Number(v) || 0 })}
+                        placeholder="measure the print"
+                        value={measurement}
+                        onChange={onMeasurementChange}
                         min={1}
                         decimalScale={2}
                         step={0.5}
@@ -468,8 +481,9 @@ function TargetConfigForm({
                     withAsterisk
                     description="Measure the printed marker to the mm — it sets the extrinsic accuracy."
                     error={measurementError}
-                    value={board.marker_size_mm}
-                    onChange={(v) => patch({ marker_size_mm: Number(v) || 0 })}
+                    placeholder="measure the print"
+                    value={measurement}
+                    onChange={onMeasurementChange}
                     min={1}
                     decimalScale={2}
                     step={0.5}
