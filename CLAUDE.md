@@ -131,13 +131,22 @@ Une décision architecturale (bibliothèque, pattern, trade-off de perf, format 
 
 ## 🧪 Référence Caliscope
 
-Caliscope (BSD-2-Clause) est la **référence conceptuelle** pour la logique de calibration. Points d'ancrage validés (**sur les sources**, main + v0.5.4, 2026-07-12) :
-- Intrinsèque : Caliscope appelle `cv2.calibrateCamera` **sans aucun flag de modèle** (ADR-0032) → 5 coefficients `[k1, k2, p1, p2, k3]`, aspect libre. Notre implémentation : `cv2.calibrateCameraExtended` + `CALIB_USE_INTRINSIC_GUESS` seul (le variant Extended expose `perViewErrors` pour l'outlier-rejection, ADR-0009).
-- Extrinsèque : PnP/`stereoCalibrate` pairwise, chaînage transitif depuis une ancre, bundle adjustment `scipy.least_squares` sur la capture volume.
-- OpenCV mainline ≥ 4.7 (ArUco/ChArUco intégrés), API `CharucoDetector` (≥ 4.8).
-- Format de sortie : TOML par caméra (`port`, `size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation` en **mètres**, `error`, `grid_count` = nombre de **vues**). Cf. ADR-0002 et spec `camera-array-config`.
+Caliscope (BSD-2-Clause) est la **référence conceptuelle** pour la logique de calibration — jamais une dépendance. Points d'ancrage validés **sur les sources**, à deux époques qu'il ne faut pas confondre :
 
-**Toujours grounder les claims sur la doc/le code Caliscope plutôt que sur des suppositions.**
+**v0.5.4 / main de 2026-07-12** (l'ancrage historique du projet, celui que citent les ADR-0002/0009/0012/0023/0032) :
+- Intrinsèque : `cv2.calibrateCamera` **sans aucun flag de modèle** (ADR-0032) → 5 coefficients `[k1, k2, p1, p2, k3]`, aspect libre.
+- Extrinsèque : PnP/`stereoCalibrate` pairwise, chaînage transitif depuis une ancre, bundle adjustment `scipy.least_squares` sur la capture volume.
+
+**v0.11.5 (commit `ddda95b4`), vérifiée le 2026-08-06** — l'amont a beaucoup bougé ; ne pas grounder un claim « Caliscope fait X » sans préciser la version :
+- Intrinsèque : `cv2.calibrateCamera` **avec `CALIB_USE_INTRINSIC_GUESS`** + un sélecteur de frames par couverture — convergence avec notre implémentation, pas une divergence. L'ancrage « sans flags » reste vrai pour ≤ 0.5.4.
+- Extrinsèque : cible **single-ArUco** possible (`ArucoTracker`, 4 coins par marker, sans raffinement subpixel), bootstrap épipolaire, puis un pipeline en 4 temps — optimize linéaire → optimize `soft_l1` (avec `refine_intrinsics` **gaté** par un depth-ratio ≥ 2) → filtre percentile **2.5 % par caméra** → re-optimize.
+- Contraintes de **rigidité** de la cible dans le BA : 6 distances par marker (4 côtés + 2 diagonales) blanchies à σ = 2 mm, résidus concaténés à ceux de reprojection.
+- Le RMSE annoncé est euclidien, **post-filtre**, et exprimé à la résolution des vidéos fournies — d'où l'importance d'ADR-0042 pour toute comparaison.
+- Dépendances notables : `av` (PyAV) pour le décodage, `pandas` pour les observations.
+
+Communs aux deux époques : OpenCV mainline ≥ 4.7 (ArUco/ChArUco intégrés), API `CharucoDetector` (≥ 4.8) ; format de sortie TOML par caméra (`port`, `size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation` en **mètres**, `error`, `grid_count` = nombre de **vues**). Cf. ADR-0002 et spec `camera-array-config`.
+
+**Toujours grounder les claims sur la doc/le code Caliscope plutôt que sur des suppositions — et dire de quelle version on parle.**
 
 ## 🪜 Sub-CLAUDE.md
 

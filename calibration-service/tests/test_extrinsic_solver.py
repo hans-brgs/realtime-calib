@@ -248,6 +248,9 @@ def test_sweep_orchestration_solves_from_sidecars(
     assert result.error < 0.1  # px, exact synthetic data
     assert result.group_count == 6
     assert result.point_count == 6 * len(CHESS)
+    # Per-camera observation counts back the ADR-0042 error rescaling.
+    assert set(result.per_camera_observations) == set(result.cameras)
+    assert sum(result.per_camera_observations.values()) == result.observations_total
     # 3D review payload: every point carries its group; each group has a board quad
     # whose corners match the ground-truth board placement (Kabsch fit).
     assert len(result.points) == result.point_count
@@ -604,3 +607,53 @@ def test_sweep_groups_builds_complete_instants_despite_rate_mismatch(tmp_path: P
     for name in ("cam_0", "cam_1", "cam_2"):
         used = [g.frames[name].payload for g in groups if name in g.frames]
         assert len(used) == len(set(used))
+
+
+def test_scaled_errors_uniform_factor_scales_all_pixel_fields() -> None:
+    # ADR-0042: per-camera RMSEs scale by their factor; the overall re-aggregates
+    # from the observation counts — with a uniform factor that is exactly error x f.
+    from dataclasses import replace
+
+    result = replace(
+        _fixture_result(),
+        per_camera_error={"cam_0": 2.0, "cam_1": 1.0, "cam_2": 1.0},
+        error=float(np.sqrt((10 * 4.0 + 20 * 1.0 + 30 * 1.0) / 60)),
+        per_camera_observations={"cam_0": 10, "cam_1": 20, "cam_2": 30},
+    )
+    scaled = result.scaled_errors({name: 0.5 for name in result.cameras})
+    assert scaled.per_camera_error == {"cam_0": 1.0, "cam_1": 0.5, "cam_2": 0.5}
+    assert scaled.error == pytest.approx(result.error * 0.5)
+    # Geometry and dimensionless fields are untouched.
+    assert scaled.points == result.points
+    assert scaled.pair_errors == result.pair_errors
+    assert scaled.per_camera_observations == result.per_camera_observations
+
+
+def test_scaled_errors_heterogeneous_factors_weight_by_observations() -> None:
+    from dataclasses import replace
+
+    counts = {"cam_0": 10, "cam_1": 20, "cam_2": 30}
+    errors = {"cam_0": 2.0, "cam_1": 1.0, "cam_2": 1.0}
+    factors = {"cam_0": 0.5, "cam_1": 1.0, "cam_2": 0.25}
+    result = replace(
+        _fixture_result(),
+        per_camera_error=dict(errors),
+        error=999.0,  # stale on purpose: the overall must be re-aggregated
+        per_camera_observations=dict(counts),
+    )
+    scaled = result.scaled_errors(factors)
+    expected = np.sqrt(
+        sum(counts[n] * (errors[n] * factors[n]) ** 2 for n in counts) / sum(counts.values())
+    )
+    assert scaled.error == pytest.approx(float(expected))
+    assert scaled.per_camera_error["cam_2"] == pytest.approx(0.25)
+
+
+def test_scaled_errors_legacy_payload_without_counts_falls_back() -> None:
+    # Payloads persisted before per_camera_observations existed: uniform-factor
+    # fallback keeps the rescale exact for every rig recorded so far.
+    result = _fixture_result()
+    assert result.per_camera_observations == {}
+    scaled = result.scaled_errors({name: 0.5 for name in result.cameras})
+    assert scaled.error == pytest.approx(0.05)
+    assert all(v == pytest.approx(0.05) for v in scaled.per_camera_error.values())

@@ -837,6 +837,22 @@ def _native_camera_model(camera: CameraConfig) -> CameraModel:
     )
 
 
+def _output_scaled_errors(
+    result: ExtrinsicResult, session: CalibrationSession
+) -> ExtrinsicResult:
+    """Extrinsic pixel errors at the operator's output resolution (ADR-0042).
+
+    The solver reports at the native recording resolution; every operator-facing
+    surface (session state, result.json, webapp) speaks output pixels — the same
+    contract the intrinsic path applies via ``IntrinsicResult.scaled``
+    (ADR-0015). Applied exactly once, on the compute and minimize exits;
+    reorientation carries the already-scaled errors through untouched.
+    """
+    return result.scaled_errors(
+        {camera.name: camera.resize_factor or 1.0 for camera in session.cameras}
+    )
+
+
 @router.post("/extrinsic/compute", response_model=SessionOut)
 async def compute_extrinsic(
     request: Request, body: ExtrinsicComputeRequest | None = None
@@ -914,6 +930,9 @@ async def compute_extrinsic(
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
+    # Errors leave the solver in native px; the operator contract is output px
+    # (ADR-0042). ba_inputs stay native — they are solver-domain data.
+    result = _output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
     (directory / "result.json").write_text(json.dumps(asdict(result)))
     # BA observations: lets Minimize refine later without redetecting the videos.
@@ -1026,6 +1045,9 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
+    # Refine recomputes errors in native px; re-express them in output px
+    # (ADR-0042) before persisting, like the compute exit.
+    refined = _output_scaled_errors(refined, session)
     # Minimize keeps the anchor pose, so the framing marker stays meaningful.
     refined = replace(refined, framed_group=result.framed_group)
     _store_extrinsic_result(manager, refined)

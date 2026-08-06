@@ -26,16 +26,27 @@ _SUBPIX_WIN = (11, 11)
 _SUBPIX_CRITERIA = (cv2.TERM_CRITERIA_EPS + cv2.TERM_CRITERIA_MAX_ITER, 30, 0.0001)
 
 
-def _detector_params() -> cv2.aruco.DetectorParameters:
+def _detector_params(*, single_marker: bool = False) -> cv2.aruco.DetectorParameters:
     """ArUco detection tuned for small/peripheral markers on a wide-angle lens.
 
     Grounded in Caliscope + OpenCV docs: lower ``minMarkerPerimeterRate`` recovers
     small markers, higher ``polygonalApproxAccuracyRate`` tolerates barrel
-    distortion. Corner refinement is left off (harmful for ChArUco).
+    distortion.
+
+    Corner refinement splits by use (ADR-0043): OFF on the ChArUco path (the
+    chessboard interpolation + ``cornerSubPix`` do the precision work, and OpenCV
+    warns ArUco refinement degrades it), CONTOUR on the single-marker path where
+    the raw ``detectMarkers`` corners ARE the calibration observations —
+    line-fitting the quad edges on the contour pixels and intersecting them cut
+    the measured corner jitter from 1.20 to 0.74 px RMS/axis on real sweep
+    footage (SUBPIX: no effect, its saddle-point model fits chessboard X-corners,
+    not marker L-corners).
     """
     params = cv2.aruco.DetectorParameters()
     params.minMarkerPerimeterRate = 0.01  # default 0.03 — small / far markers
     params.polygonalApproxAccuracyRate = 0.05  # default 0.03 — distorted images
+    if single_marker:
+        params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_CONTOUR
     return params
 
 
@@ -182,7 +193,9 @@ class BoardDetector:
             self._object_points = np.asarray(cv_board.getChessboardCorners(), np.float32)
         else:
             self._charuco = None
-            self._aruco = cv2.aruco.ArucoDetector(dictionary, _detector_params())
+            self._aruco = cv2.aruco.ArucoDetector(
+                dictionary, _detector_params(single_marker=True)
+            )
             # Single marker: canonical centered square (TL, TR, BR, BL) for IPPE_SQUARE,
             # matching the corner order cv2.aruco returns.
             self._object_points = np.array(
