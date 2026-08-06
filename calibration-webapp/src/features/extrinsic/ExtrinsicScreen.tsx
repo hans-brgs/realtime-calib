@@ -5,6 +5,7 @@ import {
   Center,
   Group,
   Loader,
+  type MantineSpacing,
   Modal,
   NumberInput,
   Slider,
@@ -18,9 +19,10 @@ import {
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
-import { lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { InfoPopover } from '@/components/InfoPopover';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { RecordingBadge } from '@/components/RecordingBadge';
@@ -30,6 +32,17 @@ import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingMo
 import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
+import {
+  DEVIATION_GOOD_PX,
+  DEVIATION_WATCH_PX,
+  formatCount,
+  levelColor,
+  observationFilter,
+  qualityLevel,
+  REFINE_FILTER_PERCENT,
+  RIGIDITY_GOOD_MM,
+  RIGIDITY_WATCH_MM,
+} from '@/features/extrinsic/resultMetrics';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
@@ -66,21 +79,6 @@ const PHASES = [
 ];
 
 const PLAY_FPS = 8;
-
-// Per-camera deviation highlight, in pixels AT THE OUTPUT RESOLUTION — the unit
-// every reported extrinsic error now carries (ADR-0042). A bare pixel threshold
-// means nothing without that reference: the same rig at 4K and at 720p would be
-// judged on the same number.
-//
-// Anchored on the corner-detection floor rather than a round figure. A single
-// ArUco target's corners are measured to ~0.74 px RMS per axis at native
-// resolution (ADR-0043), i.e. ~0.52 px euclidean once halved to a 0.5-factor
-// output — no solve can go below that, so flagging it would be noise. "Good" sits
-// just above the floor and "watch" at roughly twice it, where the error is no
-// longer explained by detection alone. A ChArUco target refines its corners with
-// cornerSubPix and therefore sits well under both.
-const DEVIATION_GOOD_PX = 0.6;
-const DEVIATION_WATCH_PX = 1.2;
 
 // Prepare replay: scrub the SYNCHRONIZED groups — every camera's frame of the same
 // instant side by side (what the compute consumes, spread shown per group).
@@ -287,7 +285,50 @@ function GroupScrubber({
   );
 }
 
+// A metric label with its "what am I looking at" affordance, and the value pushed
+// right. Every number in this panel carries one: the summary is where an operator
+// decides to accept or redo a calibration, and a bare figure with a terse label
+// cannot support that call.
+function MetricRow({
+  label,
+  help,
+  value,
+  color,
+  mt,
+  mb,
+}: {
+  label: string;
+  help: ReactNode;
+  value: ReactNode;
+  color?: string;
+  mt?: MantineSpacing;
+  mb?: MantineSpacing;
+}) {
+  return (
+    <Group justify="space-between" wrap="nowrap" gap="xs" mt={mt} mb={mb}>
+      <Group gap={2} wrap="nowrap" style={{ minWidth: 0 }}>
+        <Text fz="0.72rem" c="dark.2">
+          {label}
+        </Text>
+        <InfoPopover label={`About ${label}`}>{help}</InfoPopover>
+      </Group>
+      <Text fz="0.78rem" fw={600} className="rc-tnum" style={{ color, flex: 'none' }}>
+        {value}
+      </Text>
+    </Group>
+  );
+}
+
+// Array result panel. Every field of the payload was weighed for a permanent spot
+// here against one test — does it change what the operator does next? The pairwise
+// stereo errors failed it and were dropped: they are the residuals of the
+// INITIALISATION the bundle adjustment then supersedes, in normalized image units
+// (dimensionless, ADR-0042), and "which camera is off" is already answered below in
+// output pixels. The Minimize observation ratio passed it and was promoted out of
+// the transient click notice, since it is what explains a reprojection error that
+// moved. A converged BA stays silent — the warning is the signal, not its absence.
 function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
+  const filter = observationFilter(result);
   return (
     <>
       <Text
@@ -300,9 +341,24 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
       >
         Array result
       </Text>
-      <Text fz="0.72rem" c="dark.2">
-        Reprojection error (all cameras)
-      </Text>
+      <Group gap={2} wrap="nowrap">
+        <Text fz="0.72rem" c="dark.2">
+          Reprojection error (all cameras)
+        </Text>
+        <InfoPopover label="About the reprojection error">
+          RMS distance between each detected board corner and the point the solved array projects
+          it back to — the array&apos;s overall quality, aggregated over every camera.
+          <br />
+          <br />
+          In pixels at the <b>export resolution</b>, the same unit as the intrinsic error, so the
+          two are directly comparable. Same bands as the per-camera figures below: under{' '}
+          {DEVIATION_GOOD_PX} px is nominal, past {DEVIATION_WATCH_PX} px something is off.
+          <br />
+          <br />
+          Convergence of the bundle adjustment is checked on every solve — if it stopped on its
+          iteration ceiling instead, a warning appears right here.
+        </InfoPopover>
+      </Group>
       <Text ff="heading" fw={700} fz="1.9rem" className="rc-tnum" mb={4}>
         {result.error.toFixed(3)}
         <Text span fz="0.9rem" c="dark.2" inherit>
@@ -312,7 +368,10 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
       </Text>
       {/* The BA stopped on its evaluation ceiling instead of a tolerance
           (ADR-0036): the poses are the best-so-far, not a converged optimum —
-          say so rather than let a truncated solve pass for a good one. */}
+          say so rather than let a truncated solve pass for a good one. The
+          converged case stays silent on purpose: it is the expected outcome, and
+          a permanent green line would cost a row of a 300px panel to say
+          "nothing to report". */}
       {result.ba_converged === false && (
         <Group gap={5} wrap="nowrap" mb="md">
           <IconAlertTriangle size={13} color="var(--rc-warning)" style={{ flex: 'none' }} />
@@ -323,71 +382,107 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         </Group>
       )}
       {result.ba_converged !== false && <Box mb="md" />}
-      {/* Board rigidity (ADR-0044): how far the reconstructed corners sit from
-          the physical target. Reprojection-independent, so it catches a solve
-          that lowered its residuals by deforming the board. Thresholds are the
-          constraint tolerance (2 mm) and its 2.5x. */}
+      {/* Board rigidity (ADR-0044): the reprojection-INDEPENDENT judge. Thresholds
+          are the constraint tolerance (2 mm) and its 2.5x — stated in the popover,
+          not left to the colour alone. */}
       {result.rigidity_mm != null && result.rigidity_mm > 0 && (
-        <Group justify="space-between" mb="md">
-          <Text fz="0.72rem" c="dark.2">
-            Board rigidity
-          </Text>
-          <Text
-            fz="0.78rem"
-            fw={600}
-            className="rc-tnum"
-            style={{
-              color:
-                result.rigidity_mm <= 2
-                  ? 'var(--rc-success)'
-                  : result.rigidity_mm <= 5
-                    ? 'var(--rc-warning)'
-                    : 'var(--rc-error)',
-            }}
-          >
-            {result.rigidity_mm.toFixed(2)} mm
-          </Text>
-        </Group>
+        <MetricRow
+          label="Board rigidity"
+          mb="md"
+          color={levelColor(qualityLevel(result.rigidity_mm, RIGIDITY_GOOD_MM, RIGIDITY_WATCH_MM))}
+          value={`${result.rigidity_mm.toFixed(2)} mm`}
+          help={
+            <>
+              How far the reconstructed target sits from the physical one: RMS deviation between
+              the corner-to-corner distances the solve reconstructed and those of the printed
+              board you measured.
+              <br />
+              <br />
+              It does not depend on the reprojection error, which is the point — a solve can lower
+              its residuals by deforming the target, and this number does not follow. A world
+              scale that drifted shows up here too.
+              <br />
+              <br />≤ {RIGIDITY_GOOD_MM} mm nominal (the tolerance the solver is given), ≤{' '}
+              {RIGIDITY_WATCH_MM} mm worth a second look, beyond that the solve is bending a
+              target it was told to keep rigid — check the measured marker size first.
+            </>
+          }
+        />
       )}
+      <Group gap={2} wrap="nowrap" mb={2}>
+        <Text fz="0.66rem" fw={600} c="dark.3" tt="uppercase" style={{ letterSpacing: '0.07em' }}>
+          Per-camera deviation
+        </Text>
+        <InfoPopover label="About the per-camera deviation">
+          Each camera&apos;s own RMS reprojection error, in pixels at the export resolution. This
+          is what tells you to re-shoot one camera rather than redo the whole array: under{' '}
+          {DEVIATION_GOOD_PX} px is nominal, past {DEVIATION_WATCH_PX} px the error is no longer
+          explained by corner detection alone.
+          <br />
+          <br />
+          The <b>anchor</b> is camera 0 — the world origin, held fixed through the bundle
+          adjustment. Its pose is the identity by definition and so cannot be wrong; the figure
+          beside it is still its own reprojection error, measured like every other camera&apos;s.
+        </InfoPopover>
+      </Group>
       {result.cameras.map((camera) => {
         const deviation = result.per_camera_error[camera];
         const color =
           deviation == null
             ? undefined
-            : deviation <= DEVIATION_GOOD_PX
-              ? 'var(--rc-success)'
-              : deviation <= DEVIATION_WATCH_PX
-                ? 'var(--rc-warning)'
-                : 'var(--rc-error)';
+            : levelColor(qualityLevel(deviation, DEVIATION_GOOD_PX, DEVIATION_WATCH_PX));
         return (
-          <Group key={camera} justify="space-between" mt="sm">
+          <Group key={camera} justify="space-between" wrap="nowrap" gap="xs" mt="sm">
             <Text fz="0.72rem" c="dark.2">
               {camera} {camera === result.cameras[0] ? '· anchor' : ''}
             </Text>
-            <Text fz="0.78rem" fw={600} className="rc-tnum" style={{ color }}>
+            <Text fz="0.78rem" fw={600} className="rc-tnum" style={{ color, flex: 'none' }}>
               {deviation?.toFixed(3) ?? '—'} px
             </Text>
           </Group>
         );
       })}
-      <Group justify="space-between" mt="md">
-        <Text fz="0.72rem" c="dark.2">
-          Groups / 3D points
-        </Text>
-        <Text fz="0.78rem" fw={600} className="rc-tnum">
-          {result.group_count} / {result.point_count}
-        </Text>
-      </Group>
-      {Object.entries(result.pair_errors).map(([pair, error]) => (
-        <Group key={pair} justify="space-between" mt="sm">
-          <Text fz="0.72rem" c="dark.2">
-            {pair.replace('|', ' × ')}
-          </Text>
-          <Text fz="0.78rem" fw={600} className="rc-tnum">
-            {error.toFixed(4)}
-          </Text>
-        </Group>
-      ))}
+      <MetricRow
+        label="Groups / 3D points"
+        mt="md"
+        value={`${result.group_count} / ${formatCount(result.point_count)}`}
+        help={
+          <>
+            A <b>group</b> is one synchronized instant of the sweep where at least two cameras saw
+            the board; a <b>3D point</b> is one board corner triangulated at one such instant.
+            <br />
+            <br />
+            Together they say how much evidence the solve stood on. A low reprojection error over
+            a handful of groups is not the same result as the same error over dozens.
+          </>
+        }
+      />
+      {/* The Minimize outlier filter (ADR-0036), persistent rather than a notice
+          that vanishes on the next click and never survives a reload. */}
+      {filter && (
+        <MetricRow
+          label="Observations"
+          mt="sm"
+          value={
+            filter.dropped > 0
+              ? `${formatCount(filter.used)} / ${formatCount(filter.total)}`
+              : formatCount(filter.total)
+          }
+          help={
+            <>
+              One observation = one board corner seen by one camera in one group. They are the
+              rows the bundle adjustment minimises.
+              <br />
+              <br />
+              A fresh solve uses them all, so a single number means nothing was filtered.{' '}
+              <b>Minimize</b> re-fits after dropping the worst {REFINE_FILTER_PERCENT}% by
+              residual — always re-filtering from the full set, never cumulatively — so a{' '}
+              <i>used / total</i> pair is what that click cost in data, and it explains a
+              reprojection error that moved while the recording did not.
+            </>
+          }
+        />
+      )}
     </>
   );
 }
