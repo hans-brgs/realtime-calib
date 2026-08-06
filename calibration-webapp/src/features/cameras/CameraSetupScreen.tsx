@@ -45,6 +45,7 @@ import {
   selectDetectedCameras,
   selectDetectStatus,
 } from '@/features/cameras/camerasSlice';
+import { PREVIEW_MIRROR } from '@/features/preview/mirror';
 import { PreviewGrid, type TrackArrangement } from '@/features/preview/PreviewGrid';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
@@ -225,7 +226,13 @@ function ImportThumbnail({ name }: { name: string }) {
           muted
           playsInline
           onError={() => setFailed(true)}
-          style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'contain',
+            display: 'block',
+            transform: PREVIEW_MIRROR, // same mirror as the live tiles, for continuity
+          }}
         />
       )}
       <Text

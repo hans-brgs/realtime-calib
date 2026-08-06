@@ -3,6 +3,7 @@ import { IconPlayerPauseFilled, IconPlayerPlayFilled } from '@tabler/icons-react
 import { useEffect, useRef, useState } from 'react';
 
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
+import { PREVIEW_MIRROR } from '@/features/preview/mirror';
 import { intrinsicPreviewUrl } from '@/transport/httpClient';
 
 // Prepare-step replay (ADR-0027/0037): a native <video> over the CFR-retimed
@@ -172,7 +173,12 @@ export function PrepareScrubber({
           onLoadedMetadata={(event) => {
             event.currentTarget.currentTime = frameTime(Math.min(frame, max), fps);
           }}
-          style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+          style={{
+            maxWidth: '100%',
+            maxHeight: '100%',
+            objectFit: 'contain',
+            transform: PREVIEW_MIRROR, // same mirror as the live tiles, for continuity
+          }}
         />
         {compact && (
           <Group

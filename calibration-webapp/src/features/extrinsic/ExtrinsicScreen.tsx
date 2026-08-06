@@ -30,6 +30,7 @@ import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingMo
 import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CovisibilityMatrix } from '@/features/extrinsic/CovisibilityMatrix';
+import { PREVIEW_MIRROR } from '@/features/preview/mirror';
 import { CameraGrid } from '@/features/preview/PreviewGrid';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
@@ -119,7 +120,12 @@ function PreviewFrame({
       onLoadedMetadata={(event) => {
         event.currentTarget.currentTime = (index + 0.5) / fps;
       }}
-      style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+      style={{
+        maxWidth: '100%',
+        maxHeight: '100%',
+        objectFit: 'contain',
+        transform: PREVIEW_MIRROR, // same mirror as the live tiles, for continuity
+      }}
     />
   );
 }

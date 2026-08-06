@@ -6,6 +6,8 @@ import {
 } from '@livekit/components-react';
 import { Box, Group, Text } from '@mantine/core';
 
+import { PREVIEW_MIRROR } from '@/features/preview/mirror';
+
 // One camera tile (style inspired by vision-webapp): rounded video with a light
 // border, a name label + health dot (top-left), and connection-quality / mute
 // indicators from LiveKit (top-right). Rich health states land in F3.
@@ -17,7 +19,9 @@ export function CameraTile({ trackRef, label }: { trackRef: TrackReference; labe
 
   // The tile fills its grid cell (no scroll); `objectFit: contain` preserves each
   // camera's real aspect ratio (16:9, 4:3, …) and letterboxes with black bars where
-  // the cell shape differs — never stretching or cropping the frame.
+  // the cell shape differs — never stretching or cropping the frame. The video is
+  // mirrored for the operator (`PREVIEW_MIRROR`); the labels below are siblings, not
+  // children, so they stay readable.
   return (
     <Box
       style={{
@@ -33,7 +37,13 @@ export function CameraTile({ trackRef, label }: { trackRef: TrackReference; labe
     >
       <VideoTrack
         trackRef={trackRef}
-        style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
+        style={{
+          width: '100%',
+          height: '100%',
+          objectFit: 'contain',
+          display: 'block',
+          transform: PREVIEW_MIRROR,
+        }}
       />
 
       <Group
