@@ -116,8 +116,12 @@ function TargetConfigForm({
   );
   const [intrinsic, setIntrinsic] = useState<Board>(intrinsicSeed);
   const [extrinsic, setExtrinsic] = useState<Board>(extrinsicSeed);
+  // Read from the stored intention, not from the data: an inherited board is
+  // materialized (a copy of the intrinsic geometry), so its mere presence proves
+  // nothing — and comparing geometries would call a deliberately identical
+  // separate board "inherited".
   const [extrinsicDifferent, setExtrinsicDifferent] = useState<boolean>(
-    session?.extrinsic_board != null,
+    session?.extrinsic_board != null && !session.extrinsic_inherited,
   );
   // One measurement for all three size fields (inherited board, separate ChArUco,
   // separate marker) — it is the same physical question each time. Held apart
@@ -196,25 +200,19 @@ function TargetConfigForm({
     try {
       // Guarded by the disabled Save, so on the extrinsic tab this is a number.
       const mm = typeof measurement === 'number' ? measurement : 0;
-      if (editingInherited) {
-        // Inheriting: the extrinsic solve reads the intrinsic board itself, so
-        // the measurement taken here has to land on THAT board — persist it
-        // first, then send board=null to confirm the inheritance. Re-saving the
-        // intrinsic board does not rewind the wizard: the backend only advances
-        // the step from INTRINSIC_BOARD, and we are past it.
-        const measured = withMeasurement(intrinsic, mm);
-        await dispatch(
-          applyBoardConfig({ target: 'intrinsic', board: normalizeBoard(measured) }),
-        ).unwrap();
-        setIntrinsic(measured);
-      }
-      // Inheriting sends board=null: the backend keeps extrinsic_board null and
-      // completes Target Config. The intrinsic tab carries no measurement — its
-      // board keeps whatever size it already had, unread by that calibration.
-      const payload = editingInherited
-        ? null
-        : normalizeBoard(target === 'extrinsic' ? withMeasurement(board, mm) : board);
-      await dispatch(applyBoardConfig({ target, board: payload })).unwrap();
+      // One button, one target, one write. Inheriting sends the intrinsic
+      // geometry carrying the measurement taken here, flagged `inherited`: the
+      // backend materializes it under [extrinsic_board], so config.toml tells the
+      // same story as this screen. It rebuilds the geometry from the intrinsic
+      // board itself, so the copy cannot drift from what it claims to inherit.
+      // The intrinsic tab carries no measurement — that calibration is scale-free.
+      const measured = editingInherited ? intrinsic : board;
+      const payload = normalizeBoard(
+        target === 'extrinsic' ? withMeasurement(measured, mm) : measured,
+      );
+      await dispatch(
+        applyBoardConfig({ target, board: payload, inherited: editingInherited }),
+      ).unwrap();
       // Saving the intrinsic board advances to the extrinsic choice — surface that tab
       // (the backend now stops at extrinsic_board_choice, so the view stays here).
       if (target === 'intrinsic') {
@@ -354,9 +352,8 @@ function TargetConfigForm({
               <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />} mb="md">
                 <Text fz="0.82rem">The extrinsic calibration inherits the intrinsic board.</Text>
               </Alert>
-              {/* The geometry is inherited, the measurement is not: it is only
-                  needed now, and it is stored on the intrinsic board because
-                  that is the object the extrinsic solve reads in this mode. */}
+              {/* The geometry is inherited, the measurement is not: it is asked
+                  for here and stored here, on the materialized extrinsic board. */}
               <NumberInput
                 label="Square size (mm)"
                 withAsterisk

@@ -403,9 +403,10 @@ function ExtrinsicInner() {
   const cameraNames = cameras.map((c) => c.name);
   const allDone = cameras.length > 0 && cameras.every((c) => c.status === 'extrinsic_done');
   const anchor = cameras.find((c) => c.index === 0)?.name ?? cameraNames[0] ?? '—';
-  // Same fallback as the service's effective_extrinsic_board: the board frame
-  // anchor differs per target (marker center vs ChArUco first corner).
-  const extrinsicBoard = session?.extrinsic_board ?? session?.intrinsic_board ?? null;
+  // The board frame anchor differs per target (marker center vs ChArUco first
+  // corner). No fallback on the intrinsic board: reaching this screen means the
+  // extrinsic step was validated, so the board it defined is the one that exists.
+  const extrinsicBoard = session?.extrinsic_board ?? null;
   const markerBoard = extrinsicBoard?.board_type === 'aruco';
 
   // Backend-served knob defaults/bounds (GET /defaults, ADR-0036).

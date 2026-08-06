@@ -386,7 +386,7 @@ class CameraPublishService:
         session = self._sessions.current_or_none()
         if session is None:
             return None
-        board = session.effective_extrinsic_board() if extrinsic else session.intrinsic_board
+        board = session.extrinsic_board if extrinsic else session.intrinsic_board
         return BoardDetector(board) if board is not None else None
 
     async def start(self) -> None:

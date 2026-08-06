@@ -1,30 +1,22 @@
-import type { Board, Session, WizardStep } from '@/transport/types';
-
-// Target Config is the last step at which no human has confirmed a board yet, so
-// up to here every board number on screen is a seed — a backend default or a
-// previous session's value.
-const TARGET_CONFIG_PENDING: WizardStep[] = ['entry', 'intrinsic_board', 'extrinsic_board_choice'];
+import type { Board, Session } from '@/transport/types';
 
 /**
  * Seed for the printed-size field, or `''` to leave it blank.
  *
  * Never seeded from a default: a pre-filled 40 mm is indistinguishable from a
  * measurement the operator actually took, and that number scales every exported
- * distance — the silent failure mode this guards against. The field stays empty
- * until Target Config has been confirmed at least once; past that point the
- * stored value IS their own measurement, so blanking it would force a needless
- * re-measure on every revisit.
+ * distance — the silent failure mode this guards against.
  *
- * Which board is read mirrors the backend's `effective_extrinsic_board`: the
- * explicit extrinsic board when there is one, the inherited intrinsic board
- * otherwise. The scale is the square side for ChArUco and the marker side for a
+ * Reading the extrinsic board alone is what makes that safe, and it needs no
+ * wizard-step guard to be: that board only exists once the extrinsic step has
+ * been confirmed (inheriting materializes a copy of the intrinsic geometry
+ * there), so a size found here IS the operator's own measurement. Before that —
+ * and on a session predating the materialization — there is nothing to seed
+ * from. The scale is the square side for ChArUco and the marker side for a
  * single marker, like `board_unit_mm`.
  */
 export function measurementOf(session: Session | null): number | '' {
-  if (!session || TARGET_CONFIG_PENDING.includes(session.step)) {
-    return '';
-  }
-  const board = session.extrinsic_board ?? session.intrinsic_board;
+  const board = session?.extrinsic_board;
   if (!board) {
     return '';
   }

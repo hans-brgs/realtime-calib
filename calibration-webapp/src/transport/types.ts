@@ -70,7 +70,11 @@ export type CaptureView =
 
 export interface BoardConfigRequest {
   target: BoardTarget;
-  board: Board | null; // null = inherit the intrinsic board (extrinsic only)
+  board: Board | null; // null clears the extrinsic block (the step goes back to unvalidated)
+  // Extrinsic only: the board inherits the intrinsic geometry and only its
+  // measured size is read — the service rebuilds the copy from the intrinsic
+  // board, so what lands in config.toml cannot drift from what is on screen.
+  inherited?: boolean;
 }
 
 // One actionable load-time anomaly (ADR-0036 fail-loud): the wizard stage to
@@ -90,7 +94,11 @@ export interface Session {
   export_targets?: string[];
   cameras: CameraConfig[];
   intrinsic_board: Board | null;
+  // Set as soon as the extrinsic step is validated: inheriting materializes a
+  // copy of the intrinsic board here rather than leaving this null, so null means
+  // "step not validated" and nothing else.
   extrinsic_board: Board | null;
+  extrinsic_inherited?: boolean; // that copy is an inherited one, not a board of its own
 }
 
 // Pipeline defaults AND bounds served by the backend (GET /defaults, ADR-0036).

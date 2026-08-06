@@ -167,6 +167,9 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
+    # The export scales translations by the EXTRINSIC board's measurement, which
+    # only exists once that step is walked (ADR-0045).
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
 
     # Extrinsics incomplete -> 422 (no camera configured yet).
     assert client.post("/export", json={"formats": ["caliscope"]}).status_code == 422
@@ -210,6 +213,7 @@ def test_export_preview_renders_without_writing(tmp_path: Path) -> None:
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
     manager.current().cameras.extend(_session().cameras)
 
     preview = client.post("/export/preview", json={"formats": ["caliscope", "unity"], "units": "m"})

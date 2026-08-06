@@ -195,8 +195,13 @@ class BoardIn(BaseModel):
 
 class BoardConfigRequest(BaseModel):
     target: Literal["intrinsic", "extrinsic"]
-    # None = inherit the intrinsic board (extrinsic only); required for intrinsic.
+    # None clears the extrinsic block (the step goes back to "not validated");
+    # required for intrinsic, and whenever `inherited` is set.
     board: BoardIn | None = None
+    # Extrinsic only: the board inherits the intrinsic geometry, and only its
+    # measured size is read from `board` — the service rebuilds the copy from the
+    # intrinsic board so a client cannot desynchronize it (ADR-0045).
+    inherited: bool = False
 
 
 class BoardOut(BoardIn):
@@ -223,6 +228,9 @@ class SessionOut(BaseModel):
     cameras: list[CameraConfigOut]
     intrinsic_board: BoardOut | None
     extrinsic_board: BoardOut | None
+    # Whether extrinsic_board is a materialized copy of the intrinsic one
+    # (ADR-0045) — drives the webapp's "different board" toggle.
+    extrinsic_inherited: bool = False
 
 
 class SessionSummaryOut(BaseModel):
@@ -316,6 +324,7 @@ def _session_out(session: CalibrationSession, manager: SessionManager) -> Sessio
         ],
         intrinsic_board=_board_out(session.intrinsic_board),
         extrinsic_board=_board_out(session.extrinsic_board),
+        extrinsic_inherited=session.extrinsic_inherited,
     )
 
 
@@ -763,7 +772,7 @@ async def start_extrinsic(request: Request) -> dict[str, object]:
         raise HTTPException(
             status_code=422, detail=f"cameras missing intrinsics: {', '.join(missing)}"
         )
-    if session.effective_extrinsic_board() is None:
+    if session.extrinsic_board is None:
         raise HTTPException(status_code=422, detail="no extrinsic board defined")
 
     service = get_publish_service(request)
@@ -866,7 +875,7 @@ async def compute_extrinsic(
     params = body or ExtrinsicComputeRequest()
     manager = get_manager(request)
     session = manager.current()
-    board = session.effective_extrinsic_board()
+    board = session.extrinsic_board
     if board is None:
         raise HTTPException(status_code=422, detail="no extrinsic board defined")
     uncalibrated = [
@@ -996,7 +1005,7 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
             raise HTTPException(status_code=422, detail="group has no board pose")
         # Single-ArUco targets: the marker frame sits at its CENTER (cv2
         # convention); a ChArUco board frame originates at its first corner.
-        board = manager.current().effective_extrinsic_board()
+        board = manager.current().extrinsic_board
         marker = board is not None and board.board_type is not BoardType.CHARUCO
         transform = quad_origin_transform(
             quad, at_center=marker, ground=True
@@ -1027,7 +1036,7 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     """
     manager = get_manager(request)
     session = manager.current()
-    board = session.effective_extrinsic_board()
+    board = session.extrinsic_board
     if board is None:
         raise HTTPException(status_code=422, detail="no extrinsic board defined")
     result = _load_extrinsic_result(manager)
@@ -1177,7 +1186,7 @@ class ExportRequest(BaseModel):
 
 def _export_board(session: CalibrationSession) -> CalibrationBoard:
     """Validate the session is exportable and return its board (ADR-0026)."""
-    board = session.effective_extrinsic_board()
+    board = session.extrinsic_board
     if board is None:
         raise HTTPException(status_code=422, detail="no board defined")
     if not session.cameras or any(c.rotation is None for c in session.cameras):
@@ -1322,9 +1331,15 @@ async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut
     manager = get_manager(request)
     try:
         board = _to_board(body.board) if body.board is not None else None
-        if board is not None:
+        if board is not None and not body.inherited:
+            # Inheriting reads only the measured size from this board; the rest is
+            # rebuilt from the intrinsic board, itself validated when it was
+            # defined (ADR-0045). Validating the submitted geometry here would
+            # reject fields the service is about to discard — a caller sending a
+            # 20 mm measurement next to the default 30 mm marker would take
+            # "marker >= square" for a board that never gets stored.
             validate_board(board)
-        session = manager.define_board(body.target, board)
+        session = manager.define_board(body.target, board, inherited=body.inherited)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     return _session_out(session, manager)
@@ -1342,11 +1357,7 @@ async def preview_board(body: BoardIn) -> Response:
 @router.get("/board/{target}/image.png")
 async def board_image(request: Request, target: Literal["intrinsic", "extrinsic"]) -> Response:
     session = get_manager(request).current()
-    board = (
-        session.intrinsic_board
-        if target == "intrinsic"
-        else session.effective_extrinsic_board()
-    )
+    board = session.intrinsic_board if target == "intrinsic" else session.extrinsic_board
     if board is None:
         raise HTTPException(status_code=404, detail=f"no {target} board defined")
     return Response(content=render_board_png(board), media_type="image/png")
