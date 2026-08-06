@@ -50,7 +50,7 @@ class NoActiveSessionError(RuntimeError):
 def validate_session_id(session_id: str) -> str:
     """Validate a session id destined to become a folder name (ADR-0028).
 
-    Public: the pre-recorded session import (ADR-0031) reuses this exact
+    Public: the pre-recorded session import (ADR-0035) reuses this exact
     security boundary instead of duplicating it.
     """
     sid = session_id.strip()
@@ -324,7 +324,7 @@ class SessionManager:
     def confirm_camera_setup(self) -> CalibrationSession:
         """Advance past Camera Setup WITHOUT rebuilding the camera configs.
 
-        Load-from-files flow (ADR-0031): the cameras derive from the imported
+        Load-from-files flow (ADR-0035): the cameras derive from the imported
         videos — there is nothing to re-detect, and ``configure_cameras`` would
         drop them. Confirming just unlocks Intrinsics. Idempotent once past;
         refuses to skip the board steps (wizard order, spec wizard-navigation).

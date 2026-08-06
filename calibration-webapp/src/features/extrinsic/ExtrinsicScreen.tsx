@@ -354,7 +354,7 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
 function ExtrinsicInner() {
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
-  // Imported session (ADR-0031): capture is neutralised — the sub-wizard starts
+  // Imported session (ADR-0035): capture is neutralised — the sub-wizard starts
   // on Prepare (the sweep came with the archive) and never offers recording.
   const imported = session?.mode === 'load-from-files';
   const covisibility = useAppSelector(selectCovisibility);
@@ -511,7 +511,7 @@ function ExtrinsicInner() {
         compactHero={wizard.step === 'review' ? 'scene' : 'stack'}
         stepper={
           <PhaseStepper
-            // Imported session: the capture phase does not exist (ADR-0031).
+            // Imported session: the capture phase does not exist (ADR-0035).
             phases={imported ? PHASES.filter((p) => p.key !== 'capture') : PHASES}
             current={wizard.step}
           />
@@ -669,7 +669,7 @@ function ExtrinsicInner() {
               <Button fullWidth variant="light" mb="sm" onClick={() => void transcode.run()}>
                 Recompute (tune again)
               </Button>
-              {/* No re-record on an imported session (ADR-0031): there are no live
+              {/* No re-record on an imported session (ADR-0035): there are no live
                   cameras, and a sweep would overwrite the imported videos. */}
               {!imported && (
                 <Button

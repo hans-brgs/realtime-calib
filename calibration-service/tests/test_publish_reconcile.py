@@ -20,7 +20,7 @@ def _service(tmp_path: Path) -> CameraPublishService:
 
 
 def test_load_from_files_session_resolves_no_targets(tmp_path: Path) -> None:
-    # Imported session (ADR-0031): capture is neutralised — even with cameras
+    # Imported session (ADR-0035): capture is neutralised — even with cameras
     # configured, the publisher must resolve ZERO targets (no V4L2, no tracks).
     manager = SessionManager(tmp_path, "imported")
     session = manager.current()

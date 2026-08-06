@@ -1,4 +1,4 @@
-"""Ingest a pre-recorded session archive into the canonical session layout (ADR-0031).
+"""Ingest a pre-recorded session archive into the canonical session layout (ADR-0035).
 
 "Load from files": the operator uploads a ZIP or tar(.gz/.bz2/.xz) of
 already-captured videos (``intrinsics/cam_<n>.<ext>``, ``extrinsics/cam_<n>.<ext>``,
@@ -60,7 +60,7 @@ from calibration_service.synchronization.caliscope_alignment import (
 
 logger = logging.getLogger(__name__)
 
-# Upload contract (ADR-0031). The ZIP uses the plural spelling; the singular is
+# Upload contract (ADR-0035). The ZIP uses the plural spelling; the singular is
 # tolerated so a Caliscope-style folder (calibration/extrinsic) drops in as-is.
 _INTRINSIC_DIRS = ("intrinsics", "intrinsic")
 _EXTRINSIC_DIRS = ("extrinsics", "extrinsic")
@@ -229,7 +229,7 @@ def _scan_phase(
 
 
 def plan_import(root: Path) -> ImportPlan:
-    """Validate the extracted archive against the import contract (ADR-0031)."""
+    """Validate the extracted archive against the import contract (ADR-0035)."""
     root = _effective_root(root)
     intrinsic_folder = _find_dir(root, _INTRINSIC_DIRS)
     extrinsic_folder = _find_dir(root, _EXTRINSIC_DIRS)
@@ -295,7 +295,7 @@ def _source_fps(source: Path) -> float:
 
 
 def _normalise_video(source: Path, destination: Path) -> VideoProperties:
-    """Bring one uploaded video into the canonical layout (ADR-0031).
+    """Bring one uploaded video into the canonical layout (ADR-0035).
 
     Remux ``-c copy`` by default (container only, frames untouched); re-encode to
     CFR MJPG only when the source is VFR or the remuxed file does not probe usable.
@@ -582,7 +582,7 @@ def _materialize(plan: ImportPlan, sessions_dir: Path, session_id: str) -> list[
 
 
 def ingest(archive: Path, session_id: str, sessions_dir: Path) -> CalibrationSession:
-    """Import a pre-recorded session archive into a fresh session folder (ADR-0031).
+    """Import a pre-recorded session archive into a fresh session folder (ADR-0035).
 
     Raises ``ValueError``/``ImportValidationError`` (bad name or contract, HTTP 422),
     ``FileExistsError`` (session exists, 409), ``UnreadableArchiveError`` (not a

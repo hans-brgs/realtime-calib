@@ -11,7 +11,7 @@ interface ScreenRouterProps {
 }
 
 // Maps the active view to its screen. Every wizard stage is live; loading from
-// files is a dashboard modal (ADR-0031), not a view of its own.
+// files is a dashboard modal (ADR-0035), not a view of its own.
 export function StepContent({ view }: ScreenRouterProps) {
   switch (view) {
     case 'session':

@@ -1,4 +1,4 @@
-"""Thin ffmpeg/ffprobe helpers for the pre-recorded session import (ADR-0031).
+"""Thin ffmpeg/ffprobe helpers for the pre-recorded session import (ADR-0035).
 
 Ingest runs off the event loop (executor, like the intrinsic/extrinsic compute),
 so these are **synchronous** wrappers around ``ffmpeg`` / ``ffprobe`` — both

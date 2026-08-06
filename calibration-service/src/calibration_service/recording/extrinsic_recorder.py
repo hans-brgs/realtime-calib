@@ -117,7 +117,7 @@ def read_timestamps(path: Path) -> list[float]:
 
 
 def parse_caliscope_timestamps(path: Path) -> dict[str, list[float]]:
-    """Parse a Caliscope ``timestamps.csv`` into per-camera frame times (ADR-0031).
+    """Parse a Caliscope ``timestamps.csv`` into per-camera frame times (ADR-0035).
 
     Format (Caliscope import contract): two named columns ``cam_id,frame_time`` — one
     row per recorded frame, in ANY order; ``cam_id`` is the numeric part of ``cam_<n>``
