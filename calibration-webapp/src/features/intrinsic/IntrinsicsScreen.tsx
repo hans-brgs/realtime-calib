@@ -22,6 +22,7 @@ import { Track } from 'livekit-client';
 import { type CSSProperties, lazy, Suspense, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { labelWithHelp } from '@/components/labelWithHelp';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { RecordingBadge } from '@/components/RecordingBadge';
@@ -396,16 +397,25 @@ function PreparePanel({
         mb="md"
       />
       <NumberInput
-        label="Keyframe cap (max kept)"
+        {...labelWithHelp(
+          'Keyframe cap (max kept)',
+          <>
+            Out of the analyzed frames, how many are kept to solve on — and they are not the first
+            N. The cap sets how many <i>spots</i> to cover, spread over board tilt and position in
+            the frame; at each spot the sharpest frame is the one kept.
+            <br />
+            <br />
+            So a lower cap computes faster but samples that spread more coarsely, which tends to
+            leave the frame&apos;s edges and corners unobserved — where distortion is strongest. The
+            Results step reports the image coverage that came out (target ≥ 70%); raise the cap and
+            recompute if it falls short.
+          </>,
+        )}
         value={keyframeCap}
         onChange={(v) => onCap(Math.max(capBounds[0], Number(v) || capBounds[0]))}
         min={capBounds[0]}
         max={capBounds[1]}
-        mb="md"
       />
-      <Text fz="0.66rem" c="dark.3">
-        Fewer keyframes → faster compute, potentially lower coverage.
-      </Text>
     </>
   );
 }

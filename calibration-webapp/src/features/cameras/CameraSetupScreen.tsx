@@ -31,6 +31,8 @@ import {
   screenHeight,
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
+import { InfoPopover } from '@/components/InfoPopover';
+import { labelWithHelp } from '@/components/labelWithHelp';
 import { ScreenHeader } from '@/components/ScreenHeader';
 import {
   buildConfigRequest,
@@ -835,9 +837,26 @@ function LiveCameraSetup() {
 
                 <Box>
                   <Group justify="space-between" align="baseline" mb={6}>
-                    <Text fz="0.69rem" c="dark.2">
-                      Resize factor · s
-                    </Text>
+                    <Group gap={2} wrap="nowrap">
+                      <Text fz="0.69rem" c="dark.2">
+                        Resize factor · s
+                      </Text>
+                      {/* Composed by hand rather than through labelWithHelp: this
+                          row also carries the live output readout, which no Mantine
+                          label slot can host. The Select below therefore has no
+                          <label> of its own and gets its name from an aria-label —
+                          it had none at all before. */}
+                      <InfoPopover label="About the resize factor">
+                        Calibration always runs at the camera&apos;s native resolution, where there
+                        is the most detail to measure. The factor only sizes what leaves the app:
+                        the exported intrinsics are scaled with it (K_out = s·K), and every error
+                        this app reports is expressed at that output resolution.
+                        <br />
+                        <br />
+                        So s trades file size and downstream cost against resolution — never
+                        calibration accuracy.
+                      </InfoPopover>
+                    </Group>
                     {output && (
                       <Text fz="0.69rem" c="var(--rc-accent)" className="rc-tnum">
                         output → {output.width}×{output.height}
@@ -845,6 +864,7 @@ function LiveCameraSetup() {
                     )}
                   </Group>
                   <Select
+                    aria-label="Resize factor"
                     data={(defaults?.resize_factors ?? [1]).map((s) => ({
                       value: String(s),
                       label: `s = ${s.toFixed(2)}`,
@@ -859,12 +879,19 @@ function LiveCameraSetup() {
                 </Box>
 
                 <Select
-                  label="Capture FPS"
-                  description={
-                    fpsOptions.length > 0
-                      ? "Rates at or below the camera's native max for this resolution. Lower rates are paced by the service (fewer frames, less USB load)."
-                      : undefined
-                  }
+                  {...labelWithHelp(
+                    'Capture FPS',
+                    <>
+                      Only rates at or below every camera&apos;s native maximum{' '}
+                      <i>for this resolution</i> are offered — which is why the list shrinks when
+                      you pick a larger frame.
+                      <br />
+                      <br />
+                      Lower rates are paced by the service: fewer frames to move over USB, and
+                      fewer to detect the board in later. A sweep does not need a high rate, it
+                      needs the board seen from many angles.
+                    </>,
+                  )}
                   data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}
                   value={fps !== null ? String(fps) : null}
                   onChange={(value) => value && setFps(Number(value))}
@@ -917,10 +944,13 @@ function LiveCameraSetup() {
                 color="var(--rc-accent)"
                 style={{ flex: 'none', marginTop: 1 }}
               />
+              {/* Only the destructive consequence stays always-on — it is the one
+                  thing here that changes what the operator does next. The native/
+                  K_out = s·K rationale moved to the resize factor's own popover,
+                  next to the control it explains. */}
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
-                Calibrated in native; the factor applies on export (K_out = s·K). Applying a
-                changed configuration rebuilds the cameras — completed calibrations are discarded
-                (you will be asked to confirm).
+                Applying a changed configuration rebuilds the cameras — completed calibrations are
+                discarded (you will be asked to confirm).
               </Text>
             </Group>
           </Paper>
