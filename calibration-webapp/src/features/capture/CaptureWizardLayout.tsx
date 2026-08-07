@@ -1,7 +1,7 @@
 import { Box, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
-import { STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
+import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -129,11 +129,13 @@ export function CaptureWizardLayout({
             </Text>
           )}
           <Box
-            mt="auto"
             pt="md"
             style={
               compact
                 ? {
+                    // Owned here rather than by each panel's trailing element, which
+                    // left the rule glued to the last line of text on most steps.
+                    marginTop: STICKY_ACTION_GAP,
                     position: 'sticky',
                     bottom: 0,
                     // Full-bleed inside the panel: its 16px padding would otherwise
@@ -148,7 +150,9 @@ export function CaptureWizardLayout({
                     // their labels and thumbs painted through it.
                     zIndex: STICKY_ACTION_LAYER,
                   }
-                : undefined
+                : // Locked: no rule to space, and the action is pushed to the bottom
+                  // of the panel it shares with the content above it.
+                  { marginTop: 'auto' }
             }
           >
             {compact && message && (
