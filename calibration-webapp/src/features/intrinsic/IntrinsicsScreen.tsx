@@ -170,7 +170,18 @@ function GaugesPanel({ coverage }: { coverage: CoverageMetrics | null }) {
           stacked layout). Swapping the copy alone would not fix it: the panel width is
           fluid, and at its 280px floor the "not detected" line wraps to two while every
           counterpart wording fits on one (measured) — so the space is held, not guessed. */}
-      <Box mt="md" style={{ minHeight: 'calc(0.72rem * 1.55 * 2)' }}>
+      {/* Bottom-aligned inside that reserve: the slack has to sit ABOVE the message,
+          never below it. Held at the top, the spare line became trailing whitespace
+          that pushed this panel ~19px further from the sticky separator than every
+          other one — the reserve is for panel height, not for spacing the rule. */}
+      <Box
+        mt="md"
+        style={{
+          minHeight: 'calc(0.72rem * 1.55 * 2)',
+          display: 'flex',
+          alignItems: 'flex-end',
+        }}
+      >
         <Text fz="0.72rem" c="dark.3">
           {found
             ? 'Board detected — sweep it across the whole frame.'

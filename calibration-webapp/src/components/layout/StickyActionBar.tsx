@@ -19,6 +19,20 @@ import { useCompactLayout } from '@/components/layout/useCompactLayout';
 // the wizard's full-page drawer is pinned at 1000. 20 stays far below all of them.
 export const STICKY_ACTION_LAYER = 20;
 
+// Breathing room between the panel content and the separator, shared by both bars.
+//
+// It has to be owned HERE, not by each panel's last element. Every panel puts its
+// spacing on top (`mt="md"`) and nothing at the bottom, so the gap above the rule was
+// whatever the trailing element happened to leave: zero on the Result, Prepare and
+// Co-visibility panels, where the last line of text ended up glued to the rule. The
+// one panel that looked right — the live gauges — only did so by accident: its last
+// block reserves two lines for a message that wraps at narrow widths, so a blank line
+// showed through. Spacing that depends on what a panel happens to end with drifts per
+// step, which is exactly what this fixes.
+//
+// 16 matches the padding below the rule, so the separator sits in symmetric space.
+export const STICKY_ACTION_GAP = 16;
+
 // Pins a screen's primary action to the bottom of the viewport in the flow regime
 // (ADR-0041). There the settings panel stacks under the big view and the page scrolls,
 // so an action at the end of the panel can sit far below the fold — Start / Compute /
@@ -47,7 +61,7 @@ export function StickyActionBar({
       style={{
         position: 'sticky',
         bottom: 0,
-        marginTop: 'auto',
+        marginTop: STICKY_ACTION_GAP,
         // Own the vertical rhythm in compact: children are lifted out of the parent's
         // flex `gap` into this Box, so re-establish a comparable gap here.
         display: 'flex',
