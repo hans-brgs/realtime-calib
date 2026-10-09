@@ -346,8 +346,8 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
           Reprojection error (all cameras)
         </Text>
         <InfoPopover label="About the reprojection error">
-          RMS distance between each detected board corner and the point the solved array projects
-          it back to — the array&apos;s overall quality, aggregated over every camera.
+          RMS distance between each detected board corner and the point the solved array projects it
+          back to — the array&apos;s overall quality, aggregated over every camera.
           <br />
           <br />
           In pixels at the <b>export resolution</b>, the same unit as the intrinsic error, so the
@@ -393,18 +393,18 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
           value={`${result.rigidity_mm.toFixed(2)} mm`}
           help={
             <>
-              How far the reconstructed target sits from the physical one: RMS deviation between
-              the corner-to-corner distances the solve reconstructed and those of the printed
-              board you measured.
+              How far the reconstructed target sits from the physical one: RMS deviation between the
+              corner-to-corner distances the solve reconstructed and those of the printed board you
+              measured.
               <br />
               <br />
               It does not depend on the reprojection error, which is the point — a solve can lower
-              its residuals by deforming the target, and this number does not follow. A world
-              scale that drifted shows up here too.
+              its residuals by deforming the target, and this number does not follow. A world scale
+              that drifted shows up here too.
               <br />
               <br />≤ {RIGIDITY_GOOD_MM} mm nominal (the tolerance the solver is given), ≤{' '}
-              {RIGIDITY_WATCH_MM} mm worth a second look, beyond that the solve is bending a
-              target it was told to keep rigid — check the measured marker size first.
+              {RIGIDITY_WATCH_MM} mm worth a second look, beyond that the solve is bending a target
+              it was told to keep rigid — check the measured marker size first.
             </>
           }
         />
@@ -414,8 +414,8 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
           Per-camera deviation
         </Text>
         <InfoPopover label="About the per-camera deviation">
-          Each camera&apos;s own RMS reprojection error, in pixels at the export resolution. This
-          is what tells you to re-shoot one camera rather than redo the whole array: under{' '}
+          Each camera&apos;s own RMS reprojection error, in pixels at the export resolution. This is
+          what tells you to re-shoot one camera rather than redo the whole array: under{' '}
           {DEVIATION_GOOD_PX} px is nominal, past {DEVIATION_WATCH_PX} px the error is no longer
           explained by corner detection alone.
           <br />
@@ -452,8 +452,8 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
             the board; a <b>3D point</b> is one board corner triangulated at one such instant.
             <br />
             <br />
-            Together they say how much evidence the solve stood on. A low reprojection error over
-            a handful of groups is not the same result as the same error over dozens.
+            Together they say how much evidence the solve stood on. A low reprojection error over a
+            handful of groups is not the same result as the same error over dozens.
           </>
         }
       />
@@ -470,15 +470,14 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
           }
           help={
             <>
-              One observation = one board corner seen by one camera in one group. They are the
-              rows the bundle adjustment minimises.
+              One observation = one board corner seen by one camera in one group. They are the rows
+              the bundle adjustment minimises.
               <br />
-              <br />
-              A fresh solve uses them all, so a single number means nothing was filtered.{' '}
-              <b>Minimize</b> re-fits after dropping the worst {REFINE_FILTER_PERCENT}% by
-              residual — always re-filtering from the full set, never cumulatively — so a{' '}
-              <i>used / total</i> pair is what that click cost in data, and it explains a
-              reprojection error that moved while the recording did not.
+              <br />A fresh solve uses them all, so a single number means nothing was filtered.{' '}
+              <b>Minimize</b> re-fits after dropping the worst {REFINE_FILTER_PERCENT}% by residual
+              — always re-filtering from the full set, never cumulatively — so a <i>used / total</i>{' '}
+              pair is what that click cost in data, and it explains a reprojection error that moved
+              while the recording did not.
             </>
           }
         />
