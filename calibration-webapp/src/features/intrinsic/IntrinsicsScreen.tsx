@@ -33,7 +33,9 @@ import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
 import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
+import { CameraHealthOverlay } from '@/features/preview/CameraHealthOverlay';
 import { CameraTile } from '@/features/preview/CameraTile';
+import { useCameraHealth } from '@/features/preview/useCameraHealth';
 import {
   computeIntrinsicThunk,
   selectSession,
@@ -580,6 +582,7 @@ function IntrinsicsInner() {
     isTrackReference,
   );
   const activeRef = trackRefs.find((r) => r.publication.trackName === active);
+  const activeHealth = useCameraHealth()[active ?? ''];
 
   const nextCamera = () => {
     const idx = cameras.findIndex((c) => c.name === active);
@@ -693,6 +696,11 @@ function IntrinsicsInner() {
               />
             ) : activeRef ? (
               <CameraTile trackRef={activeRef} label={active ?? undefined} />
+            ) : activeHealth?.state === 'error' ? (
+              // No track to draw the tile on: still say WHY instead of "waiting" (#46).
+              <Box pos="relative" h="100%">
+                <CameraHealthOverlay health={activeHealth} />
+              </Box>
             ) : (
               <Center h="100%">
                 <Text c="dark.3" fz="0.84rem">

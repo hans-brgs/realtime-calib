@@ -6,14 +6,20 @@ import {
 } from '@livekit/components-react';
 import { Box, Group, Text } from '@mantine/core';
 
+import { CameraHealthOverlay } from '@/features/preview/CameraHealthOverlay';
+import { healthColor, useCameraHealth } from '@/features/preview/useCameraHealth';
+
 // One camera tile (style inspired by vision-webapp): rounded video with a light
 // border, a name label + health dot (top-left), and connection-quality / mute
-// indicators from LiveKit (top-right). Rich health states land in F3.
+// indicators from LiveKit (top-right). The dot and the overlay follow the service's
+// `camera_state` telemetry (#46), keyed by the published track name — not by `label`,
+// which may already show a pending reorder.
 // `label` overrides the track-derived name (used to reflect a pending index reorder
 // before it is applied/republished). The base name is the published track name (cam_i),
 // since one participant carries all tracks now (ADR-0018).
 export function CameraTile({ trackRef, label }: { trackRef: TrackReference; label?: string }) {
   const name = label ?? trackRef.publication.trackName;
+  const health = useCameraHealth()[trackRef.publication.trackName];
 
   // The tile fills its grid cell (no scroll); `objectFit: contain` preserves each
   // camera's real aspect ratio (16:9, 4:3, …) and letterboxes with black bars where
@@ -35,6 +41,7 @@ export function CameraTile({ trackRef, label }: { trackRef: TrackReference; labe
         trackRef={trackRef}
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
       />
+      <CameraHealthOverlay health={health} />
 
       <Group
         gap={6}
@@ -48,7 +55,7 @@ export function CameraTile({ trackRef, label }: { trackRef: TrackReference; labe
           padding: '3px 8px',
         }}
       >
-        <Box w={7} h={7} style={{ borderRadius: '50%', background: 'var(--rc-success)' }} />
+        <Box w={7} h={7} style={{ borderRadius: '50%', background: healthColor(health) }} />
         <Text fz="0.69rem" c="dark.0">
           {name}
         </Text>

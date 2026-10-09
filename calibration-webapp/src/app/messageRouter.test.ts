@@ -4,6 +4,8 @@ import { describe, expect, it } from 'vitest';
 import { dataChannelMessageReceived, listenerMiddleware } from '@/app/listenerMiddleware';
 import { routeDataChannelMessage } from '@/app/messageRouter';
 import telemetryReducer, {
+  type CameraStateMessage,
+  cameraStateReceived,
   type Covisibility,
   type CoverageMetrics,
   coverageReceived,
@@ -20,6 +22,14 @@ const coverage: CoverageMetrics = {
   sharpness: 142,
   sharpness_ok: true,
   grid_count: 18,
+};
+
+const cameraState: CameraStateMessage = {
+  type: 'camera_state',
+  cameras: {
+    cam_0: { state: 'live', reason: null, for_s: 12.3, retry_in_s: null },
+    cam_1: { state: 'error', reason: 'cannot open /dev/video4', for_s: 4, retry_in_s: 2 },
+  },
 };
 
 const covisibility: Covisibility = {
@@ -42,9 +52,16 @@ describe('routeDataChannelMessage', () => {
     );
   });
 
+  it('routes camera_state to cameraStateReceived, stamped with its receipt time', () => {
+    const action = routeDataChannelMessage(JSON.stringify(cameraState));
+    expect(action?.type).toBe(cameraStateReceived.type);
+    expect(action?.payload).toMatchObject(cameraState);
+    expect(typeof (action?.payload as { receivedAt: unknown }).receivedAt).toBe('number');
+  });
+
   it('ignores an unknown type (e.g. a not-yet-routed future message)', () => {
     expect(
-      routeDataChannelMessage(JSON.stringify({ type: 'camera_state', alive: true })),
+      routeDataChannelMessage(JSON.stringify({ type: 'session_state', step: 'intrinsic' })),
     ).toBeNull();
   });
 
@@ -71,11 +88,15 @@ describe('data-channel routing (store + listener middleware)', () => {
     store.dispatch(
       dataChannelMessageReceived({ topic: 'telemetry', text: JSON.stringify(covisibility) }),
     );
+    store.dispatch(
+      dataChannelMessageReceived({ topic: 'telemetry', text: JSON.stringify(cameraState) }),
+    );
     // Listener effects run asynchronously — let the task queue drain before asserting.
     await new Promise((resolve) => setTimeout(resolve, 0));
 
     const state = store.getState();
     expect(state.telemetry.coverage.cam_0.board_coverage).toBe(0.52);
     expect(state.telemetry.covisibility?.synced_groups).toBe(12);
+    expect(state.telemetry.cameraState.cam_1.reason).toBe('cannot open /dev/video4');
   });
 });

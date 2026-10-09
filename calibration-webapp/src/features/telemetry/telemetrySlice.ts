@@ -33,12 +33,38 @@ export interface Covisibility {
   synced_groups: number;
 }
 
+// Live capture health of the whole rig (spec realtime-telemetry, #46): a full
+// snapshot re-sent every reconcile tick (>= 1 Hz) on the lossy telemetry topic.
+// `idle` = closed on purpose for the current view; `error` carries the reason.
+export type CaptureState = 'live' | 'opening' | 'error' | 'idle';
+
+export interface CameraCaptureState {
+  state: CaptureState;
+  reason: string | null;
+  for_s: number;
+  retry_in_s: number | null;
+}
+
+export interface CameraStateMessage {
+  type: 'camera_state';
+  cameras: Record<string, CameraCaptureState>;
+}
+
 interface TelemetryState {
   coverage: Record<string, CoverageMetrics>;
   covisibility: Covisibility | null;
+  cameraState: Record<string, CameraCaptureState>;
+  // Local receipt time (ms epoch) of the last snapshot: when the service stops
+  // sending (room drop, restart), the last one must not pass for current.
+  cameraStateAt: number | null;
 }
 
-const initialState: TelemetryState = { coverage: {}, covisibility: null };
+const initialState: TelemetryState = {
+  coverage: {},
+  covisibility: null,
+  cameraState: {},
+  cameraStateAt: null,
+};
 
 const telemetrySlice = createSlice({
   name: 'telemetry',
@@ -53,10 +79,21 @@ const telemetrySlice = createSlice({
     covisibilityCleared(state) {
       state.covisibility = null;
     },
+    cameraStateReceived: {
+      // Replaced wholesale: each message is the full rig, not a delta.
+      reducer(state, action: PayloadAction<CameraStateMessage & { receivedAt: number }>) {
+        state.cameraState = action.payload.cameras;
+        state.cameraStateAt = action.payload.receivedAt;
+      },
+      // The receipt clock is read here, not in the reducer, which must stay pure.
+      prepare(message: CameraStateMessage) {
+        return { payload: { ...message, receivedAt: Date.now() } };
+      },
+    },
   },
 });
 
-export const { coverageReceived, covisibilityReceived, covisibilityCleared } =
+export const { coverageReceived, covisibilityReceived, covisibilityCleared, cameraStateReceived } =
   telemetrySlice.actions;
 export default telemetrySlice.reducer;
 
@@ -67,3 +104,13 @@ export const selectCoverage =
 
 export const selectCovisibility = (state: RootState): Covisibility | null =>
   state.telemetry.covisibility;
+
+// A snapshot older than this is no longer evidence of anything: the service sends one
+// at least every second, so 5 s of silence means it stopped (room drop, restart).
+export const CAMERA_STATE_STALE_MS = 5000;
+
+export const selectCameraStates = (state: RootState): Record<string, CameraCaptureState> =>
+  state.telemetry.cameraState;
+
+export const selectCameraStateAt = (state: RootState): number | null =>
+  state.telemetry.cameraStateAt;
