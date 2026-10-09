@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import reducer, {
+  cameraStateReceived,
   type Covisibility,
   covisibilityCleared,
   covisibilityReceived,
@@ -42,5 +43,31 @@ describe('telemetrySlice', () => {
     let state = reducer(undefined, covisibilityReceived(covisibility));
     state = reducer(state, covisibilityCleared());
     expect(state.covisibility).toBeNull();
+  });
+});
+
+describe('cameraStateReceived', () => {
+  it('replaces the whole rig snapshot and records when it arrived', () => {
+    let state = reducer(
+      undefined,
+      cameraStateReceived({
+        type: 'camera_state',
+        cameras: {
+          cam_0: { state: 'live', reason: null, for_s: 1, retry_in_s: null },
+          cam_1: { state: 'error', reason: 'no frame for 3 s', for_s: 0, retry_in_s: 1 },
+        },
+      }),
+    );
+    expect(state.cameraStateAt).not.toBeNull();
+    // A full snapshot, not a delta: a camera absent from the next one is gone
+    // (removed from the config), not left over from the previous message.
+    state = reducer(
+      state,
+      cameraStateReceived({
+        type: 'camera_state',
+        cameras: { cam_0: { state: 'live', reason: null, for_s: 2, retry_in_s: null } },
+      }),
+    );
+    expect(Object.keys(state.cameraState)).toEqual(['cam_0']);
   });
 });

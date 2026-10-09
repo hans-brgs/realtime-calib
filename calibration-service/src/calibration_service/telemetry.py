@@ -88,3 +88,13 @@ def covisibility_payload(graph: CovisibilityGraph) -> dict[str, object]:
         "board_frames": dict(graph.board_frames),
         "synced_groups": graph.synced_groups,
     }
+
+
+def camera_state_payload(cameras: dict[str, dict[str, object]]) -> dict[str, object]:
+    """Build the ``camera_state`` data-channel payload (spec realtime-telemetry, #46).
+
+    ``cameras`` is :meth:`CameraHealth.snapshot` — the FULL rig, re-sent every
+    reconcile tick: the topic is lossy, so a dropped packet or a late-joining
+    webapp resyncs on the next tick instead of needing a catch-up protocol.
+    """
+    return {"type": "camera_state", "cameras": cameras}
