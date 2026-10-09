@@ -20,7 +20,6 @@ from typing import Any
 import rtoml
 
 from calibration_service.atomic_io import atomic_write_text
-from calibration_service.resolution import from_legacy_output
 from calibration_service.models.session import (
     CalibrationSession,
     CameraConfig,
@@ -28,6 +27,7 @@ from calibration_service.models.session import (
     SessionMode,
     WizardStep,
 )
+from calibration_service.resolution import from_legacy_output
 from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)

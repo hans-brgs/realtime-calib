@@ -19,6 +19,7 @@ Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import cast
@@ -28,9 +29,9 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
-from calibration_service.resolution import output_size, to_output
 from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.resolution import output_size, to_output
 
 # Real Caliscope parity (ADR-0032, verified against caliscope source): plain
 # cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
@@ -102,9 +103,47 @@ class IntrinsicResult:
 
 
 # Accumulation-map width; rows derive from the image aspect for ~square cells.
-# A raster fine enough that its quantisation of the union area is negligible, small
-# enough to ship in the metrics/telemetry payload (~96x54 at 16:9).
+# Small enough to ship in the metrics/telemetry payload (~96x54 at 16:9).
 _COVERAGE_COLS = 96
+# The union-area metric is read on a finer raster: the cell-centre test is unbiased,
+# and at this width its scatter stays under 0.5 % even for a small quad.
+_UNION_COLS = 384
+
+
+def _hull_masks(
+    image_points: list[NDArray[np.float32]], image_size: tuple[int, int], cols: int
+) -> Iterator[NDArray[np.bool_]]:
+    """Per keyframe, the cells whose CENTRE lies in its board's convex hull.
+
+    A cell counts when its centre is inside, not when an edge touches it: the
+    former truncate-and-fill credited every boundary cell and overestimated a
+    quad's area by 8 to 28 % at 96 columns (audit INT-10); the centre test is
+    unbiased.
+    """
+    width, height = image_size
+    rows = max(1, round(cols * height / max(1, width)))
+    xs = (np.arange(cols) + 0.5) * width / cols
+    ys = (np.arange(rows) + 0.5) * height / rows
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    for pts in image_points:
+        hull = cv2.convexHull(pts.reshape(-1, 2).astype(np.float32)).reshape(-1, 2)
+        hull = hull.astype(np.float64)
+        nxt = np.roll(hull, -1, axis=0)
+        orientation = np.sign(np.sum(hull[:, 0] * nxt[:, 1] - nxt[:, 0] * hull[:, 1]))
+        inside = np.zeros((rows, cols), bool)
+        # Only the cells around the hull's bounding box, a cell of margin each side:
+        # the same mask, 25x cheaper than testing the whole grid.
+        c0 = max(0, int(np.floor(hull[:, 0].min() * cols / width - 0.5)))
+        c1 = min(cols, int(np.ceil(hull[:, 0].max() * cols / width - 0.5)) + 1)
+        r0 = max(0, int(np.floor(hull[:, 1].min() * rows / height - 0.5)))
+        r1 = min(rows, int(np.ceil(hull[:, 1].max() * rows / height - 0.5)) + 1)
+        if orientation != 0 and c0 < c1 and r0 < r1:
+            box_x, box_y = grid_x[r0:r1, c0:c1], grid_y[r0:r1, c0:c1]
+            box = np.ones(box_x.shape, bool)
+            for (x0, y0), (x1, y1) in zip(hull, nxt, strict=True):
+                box &= orientation * ((x1 - x0) * (box_y - y0) - (y1 - y0) * (box_x - x0)) >= 0
+            inside[r0:r1, c0:c1] = box
+        yield inside
 
 
 def _coverage_map(
@@ -118,20 +157,13 @@ def _coverage_map(
     hull of its DETECTED corners (a partial detection credits only what it saw),
     rasterised onto a ``cols``-wide grid (rows from the image aspect) and summed.
     The intensity is a redundancy map — 0 = never covered (go fill it), 1 = seen
-    once (fragile), 3+ = well constrained — and ``_union_coverage`` reads the area
-    fraction off it, with no arbitrary grid size baked into the metric.
+    once (fragile), 3+ = well constrained.
     """
     width, height = image_size
     rows = max(1, round(cols * height / max(1, width)))
     acc = np.zeros((rows, cols), dtype=np.int32)
-    sx, sy = cols / max(1, width), rows / max(1, height)
-    for pts in image_points:
-        xy = pts.reshape(-1, 2).astype(np.float64)
-        scaled = np.column_stack((xy[:, 0] * sx, xy[:, 1] * sy)).astype(np.int32)
-        hull = cv2.convexHull(scaled)
-        mask = np.zeros((rows, cols), dtype=np.uint8)
-        cv2.fillConvexPoly(mask, hull, 1)
-        acc += mask.astype(np.int32)
+    for mask in _hull_masks(image_points, image_size, cols):
+        acc += mask
     return tuple(tuple(int(v) for v in grid_row) for grid_row in acc)
 
 
@@ -139,16 +171,18 @@ _ORIENTATION_SECTORS = 8  # Caliscope 45deg tilt-azimuth bins
 _FRONTAL_TILT_DEG = 8.0  # below this the tilt direction is meaningless -> not binned
 
 
-def _union_coverage(coverage_map: tuple[tuple[int, ...], ...]) -> float:
+def _union_coverage(
+    image_points: list[NDArray[np.float32]], image_size: tuple[int, int], cols: int = _UNION_COLS
+) -> float:
     """Image coverage = area fraction of the union of the keyframe quads (ADR-0039).
 
-    Grid-free by construction: any cell covered by at least one quad counts, so a
-    finer raster does not shift the value (unlike the former fixed-grid metric).
+    Read by the unbiased cell-centre test on a raster fine enough that its value
+    no longer depends on the grid (within 0.5 %, audit INT-10).
     """
-    if not coverage_map or not coverage_map[0]:
-        return 0.0
-    covered = sum(1 for row in coverage_map for value in row if value > 0)
-    return covered / float(len(coverage_map) * len(coverage_map[0]))
+    union: NDArray[np.bool_] | None = None
+    for mask in _hull_masks(image_points, image_size, cols):
+        union = mask if union is None else union | mask
+    return 0.0 if union is None else float(union.mean())
 
 
 def _orientation_bins(rvecs: list[NDArray[np.float64]]) -> int:
@@ -350,7 +384,7 @@ def calibrate_intrinsic(
         view_count=len(object_points),
         image_size=(width, height),
         coverage=coverage,
-        image_coverage=_union_coverage(coverage),
+        image_coverage=_union_coverage(image_points, (width, height)),
         orientation_bins=_orientation_bins(rvec_list),
         board_quads=_board_quads(rvec_list, tvec_list, cv_board),
         sharpness_min=float(min(used_sharpness)),

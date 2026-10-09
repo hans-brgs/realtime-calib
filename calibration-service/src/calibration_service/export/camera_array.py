@@ -29,8 +29,8 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from calibration_service.resolution import output_size
 from calibration_service.models.session import CalibrationSession, CameraConfig
+from calibration_service.resolution import output_size
 
 
 @dataclass(frozen=True)

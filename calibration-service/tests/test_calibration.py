@@ -195,15 +195,49 @@ def test_coverage_map_credits_only_the_covered_region() -> None:
     cmap = _coverage_map([quad], (640, 480))
     assert cmap[0][0] >= 1  # covered corner
     assert cmap[-1][-1] == 0  # opposite corner untouched
-    # ~a quarter of the image is covered (raster quantisation aside).
-    assert _union_coverage(cmap) == pytest.approx(0.25, abs=0.03)
+    # A quarter of the image is covered, read without the boundary-cell bias.
+    assert _union_coverage([quad], (640, 480)) == pytest.approx(0.25, abs=0.005)
 
 
-def test_union_coverage_is_grid_free_area_fraction() -> None:
-    empty = tuple(tuple(0 for _ in range(_COVERAGE_COLS)) for _ in range(10))
-    assert _union_coverage(empty) == 0.0
-    full = tuple(tuple(3 for _ in range(_COVERAGE_COLS)) for _ in range(10))
-    assert _union_coverage(full) == 1.0  # every cell covered (count > 0)
+def test_union_coverage_is_an_unbiased_area_fraction() -> None:
+    # INT-10: truncating then filling every touched cell overestimated a small
+    # quad's area by 8 to 28 %; the cell-centre test reads its true area.
+    assert _union_coverage([], (1920, 1080)) == 0.0
+    full = np.array([[0.0, 0.0], [1920.0, 0.0], [1920.0, 1080.0], [0.0, 1080.0]], np.float32)
+    assert _union_coverage([full], (1920, 1080)) == 1.0
+    angle = np.radians(17.0)
+    rotation = np.array([[np.cos(angle), -np.sin(angle)], [np.sin(angle), np.cos(angle)]])
+    side = np.sqrt(0.05 * 1920 * 1080)  # a rotated square of 5 % of the image
+    square = (np.array([[-1, -1], [1, -1], [1, 1], [-1, 1]]) * side / 2) @ rotation.T + [700, 500]
+    assert _union_coverage([square.astype(np.float32)], (1920, 1080)) == pytest.approx(
+        0.05, rel=0.01
+    )
+
+
+def test_hull_masks_match_a_whole_grid_evaluation() -> None:
+    # The cells are only tested around each hull's bounding box: the masks must be
+    # those of the whole grid, boundary cells included, for hulls of any size.
+    from calibration_service.calibration.intrinsic import _hull_masks
+
+    rng = np.random.default_rng(6)
+    size = (1920, 1080)
+    hulls = []
+    for _ in range(60):
+        centre = rng.uniform([0, 0], size)
+        hulls.append((centre + rng.normal(0, rng.uniform(5, 400), (6, 2))).astype(np.float32))
+    cols = 96
+    rows = round(cols * size[1] / size[0])
+    grid_x, grid_y = np.meshgrid(
+        (np.arange(cols) + 0.5) * size[0] / cols, (np.arange(rows) + 0.5) * size[1] / rows
+    )
+    for pts, mask in zip(hulls, _hull_masks(hulls, size, cols), strict=True):
+        hull = cv2.convexHull(pts).reshape(-1, 2).astype(np.float64)
+        nxt = np.roll(hull, -1, axis=0)
+        sign = np.sign(np.sum(hull[:, 0] * nxt[:, 1] - nxt[:, 0] * hull[:, 1]))
+        whole = np.full((rows, cols), sign != 0)
+        for (x0, y0), (x1, y1) in zip(hull, nxt, strict=True):
+            whole &= sign * ((x1 - x0) * (grid_y - y0) - (y1 - y0) * (grid_x - x0)) >= 0
+        assert np.array_equal(mask, whole)
 
 
 def test_orientation_bins_drops_frontal_and_counts_azimuth() -> None:

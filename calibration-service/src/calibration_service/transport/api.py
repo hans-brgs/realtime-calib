@@ -42,7 +42,6 @@ from calibration_service.calibration import (
     reorient_result,
     sweep_groups,
 )
-from calibration_service.resolution import to_native
 from calibration_service.export import (
     aniposelib_document,
     caliscope_document,
@@ -63,6 +62,7 @@ from calibration_service.recording import (
     preview_path,
 )
 from calibration_service.recording.ffmpeg import FfmpegError
+from calibration_service.resolution import to_native
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
 from calibration_service.settings import RuntimeSettings, SettingsStore
