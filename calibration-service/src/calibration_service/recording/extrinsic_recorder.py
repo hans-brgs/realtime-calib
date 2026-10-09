@@ -20,6 +20,7 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from calibration_service.atomic_io import atomic_write_text
 from calibration_service.recording.video_writer import VideoRecorder
 from calibration_service.session.store import session_dir
 from calibration_service.tuning import TUNING
@@ -79,7 +80,7 @@ class ExtrinsicRecorder:
         sidecar = self._sidecars.get(camera)
         if recorder is None or sidecar is None:
             return
-        recorder.write(image)
+        recorder.write(image)  # raises on a refused frame: no sidecar line without it
         sidecar.write(f"{timestamp:.6f}\n")
 
     def frames(self) -> dict[str, int]:
@@ -106,7 +107,8 @@ class ExtrinsicRecorder:
                 for spec in self._specs
             ]
         }
-        (self._directory / _MANIFEST_FILE).write_text(json.dumps(manifest, indent=2))
+        # Atomic: the manifest is what tells the compute a sweep exists at all.
+        atomic_write_text(self._directory / _MANIFEST_FILE, json.dumps(manifest, indent=2))
         logger.info("extrinsic sweep closed: %s", counts)
         return counts
 

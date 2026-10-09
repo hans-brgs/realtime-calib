@@ -66,7 +66,7 @@ def test_save_is_atomic_no_temp_left(tmp_path: Path) -> None:
 
     base = session_dir(tmp_path, "demo")
     assert (base / SESSION_FILE).is_file()
-    assert not (base / (SESSION_FILE + ".tmp")).exists()
+    assert [p.name for p in base.iterdir() if p.is_file()] == [SESSION_FILE]
 
 
 def test_list_sessions(tmp_path: Path) -> None:

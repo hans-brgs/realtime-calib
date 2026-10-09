@@ -29,7 +29,7 @@ _CAPTURE_FILE = "capture.mkv"
 
 
 class RecordingError(RuntimeError):
-    """Raised when the video writer cannot be opened."""
+    """Raised when the video writer cannot be opened or is handed an unusable frame."""
 
 
 def intrinsic_capture_path(sessions_dir: Path, session_id: str, camera_name: str) -> Path:
@@ -38,7 +38,7 @@ def intrinsic_capture_path(sessions_dir: Path, session_id: str, camera_name: str
 
 
 class VideoRecorder:
-    """Writes BGR frames to a lossless mkv. One recorder per camera capture."""
+    """Writes BGR frames to an MJPG mkv (near-lossless). One recorder per camera capture."""
 
     def __init__(
         self,
@@ -55,13 +55,26 @@ class VideoRecorder:
         )
         if not self._writer.isOpened():
             raise RecordingError(f"cannot open video writer for {path}")
+        self._size = (width, height)
         # JPEG quality of every recorded frame — the pixels every offline compute
         # re-detects on (default from TUNING; Settings knob wiring: ADR-0036).
         self._writer.set(cv2.VIDEOWRITER_PROP_QUALITY, quality)
         self._frames = 0
 
     def write(self, image: NDArray[np.uint8]) -> None:
-        """Append one BGR frame (must match the writer's width/height)."""
+        """Append one BGR frame; raises ``RecordingError`` if its size is not the writer's.
+
+        ``cv2.VideoWriter`` silently DROPS a frame of another size: the count (and,
+        for the extrinsic sweep, the timestamp sidecar) would advance over a frame
+        the file never received — a video that decodes to nothing behind a
+        manifest announcing N frames.
+        """
+        height, width = image.shape[:2]
+        if (width, height) != self._size:
+            raise RecordingError(
+                f"frame is {width}x{height}, {self._path.name} records "
+                f"{self._size[0]}x{self._size[1]}"
+            )
         self._writer.write(image)
         self._frames += 1
 

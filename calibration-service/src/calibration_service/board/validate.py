@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import math
-
 from calibration_service.board.dictionaries import (
     dictionary_capacity,
     is_supported,
@@ -21,7 +19,7 @@ def validate_board(board: CalibrationBoard) -> None:
         # A single ArUco marker: pick a dictionary + a marker id within its capacity.
         if not 0 <= board.marker_id < capacity:
             raise ValueError(f"marker_id must be in [0, {capacity}) for {board.dictionary}")
-        if board.marker_size_mm <= 0:
+        if not board.marker_size_mm > 0:  # also refuses nan
             raise ValueError("marker_size_mm must be > 0")
         return
 
@@ -30,10 +28,16 @@ def validate_board(board: CalibrationBoard) -> None:
         raise ValueError("columns and rows must both be >= 2")
     if not 0.0 < board.marker_ratio < 1.0:
         raise ValueError("marker_ratio must be in (0, 1) — the marker sits inside the square")
+    # Both sizes carry the metric scale: a non-positive one mirrors or collapses
+    # the exported world (the ordering check alone lets -40/-50 through). Written
+    # as "not > 0" so a nan from a hand-edited TOML is refused too.
+    if not (board.square_size_mm > 0 and board.marker_size_mm > 0):
+        raise ValueError("square_size_mm and marker_size_mm must be > 0")
     if board.marker_size_mm >= board.square_size_mm:
         raise ValueError("marker_size_mm must be smaller than square_size_mm")
-    # A ChArUco board fills half its cells (checkerboard) with markers.
-    needed = math.ceil((board.columns * board.rows) / 2)
+    # Markers fill the white cells of the checkerboard: floor(c*r/2) of them, as
+    # cv2.aruco.CharucoBoard allocates (5x7 -> 17 markers).
+    needed = (board.columns * board.rows) // 2
     if needed > capacity:
         raise ValueError(
             f"{board.columns}x{board.rows} ChArUco needs {needed} markers but "

@@ -127,6 +127,23 @@ def export_targets() -> list[ExportTarget]:
     return targets
 
 
+# Export unit -> factor applied to translations held in millimetres (ADR-0026).
+_UNIT_SCALE = {"mm": 1.0, "m": 0.001}
+
+
+def _unit_scale(units: str) -> float:
+    """Millimetre-to-``units`` factor; an unknown unit is refused, not defaulted.
+
+    It used to fall through to millimetres: a session carrying ``"km"`` wrote a mm
+    TOML while the JSON announced ``world_units: "km"``.
+    """
+    try:
+        return _UNIT_SCALE[units]
+    except KeyError:
+        expected = ", ".join(sorted(_UNIT_SCALE))
+        raise ValueError(f"unknown export units {units!r} (expected: {expected})") from None
+
+
 def _output_size(camera: CameraConfig) -> list[int]:
     """Calibration (output) resolution the stored K corresponds to (ADR-0015)."""
     factor = camera.resize_factor or 1.0
@@ -157,7 +174,7 @@ def caliscope_document(
     ``units`` scales the extrinsic translations ("mm" or "m") like the platform
     variants — Caliscope's own arrays are metre-scaled, so a drop-in export uses "m".
     """
-    scale = 0.001 if units == "m" else 1.0
+    scale = _unit_scale(units)
     document: dict[str, Any] = {}
     for camera in session.cameras:
         entry: dict[str, Any] = {
@@ -224,7 +241,7 @@ def platform_variant(
     project via the platform's own camera API instead. ``units`` scales world
     lengths ("mm" or "m"); intrinsics stay in pixels.
     """
-    scale = 0.001 if units == "m" else 1.0
+    scale = _unit_scale(units)
     convention = CONVENTIONS[format_id]
     basis = np.asarray(convention.basis, np.float64)
     forward = basis @ np.array([0.0, 0.0, 1.0])  # OpenCV optical axis, remapped
@@ -284,6 +301,8 @@ def platform_variant(
             "camera_up": [float(v) for v in local_up],
         },
         "world_units": units,
-        "anchor": next((c.name for c in session.cameras if c.index == 0), None),
+        # The gauge camera the solver holds fixed: the LOWEST index (ADR-0012) —
+        # an imported cam_1..N rig has no cam_0, and the field used to read null.
+        "anchor": min(session.cameras, key=lambda c: c.index).name if session.cameras else None,
         "cameras": cameras,
     }

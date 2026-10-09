@@ -14,13 +14,14 @@ squares.
 
 from __future__ import annotations
 
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import rtoml
 
+from calibration_service.atomic_io import atomic_write_text
+from calibration_service.board.validate import validate_board
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.session.store import session_dir
 from calibration_service.tuning import TUNING
@@ -111,8 +112,6 @@ def save_board_config(
     inherited: bool = False,
 ) -> None:
     """Persist board blocks to ``config.toml`` atomically (temp file + rename)."""
-    target = session_dir(sessions_dir, session_id)
-    target.mkdir(parents=True, exist_ok=True)
     blocks: dict[str, object] = {}
     if intrinsic is not None:
         blocks["intrinsic_board"] = _board_to_dict(intrinsic, carries_scale=False)
@@ -122,9 +121,7 @@ def save_board_config(
         block.update(_board_to_dict(extrinsic, carries_scale=True))
         blocks["extrinsic_board"] = block
 
-    tmp = target / (CONFIG_FILE + ".tmp")
-    tmp.write_text(rtoml.dumps(blocks))
-    os.replace(tmp, target / CONFIG_FILE)
+    atomic_write_text(session_dir(sessions_dir, session_id) / CONFIG_FILE, rtoml.dumps(blocks))
 
 
 def load_board_config(
@@ -154,10 +151,15 @@ def load_board_config(
             # keys — it is not a CalibrationBoard field (ADR-0045).
             block = {k: v for k, v in block.items() if k != INHERITED_KEY}
         try:
-            return _board_from_dict(block, carries_scale=carries_scale)
+            board = _board_from_dict(block, carries_scale=carries_scale)
+            # The same rules POST /board enforces: a hand-edited or legacy file
+            # must not slip a board the API would refuse (e.g. a negative size,
+            # which mirrors the exported world) past them.
+            validate_board(board)
         except (KeyError, TypeError, ValueError) as exc:
             issues.append(f"the {label} board in config.toml is invalid ({exc}) — reconfigure it")
             return None
+        return board
 
     intrinsic = read("intrinsic_board", "intrinsic", carries_scale=False)
     extrinsic = read("extrinsic_board", "extrinsic", carries_scale=True)

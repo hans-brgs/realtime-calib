@@ -28,6 +28,27 @@ def _client(tmp_path: Path) -> TestClient:
     return TestClient(create_app(SessionManager(tmp_path, "default")))
 
 
+def _configure_one_camera(client: TestClient) -> None:
+    """Configure a single 64x48 camera, cam_0 — routes naming a camera need it."""
+    response = client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": 0,
+                    "device_path": "/dev/v4l/by-path/x",
+                    "device_node": "/dev/video0",
+                    "width": 64,
+                    "height": 48,
+                    "fps": 30,
+                }
+            ],
+        },
+    )
+    assert response.status_code == 200
+
+
 def _import_zip(tmp_path: Path, tree: dict[str, int]) -> bytes:
     """An in-memory upload archive: {relpath: frame count} rendered via VideoRecorder."""
     stage = tmp_path / "zip-stage"
@@ -94,6 +115,36 @@ def test_open_session_switches_the_active_one(tmp_path: Path) -> None:
     assert client.post("/sessions/open", json={"session_id": "alpha"}).status_code == 200
     assert client.get("/session").json()["session_id"] == "alpha"
     assert client.post("/sessions/open", json={"session_id": "ghost"}).status_code == 404
+
+
+def test_failed_open_keeps_the_active_session(tmp_path: Path) -> None:
+    # A corrupt session.toml used to leave the manager pointed at it: the open
+    # answered 422, then every session route 500'd until another open.
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    client.post("/sessions", json={"session_id": "good"})
+    client.post("/sessions", json={"session_id": "bad"})
+    client.post("/sessions/open", json={"session_id": "good"})
+    (tmp_path / "bad" / "session.toml").write_text('session_id = "bad"\nstep = "bogus"\n')
+
+    response = client.post("/sessions/open", json={"session_id": "bad"})
+    assert response.status_code == 422
+    assert "unreadable" in response.json()["detail"]
+    assert client.get("/session").json()["session_id"] == "good"
+
+
+def test_unknown_export_units_load_as_default_with_an_issue(tmp_path: Path) -> None:
+    client = TestClient(create_app(SessionManager(tmp_path)))
+    client.post("/sessions", json={"session_id": "s"})
+    path = tmp_path / "s" / "session.toml"
+    path.write_text(path.read_text().replace('export_units = "m"', 'export_units = "km"'))
+
+    body = client.post("/sessions/open", json={"session_id": "s"}).json()
+    assert body["export_units"] == "m"
+    assert [issue["step"] for issue in body["issues"]] == ["export"]
+    # Choosing the units clears the alert, as a fresh board clears the board ones.
+    fixed = client.post("/export/config", json={"formats": [], "units": "mm"}).json()
+    assert fixed["issues"] == []
+    assert client.get("/session").json()["issues"] == []
 
 
 def test_sessions_location_returns_the_root(tmp_path: Path) -> None:
@@ -463,11 +514,33 @@ def test_capture_view_rejects_unknown_id(tmp_path: Path) -> None:
 def test_preview_routes_without_recording(tmp_path: Path) -> None:
     # ADR-0027: no source recording -> preview 404, status 'missing' (no job).
     client = _client(tmp_path)
-    assert client.get("/intrinsic/nope/preview").status_code == 404
-    status = client.get("/intrinsic/nope/preview/status")
+    _configure_one_camera(client)
+    assert client.get("/intrinsic/cam_0/preview").status_code == 404
+    status = client.get("/intrinsic/cam_0/preview/status")
     assert status.status_code == 200
     assert status.json()["state"] == "missing"
     assert client.get("/extrinsic/cam_0/preview").status_code == 404
+
+
+@pytest.mark.parametrize(
+    ("method", "route"),
+    [
+        ("get", "/intrinsic/nope/preview"),
+        ("get", "/intrinsic/nope/preview/status"),
+        ("post", "/intrinsic/nope/preview/transcode"),
+        ("get", "/intrinsic/nope/metrics"),
+        ("post", "/intrinsic/nope/compute"),
+        ("get", "/extrinsic/nope/preview"),
+    ],
+)
+def test_unknown_camera_is_404_before_any_work(tmp_path: Path, method: str, route: str) -> None:
+    # A path segment naming no session camera: refused up front — the intrinsic
+    # compute used to run the whole solve and only fail storing it (500).
+    client = _client(tmp_path)
+    _configure_one_camera(client)
+    response = getattr(client, method)(route)
+    assert response.status_code == 404
+    assert "unknown camera" in response.json()["detail"]
 
 
 def test_preview_serves_the_transcoded_mp4(tmp_path: Path) -> None:
@@ -475,6 +548,7 @@ def test_preview_serves_the_transcoded_mp4(tmp_path: Path) -> None:
     # covered in test_preview.py; here only the HTTP surface).
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
+    _configure_one_camera(client)
     source = manager.intrinsic_video_path("cam_0")
     source.parent.mkdir(parents=True, exist_ok=True)
     preview_path(source).write_bytes(b"not-a-real-mp4")
@@ -489,6 +563,7 @@ def test_compute_accepts_and_forwards_prepare_knobs(tmp_path: Path) -> None:
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
     client.post("/board", json={"target": "intrinsic", "board": board})
+    _configure_one_camera(client)
     path = manager.intrinsic_video_path("cam_0")
     with VideoRecorder(path, 64, 48, fps=30) as rec:
         for _ in range(3):
@@ -558,6 +633,7 @@ def test_compute_persists_metrics_for_reload(
 def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
+    _configure_one_camera(client)
     assert client.get("/intrinsic/cam_0/metrics").status_code == 404  # nothing computed
 
     path = manager.intrinsic_metrics_path("cam_0")
@@ -772,3 +848,63 @@ def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
 
     # The scrubber's frame sources are now the per-camera previews (ADR-0027);
     # their transcode lifecycle is covered in test_preview.py.
+
+
+@pytest.mark.parametrize(
+    ("content", "method", "route"),
+    [
+        ('{"cameras": ["cam_0"', "get", "/extrinsic/result"),  # truncated write
+        ('{"cameras": ["cam_0"', "post", "/extrinsic/orient"),
+        ('{"not_a_field": 1}', "post", "/extrinsic/orient"),  # another schema
+        ("[1, 2]", "get", "/extrinsic/result"),  # not an object
+    ],
+)
+def test_unreadable_result_json_is_a_422_not_a_500(
+    tmp_path: Path, content: str, method: str, route: str
+) -> None:
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    path = manager.extrinsic_dir() / "result.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content)
+    kwargs = {"json": {"op": "rotate", "axis": "y", "degrees": 90}} if method == "post" else {}
+    response = getattr(client, method)(route, **kwargs)
+    assert response.status_code == 422
+    assert "result.json" in response.json()["detail"]
+
+
+def test_unreadable_ba_inputs_is_a_422_not_a_500(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    result = {
+        "cameras": [],
+        "rotations": {},
+        "translations": {},
+        "per_camera_error": {},
+        "error": 0.0,
+        "pair_errors": {},
+        "group_count": 0,
+        "point_count": 0,
+    }
+    (directory / "result.json").write_text(json.dumps(result))
+    (directory / "ba_inputs.json").write_text('{"obs_camera": [0, 1')  # truncated
+    response = client.post("/extrinsic/minimize")
+    assert response.status_code == 422
+    assert "ba_inputs.json" in response.json()["detail"]
+
+
+def test_unreadable_intrinsic_metrics_is_a_422_not_a_500(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    _configure_one_camera(client)
+    path = manager.intrinsic_metrics_path("cam_0")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text('{"coverage": [[0')
+    response = client.get("/intrinsic/cam_0/metrics")
+    assert response.status_code == 422
+    assert "metrics.json" in response.json()["detail"]

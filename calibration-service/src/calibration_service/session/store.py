@@ -13,13 +13,13 @@ is persisted before it is considered acquired (ADR-0011).
 from __future__ import annotations
 
 import logging
-import os
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
 import rtoml
 
+from calibration_service.atomic_io import atomic_write_text
 from calibration_service.models.session import (
     CalibrationSession,
     CameraConfig,
@@ -72,10 +72,7 @@ def create_session(
 def save_session(sessions_dir: Path, session: CalibrationSession) -> None:
     """Persist ``session.toml`` atomically (temp file + rename)."""
     target = session_dir(sessions_dir, session.session_id)
-    target.mkdir(parents=True, exist_ok=True)
-    tmp = target / (SESSION_FILE + ".tmp")
-    tmp.write_text(rtoml.dumps(_to_dict(session)))
-    os.replace(tmp, target / SESSION_FILE)
+    atomic_write_text(target / SESSION_FILE, rtoml.dumps(_to_dict(session)))
 
 
 def load_session(sessions_dir: Path, session_id: str) -> CalibrationSession:

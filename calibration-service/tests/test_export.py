@@ -24,6 +24,7 @@ from calibration_service.models.session import (
     CameraStatus,
 )
 from calibration_service.session.manager import SessionManager
+from calibration_service.tuning import TUNING
 
 SQUARE_MM = 40.0
 K = [[800.0, 0.0, 320.0], [0.0, 800.0, 240.0], [0.0, 0.0, 1.0]]
@@ -201,6 +202,10 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     client.post("/export", json={"formats": ["unity"], "units": "mm"})
     unity_mm = json.loads((manager.export_dir() / "camera_array_unity.json").read_text())
     assert unity_mm["world_units"] == "mm"
+    # The folder (and so the archive) holds THIS export only: the previous
+    # selection's metre TOML must not ship next to the new millimetre JSON.
+    with zipfile.ZipFile(io.BytesIO(client.get("/export/archive").content)) as bundle:
+        assert bundle.namelist() == ["camera_array_unity.json"]
 
     assert client.post("/export", json={"formats": ["nope"]}).status_code == 422
     assert manager.current().step.value == "export"  # wizard advanced
@@ -257,3 +262,36 @@ def test_export_refuses_a_camera_without_translation() -> None:
     session.cameras[1].translation = None
     with pytest.raises(ValueError, match="cam_1"):
         caliscope_document(session, SQUARE_MM)
+
+
+@pytest.mark.parametrize("writer", ["caliscope", "threejs"])
+def test_unknown_units_are_refused_not_defaulted(writer: str) -> None:
+    # Used to fall through to millimetres while the JSON announced the bad unit.
+    with pytest.raises(ValueError, match="unknown export units"):
+        if writer == "caliscope":
+            caliscope_document(_session(), SQUARE_MM, units="km")
+        else:
+            platform_variant(_session(), writer, SQUARE_MM, units="km")
+
+
+def test_anchor_is_the_lowest_index_camera() -> None:
+    # An imported cam_1..N rig has no cam_0: the anchor is the camera the solver
+    # holds fixed, the lowest index (ADR-0012) — it used to read null.
+    session = _session()
+    for camera in session.cameras:
+        camera.index += 1
+        camera.name = f"cam_{camera.index}"
+    assert platform_variant(session, "threejs", SQUARE_MM)["anchor"] == "cam_1"
+
+
+def test_export_units_have_one_definition() -> None:
+    # The unit list exists in TUNING (served to the webapp), the writers' scale
+    # table and the API Literal: they must not drift apart.
+    from typing import get_args
+
+    from calibration_service.export.camera_array import _UNIT_SCALE
+    from calibration_service.transport.api import ExportUnits
+
+    options = set(TUNING.export_units_options)
+    assert set(_UNIT_SCALE) == options
+    assert set(get_args(ExportUnits)) == options

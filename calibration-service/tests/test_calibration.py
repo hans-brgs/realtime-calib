@@ -268,3 +268,18 @@ def test_calibrate_recovers_intrinsics() -> None:
     assert result.error < 1.0
     assert abs(result.matrix[0][0] - 600.0) / 600.0 < 0.1  # fx within 10%
     assert result.view_count == 15
+
+
+def test_solver_failure_is_reported_as_unusable_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A cv2.error out of the solver used to escape as an HTTP 500: it is a
+    # property of the views, reported like the other unusable-input cases.
+    def _assert_fails(*_args: object, **_kwargs: object) -> None:
+        raise cv2.error("(-215:Assertion failed) degenerate view")
+
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    views = [_detection(100.0 + 40.0 * i, 100.0 + 20.0 * i, 10.0) for i in range(8)]
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", _assert_fails)
+    with pytest.raises(ValueError, match="OpenCV calibration failed"):
+        calibrate_intrinsic(views, board, (640, 480))

@@ -7,8 +7,14 @@ from pathlib import Path
 
 import cv2
 import numpy as np
+import pytest
 
-from calibration_service.recording import CameraSpec, ExtrinsicRecorder, read_timestamps
+from calibration_service.recording import (
+    CameraSpec,
+    ExtrinsicRecorder,
+    RecordingError,
+    read_timestamps,
+)
 
 
 def _image(width: int = 64, height: int = 48) -> np.ndarray:
@@ -58,3 +64,14 @@ def test_unknown_camera_writes_are_ignored(tmp_path: Path) -> None:
     recorder = ExtrinsicRecorder(tmp_path, [CameraSpec("cam_0", 64, 48, 30)])
     recorder.write("cam_9", _image(), 1.0)  # not part of the sweep -> no-op
     assert recorder.close() == {"cam_0": 0}
+
+
+def test_a_refused_frame_writes_no_sidecar_line(tmp_path: Path) -> None:
+    # Sidecar line i must mean decoded frame i (ADR-0007): a frame the video
+    # refuses must not leave a timestamp behind.
+    recorder = ExtrinsicRecorder(tmp_path, [CameraSpec("cam_0", 64, 48, 30)])
+    recorder.write("cam_0", np.zeros((48, 64, 3), np.uint8), 1.0)
+    with pytest.raises(RecordingError):
+        recorder.write("cam_0", np.zeros((96, 128, 3), np.uint8), 2.0)
+    assert recorder.close() == {"cam_0": 1}
+    assert read_timestamps(tmp_path / "cam_0.timestamps") == [1.0]
