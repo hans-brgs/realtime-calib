@@ -40,9 +40,9 @@ from calibration_service.calibration.extrinsic import (
     compute_extrinsic_from_sweep,
     derive_sweep_window,
 )
-from calibration_service.resolution import to_native
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.session import CalibrationSession
+from calibration_service.resolution import to_native
 from calibration_service.session.config_store import load_board_config
 from calibration_service.session.store import load_session
 from calibration_service.tuning import TUNING
