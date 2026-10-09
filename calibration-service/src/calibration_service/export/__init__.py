@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from calibration_service.export.camera_array import (
     CONVENTIONS,
-    PLATFORM_FORMATS,
     ExportTarget,
+    aniposelib_document,
     caliscope_document,
     export_targets,
     platform_variant,
@@ -13,8 +13,8 @@ from calibration_service.export.camera_array import (
 
 __all__ = [
     "CONVENTIONS",
-    "PLATFORM_FORMATS",
     "ExportTarget",
+    "aniposelib_document",
     "caliscope_document",
     "export_targets",
     "platform_variant",

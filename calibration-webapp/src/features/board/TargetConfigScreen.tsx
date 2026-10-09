@@ -3,6 +3,7 @@ import {
   Box,
   Button,
   Group,
+  Modal,
   NumberInput,
   Paper,
   SegmentedControl,
@@ -11,7 +12,7 @@ import {
   Switch,
   Text,
 } from '@mantine/core';
-import { IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
+import { IconAlertTriangle, IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -26,8 +27,14 @@ import { ScreenHeader } from '@/components/ScreenHeader';
 import { measurementOf, withMeasurement } from '@/features/board/measurement';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
-import { fetchBoardDictionaries, previewBoard } from '@/transport/httpClient';
-import type { Board, BoardTarget, BoardType } from '@/transport/types';
+import {
+  DISCARDS_EXTRINSIC,
+  errorCode,
+  errorMessage,
+  fetchBoardDictionaries,
+  previewBoard,
+} from '@/transport/httpClient';
+import type { Board, BoardConfigRequest, BoardTarget, BoardType } from '@/transport/types';
 
 // For ChArUco the operator sets the square (measured, metric scale) + a marker ratio;
 // the marker's mm size is derived from them. ArUco (single marker) is left as-is.
@@ -157,6 +164,10 @@ function TargetConfigForm({
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  // A save the service refused because it would discard the solved camera array
+  // (ADR-0048): held until the operator confirms or cancels in the modal.
+  const [discardPending, setDiscardPending] = useState<BoardConfigRequest | null>(null);
 
   const urlRef = useRef<string | null>(null);
 
@@ -220,33 +231,45 @@ function TargetConfigForm({
 
   useEffect(() => () => void (urlRef.current && URL.revokeObjectURL(urlRef.current)), []);
 
-  const save = async () => {
-    const target: BoardTarget = active;
+  // One request, then the follow-ups of a success; a refusal that would discard
+  // the solved array opens the confirmation instead of failing (ADR-0048).
+  const submit = async (request: BoardConfigRequest) => {
     setSaving(true);
+    setSaveError(null);
     try {
-      // Guarded by the disabled Save, so on the extrinsic tab this is a number.
-      const mm = typeof measurement === 'number' ? measurement : 0;
-      // One button, one target, one write. Inheriting sends the intrinsic
-      // geometry carrying the measurement taken here, flagged `inherited`: the
-      // backend materializes it under [extrinsic_board], so config.toml tells the
-      // same story as this screen. It rebuilds the geometry from the intrinsic
-      // board itself, so the copy cannot drift from what it claims to inherit.
-      // The intrinsic tab carries no measurement — that calibration is scale-free.
-      const measured = editingInherited ? intrinsic : board;
-      const payload = normalizeBoard(
-        target === 'extrinsic' ? withMeasurement(measured, mm) : measured,
-      );
-      await dispatch(
-        applyBoardConfig({ target, board: payload, inherited: editingInherited }),
-      ).unwrap();
+      await dispatch(applyBoardConfig(request)).unwrap();
+      setDiscardPending(null);
       // Saving the intrinsic board advances to the extrinsic choice — surface that tab
       // (the backend now stops at extrinsic_board_choice, so the view stays here).
-      if (target === 'intrinsic') {
+      if (request.target === 'intrinsic') {
         setActive('extrinsic');
+      }
+    } catch (err) {
+      if (errorCode(err) === DISCARDS_EXTRINSIC && !request.discard_extrinsic) {
+        setDiscardPending(request);
+      } else {
+        setDiscardPending(null);
+        setSaveError(errorMessage(err, 'could not save the board'));
       }
     } finally {
       setSaving(false);
     }
+  };
+
+  const save = () => {
+    // Guarded by the disabled Save, so on the extrinsic tab this is a number.
+    const mm = typeof measurement === 'number' ? measurement : 0;
+    // One button, one target, one write. Inheriting sends the intrinsic
+    // geometry carrying the measurement taken here, flagged `inherited`: the
+    // backend materializes it under [extrinsic_board], so config.toml tells the
+    // same story as this screen. It rebuilds the geometry from the intrinsic
+    // board itself, so the copy cannot drift from what it claims to inherit.
+    // The intrinsic tab carries no measurement — that calibration is scale-free.
+    const measured = editingInherited ? intrinsic : board;
+    const payload = normalizeBoard(
+      active === 'extrinsic' ? withMeasurement(measured, mm) : measured,
+    );
+    void submit({ target: active, board: payload, inherited: editingInherited });
   };
 
   return (
@@ -255,6 +278,47 @@ function TargetConfigForm({
       h={screenHeight(compact)}
       style={{ display: 'flex', flexDirection: 'column' }}
     >
+      {/* Changing the target the array was solved on (ADR-0048): the poses are in
+          that target's units, so the solve goes — never silently. */}
+      <Modal
+        opened={discardPending != null}
+        // Not while the confirmed save is in flight: closing then would look like
+        // a cancel while the discard still happens.
+        onClose={() => !saving && setDiscardPending(null)}
+        closeOnClickOutside={!saving}
+        closeOnEscape={!saving}
+        withCloseButton={!saving}
+        title="Change the solved target?"
+        centered
+      >
+        <Group gap={9} wrap="nowrap" align="flex-start">
+          <IconAlertTriangle
+            size={18}
+            color="var(--rc-warning)"
+            style={{ flex: 'none', marginTop: 2 }}
+          />
+          <Text fz="0.81rem" style={{ lineHeight: 1.55 }}>
+            The camera array was solved on the current target definition. Saving this one discards
+            that solve. If you corrected the definition of the target you recorded, recompute from
+            the recorded sweep on the Extrinsic step; if it is another target, record a new sweep
+            with it. A new measurement of the same target keeps the solve.
+          </Text>
+        </Group>
+        <Group justify="flex-end" mt="lg" gap="sm">
+          <Button variant="default" disabled={saving} onClick={() => setDiscardPending(null)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            loading={saving}
+            onClick={() =>
+              discardPending && void submit({ ...discardPending, discard_extrinsic: true })
+            }
+          >
+            Save &amp; discard the solve
+          </Button>
+        </Group>
+      </Modal>
       <ScreenHeader
         title="Target Config"
         subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
@@ -547,6 +611,11 @@ function TargetConfigForm({
             <Button fullWidth mt="lg" onClick={save} loading={saving} disabled={missingMeasurement}>
               Save {active} board
             </Button>
+            {saveError && (
+              <Text c="var(--rc-error)" fz="0.78rem" mt={6}>
+                {saveError}
+              </Text>
+            )}
           </StickyActionBar>
         </Box>
       </Box>

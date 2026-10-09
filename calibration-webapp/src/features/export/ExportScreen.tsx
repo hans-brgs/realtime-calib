@@ -238,7 +238,8 @@ export function ExportScreen() {
               ]}
             />
             <Text fz="0.66rem" c="dark.2" mt={6}>
-              Applies to the platform JSON files — the Caliscope TOML is always in mm.
+              Applies to the platform JSON files and the aniposelib TOML — the Caliscope TOML is
+              always in metres, Caliscope&apos;s own unit.
             </Text>
           </Box>
 

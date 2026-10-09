@@ -73,6 +73,38 @@ def inherited_board(intrinsic: CalibrationBoard, measured: CalibrationBoard) -> 
     )
 
 
+def _extrinsic_geometry(board: CalibrationBoard | None) -> tuple[object, ...] | None:
+    """The identity of the printed extrinsic target: its geometry, not its measurement.
+
+    The board model splits geometry (what is printed) from the measured ``*_mm``
+    sizes (ADR-0020). Poses are stored in board units and the export multiplies
+    them by the CURRENT measurement, so a new measurement of the same print
+    legitimately rescales them. Any geometry field of the type — even one the
+    pose units survive, like ``marker_ratio`` or ``inverted`` — names another
+    print: the solve and its recorded sweep were made on a different target, and
+    the export used to scale them silently (ADR-0048).
+    """
+    if board is None:
+        return None
+    if board.board_type is BoardType.CHARUCO:
+        return (
+            board.board_type,
+            board.dictionary,
+            board.columns,
+            board.rows,
+            board.marker_ratio,
+            board.inverted,
+        )
+    # A single marker ignores the grid fields and the marker/square ratio.
+    return (board.board_type, board.dictionary, board.marker_id, board.inverted)
+
+
+# Solve artefacts derived from the extrinsic recording. The recording itself
+# (videos, sidecars, manifest) is kept: after a corrected definition or new
+# intrinsics, the same sweep recomputes the array without a new capture.
+_EXTRINSIC_RESULT_FILES = ("result.json", "ba_inputs.json")
+
+
 class NoActiveSessionError(RuntimeError):
     """Raised by session-scoped operations when no session is active (ADR-0028)."""
 
@@ -266,11 +298,16 @@ class SessionManager:
         rebuilt service-side so a client cannot desynchronize it. ``board=None``
         clears the block — the extrinsic step goes back to "not validated" — and no
         longer means "inherit".
+
+        A definition that changes the effective extrinsic target's geometry discards
+        the solved array (ADR-0048); the API asks the operator to confirm first
+        (``board_change_discards_extrinsic``).
         """
         session = self.current()
+        self._check_board_request(target, board, inherited)
+        discard = self.board_change_discards_extrinsic(target, board, inherited)
         if target == "intrinsic":
-            if board is None:
-                raise ValueError("intrinsic board is required")
+            assert board is not None  # checked by _check_board_request
             session.intrinsic_board = board
             if session.extrinsic_inherited and session.extrinsic_board is not None:
                 # Re-sync: while inheriting, the extrinsic block tracks the
@@ -280,16 +317,10 @@ class SessionManager:
                 session.extrinsic_board = inherited_board(board, session.extrinsic_board)
             if session.step == WizardStep.INTRINSIC_BOARD:
                 session.step = WizardStep.EXTRINSIC_BOARD_CHOICE
-        elif target == "extrinsic":
+        else:
             if inherited:
-                if board is None:
-                    raise ValueError("inheriting requires the measured board size")
-                if session.intrinsic_board is None:
-                    raise ValueError("define the intrinsic board before inheriting it")
-                if board.board_type is not session.intrinsic_board.board_type:
-                    # The measurement is read from the key its TYPE carries the
-                    # scale in; a mismatch would silently pick up a default size.
-                    raise ValueError("an inherited board must match the intrinsic board type")
+                # Both checked by _check_board_request.
+                assert board is not None and session.intrinsic_board is not None
                 session.extrinsic_board = inherited_board(session.intrinsic_board, board)
             else:
                 session.extrinsic_board = board
@@ -299,9 +330,14 @@ class SessionManager:
                 WizardStep.EXTRINSIC_BOARD_CHOICE,
             ):
                 session.step = WizardStep.CAMERA_SETUP
-        else:
-            raise ValueError(f"unknown board target: {target!r}")
+        if discard:
+            self._discard_extrinsic(session, "the extrinsic target changed")
 
+        # session.toml first: a crash between the two writes then leaves the old
+        # board without poses (the solve visibly gone, nothing exportable), never
+        # the new board next to poses solved on the old one (the silent EXP-3
+        # export).
+        save_session(self._sessions_dir, session)
         save_board_config(
             self._sessions_dir,
             self._require_session_id(),
@@ -309,11 +345,99 @@ class SessionManager:
             session.extrinsic_board,
             session.extrinsic_inherited,
         )
-        save_session(self._sessions_dir, session)
         # A fresh definition resolves any load-time board anomaly (ADR-0036).
         session.issues = [issue for issue in session.issues if issue.step != "boards"]
         logger.info("defined %s board; step -> %s", target, session.step)
         return session
+
+    def has_extrinsic_result(self) -> bool:
+        """Whether any camera of the active session carries a solved pose."""
+        return any(camera.rotation is not None for camera in self.current().cameras)
+
+    def has_extrinsic_recording(self) -> bool:
+        """Whether the active session holds a sweep of its CURRENT cameras.
+
+        The manifest is what announces a sweep; a camera rebuild removes it
+        (``configure_cameras``), so a sweep of other cameras is never offered.
+        """
+        return (self.extrinsic_dir() / "manifest.json").is_file()
+
+    def _check_board_request(
+        self, target: str, board: CalibrationBoard | None, inherited: bool
+    ) -> None:
+        """Refuse a board definition ``define_board`` cannot apply (ValueError).
+
+        Checked before the discard question too: confirming a discard for a
+        request that then fails would ask the operator for nothing.
+        """
+        if target == "intrinsic":
+            if board is None:
+                raise ValueError("intrinsic board is required")
+        elif target == "extrinsic":
+            if inherited:
+                intrinsic = self.current().intrinsic_board
+                if board is None:
+                    raise ValueError("inheriting requires the measured board size")
+                if intrinsic is None:
+                    raise ValueError("define the intrinsic board before inheriting it")
+                if board.board_type is not intrinsic.board_type:
+                    # The measurement is read from the key its TYPE carries the
+                    # scale in; a mismatch would silently pick up a default size.
+                    raise ValueError("an inherited board must match the intrinsic board type")
+        else:
+            raise ValueError(f"unknown board target: {target!r}")
+
+    def board_change_discards_extrinsic(
+        self, target: str, board: CalibrationBoard | None, inherited: bool = False
+    ) -> bool:
+        """Whether this board definition would invalidate the extrinsic solve (ADR-0048).
+
+        True when a solve exists and the EFFECTIVE extrinsic target changes
+        geometry: editing the extrinsic board, or the intrinsic board while the
+        extrinsic one inherits it. A new measurement alone keeps the solve.
+        Raises ValueError, like ``define_board``, for a request it cannot apply.
+        """
+        self._check_board_request(target, board, inherited)
+        if not self.has_extrinsic_result():
+            return False
+        session = self.current()
+        current = session.extrinsic_board
+        after: CalibrationBoard | None
+        if target == "extrinsic":
+            if inherited and board is not None and session.intrinsic_board is not None:
+                after = inherited_board(session.intrinsic_board, board)
+            else:
+                after = board
+        elif target == "intrinsic" and board is not None and session.extrinsic_inherited:
+            after = inherited_board(board, current) if current is not None else None
+        else:
+            after = current
+        return _extrinsic_geometry(after) != _extrinsic_geometry(current)
+
+    def _discard_extrinsic(self, session: CalibrationSession, reason: str) -> None:
+        """Drop the extrinsic solve: poses off every camera, its artefacts off disk.
+
+        The recording stays: after new intrinsics or a corrected definition of the
+        recorded target, the Extrinsic step recomputes from it; a sweep of another
+        print has to be recorded again. The last delivered ``export/`` stays too.
+        The wizard steps back to the extrinsic stage if it had moved past it; the
+        caller persists the session.
+        """
+        for camera in session.cameras:
+            camera.rotation = None
+            camera.translation = None
+            camera.extrinsic_error = None
+            if camera.status is CameraStatus.EXTRINSIC_DONE:
+                camera.status = CameraStatus.INTRINSIC_DONE
+        self._discard_extrinsic_files()
+        if session.step == WizardStep.EXPORT:
+            session.step = WizardStep.EXTRINSIC_CAPTURE
+        logger.info("extrinsic solve discarded: %s", reason)
+
+    def _discard_extrinsic_files(self) -> None:
+        directory = self.extrinsic_dir()
+        for name in _EXTRINSIC_RESULT_FILES:
+            (directory / name).unlink(missing_ok=True)
 
     @property
     def sessions_dir(self) -> Path:
@@ -389,6 +513,10 @@ class SessionManager:
         camera = next((c for c in session.cameras if c.name == camera_name), None)
         if camera is None:
             raise ValueError(f"unknown camera {camera_name!r}")
+        if self.has_extrinsic_result():
+            # The poses were solved with this camera's former K: a new K next to
+            # them would export an inconsistent array (ADR-0048).
+            self._discard_extrinsic(session, f"{camera_name}'s intrinsics were recomputed")
         # Calibrated at native resolution; report at the operator's output resolution
         # (native x resize_factor, ADR-0015).
         result = result.scaled(camera.resize_factor)
@@ -416,6 +544,15 @@ class SessionManager:
         session = self.current()
         session.cameras = cameras
         session.step = WizardStep.CAMERA_SETUP
+        # The fresh configs carry no pose: the solve artefacts on disk describe
+        # cameras that no longer exist (Minimize / orient would write them back).
+        self._discard_extrinsic_files()
+        # The sweep is forgotten too. Its videos are keyed by camera NAME: after a
+        # rebuild, cam_0.mkv may show another device, at another native size, than
+        # the new cam_0 (why ADR-0040 refused /cameras/order). Without its
+        # manifest the sweep is neither announced nor computable (404); the next
+        # sweep overwrites the videos.
+        (self.extrinsic_dir() / "manifest.json").unlink(missing_ok=True)
         save_session(self._sessions_dir, session)
         logger.info("configured %d camera(s); step -> %s", len(cameras), session.step)
         return session

@@ -47,6 +47,7 @@ import { CameraGrid } from '@/features/preview/PreviewGrid';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import {
   computeExtrinsicThunk,
+  refreshSession,
   selectSession,
   validateExtrinsicThunk,
 } from '@/features/session/sessionSlice';
@@ -549,6 +550,9 @@ function ExtrinsicInner() {
     },
     stop: async () => {
       await stopExtrinsic().catch(() => {});
+      // The stop answers frame counts, not the session: re-read it so the
+      // "recorded sweep" flag holds if the operator leaves before computing.
+      void dispatch(refreshSession());
     },
     afterStop: () => transcode.run(),
     compute: async () => {
@@ -823,13 +827,23 @@ function ExtrinsicInner() {
               Stop
             </Button>
           ) : (
-            <Button
-              fullWidth
-              leftSection={<IconPlayerRecordFilled size={16} />}
-              onClick={() => void wizard.startRecording()}
-            >
-              Start synchronized sweep
-            </Button>
+            <>
+              <Button
+                fullWidth
+                leftSection={<IconPlayerRecordFilled size={16} />}
+                onClick={() => void wizard.startRecording()}
+              >
+                Start synchronized sweep
+              </Button>
+              {/* A solve discarded by new intrinsics or a corrected target definition
+                  (ADR-0048) recomputes from the sweep already recorded; only a sweep
+                  of another target has to be recorded again. */}
+              {session?.extrinsic_recorded && (
+                <Button fullWidth variant="light" mt="sm" onClick={() => void transcode.run()}>
+                  Recompute from the recorded sweep
+                </Button>
+              )}
+            </>
           )
         }
         message={wizard.message}

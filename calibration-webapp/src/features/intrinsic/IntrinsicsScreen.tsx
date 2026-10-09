@@ -19,7 +19,7 @@ import {
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { Track } from 'livekit-client';
-import { type CSSProperties, lazy, Suspense, useEffect, useState } from 'react';
+import { type CSSProperties, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { labelWithHelp } from '@/components/labelWithHelp';
@@ -44,6 +44,8 @@ import {
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { type CoverageMetrics, selectCoverage } from '@/features/telemetry/telemetrySlice';
 import {
+  DISCARDS_EXTRINSIC,
+  errorCode,
   errorMessage,
   fetchIntrinsicPreviewStatus,
   retryIntrinsicPreview,
@@ -450,6 +452,13 @@ function IntrinsicsInner() {
   const [active, setActive] = useState<string | null>(cameras[0]?.name ?? null);
   const coverage = useAppSelector(selectCoverage(active));
   const camera = cameras.find((c) => c.name === active) ?? null;
+  // A solved camera array exists: a recompute changes this camera's K, which
+  // invalidates the poses — the service discards the solve, once the operator
+  // has confirmed it (ADR-0048). A ref, so the compute reads the confirmation
+  // given just before it runs.
+  const solvedArray = cameras.some((c) => c.rotation != null);
+  const [discardOpen, setDiscardOpen] = useState(false);
+  const discardExtrinsic = useRef(false);
 
   // Backend-served knob defaults/bounds (GET /defaults, ADR-0036).
   const defaults = useAppSelector(selectDefaults);
@@ -498,13 +507,32 @@ function IntrinsicsInner() {
     },
     afterStop: () => transcode.run(),
     compute: async () => {
+      // Read then clear: the confirmation covers this one request, whatever happens.
+      const discard = discardExtrinsic.current;
+      discardExtrinsic.current = false;
       if (!active) throw new Error('no active camera');
-      await dispatch(
-        computeIntrinsicThunk({
-          camera: active,
-          params: { stride, cap: keyframeCap, frame_start: trimStart, frame_end: trimEnd + 1 },
-        }),
-      ).unwrap();
+      try {
+        await dispatch(
+          computeIntrinsicThunk({
+            camera: active,
+            params: {
+              stride,
+              cap: keyframeCap,
+              frame_start: trimStart,
+              frame_end: trimEnd + 1,
+              discard_extrinsic: discard,
+            },
+          }),
+        ).unwrap();
+      } catch (err) {
+        // The service's own guard (ADR-0048): a client that missed the solve (a
+        // session solved from another device) asks here too instead of failing.
+        if (errorCode(err) === DISCARDS_EXTRINSIC) {
+          setDiscardOpen(true);
+          throw new Error('confirm discarding the solved camera array to recompute');
+        }
+        throw err;
+      }
     },
   });
 
@@ -784,7 +812,7 @@ function IntrinsicsInner() {
             <Button
               fullWidth
               loading={wizard.step === 'computing'}
-              onClick={() => void wizard.runCompute()}
+              onClick={() => (solvedArray ? setDiscardOpen(true) : void wizard.runCompute())}
             >
               Compute
             </Button>
@@ -835,6 +863,42 @@ function IntrinsicsInner() {
         onRetry={() => void transcode.retry()}
         onClose={transcode.dismiss}
       />
+
+      {/* A recompute over a solved array (ADR-0048): the new K invalidates the poses. */}
+      <Modal
+        opened={discardOpen}
+        onClose={() => setDiscardOpen(false)}
+        centered
+        title="Recompute over the solved array?"
+      >
+        <Group gap={10} mb="md" wrap="nowrap" align="flex-start">
+          <IconAlertTriangle
+            size={20}
+            color="var(--rc-warning)"
+            style={{ flex: 'none', marginTop: 2 }}
+          />
+          <Text fz="0.84rem" c="dark.1">
+            The camera array was solved with {active}&apos;s current intrinsics. Recomputing them
+            discards that solve. The extrinsic sweep stays recorded: recompute the array from it on
+            the Extrinsic step afterwards, no new sweep needed.
+          </Text>
+        </Group>
+        <Group justify="flex-end">
+          <Button variant="default" onClick={() => setDiscardOpen(false)}>
+            Cancel
+          </Button>
+          <Button
+            color="red"
+            onClick={() => {
+              discardExtrinsic.current = true;
+              setDiscardOpen(false);
+              void wizard.runCompute();
+            }}
+          >
+            Recompute &amp; discard the solve
+          </Button>
+        </Group>
+      </Modal>
 
       {/* Override double-validation (ADR-0019): re-recording overwrites the result. */}
       <Modal

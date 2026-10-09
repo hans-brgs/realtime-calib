@@ -39,6 +39,11 @@ const initialState: SessionState = {
 // null when no session is active (ADR-0028) — the shell shows the dashboard.
 export const rehydrateSession = createAsyncThunk('session/rehydrate', () => fetchSession());
 
+// Quiet re-read after a change the service made without returning the session
+// (a stopped sweep): unlike rehydrate, the status stays put, so the screen stays
+// mounted with its local wizard state.
+export const refreshSession = createAsyncThunk('session/refresh', () => fetchSession());
+
 export const fetchRecentSessions = createAsyncThunk('session/recent', () => fetchSessions());
 
 // Create a new session (unique folder name) and make it active (ADR-0028).
@@ -140,6 +145,9 @@ const sessionSlice = createSlice({
         state.session = action.payload;
       })
       .addCase(computeExtrinsicThunk.fulfilled, (state, action) => {
+        state.session = action.payload;
+      })
+      .addCase(refreshSession.fulfilled, (state, action) => {
         state.session = action.payload;
       })
       .addCase(fetchRecentSessions.fulfilled, (state, action) => {

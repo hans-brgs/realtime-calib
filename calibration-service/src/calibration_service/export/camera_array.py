@@ -1,7 +1,9 @@
-"""Calibration export documents: Caliscope TOML + per-platform JSON variants.
+"""Calibration export documents: Caliscope + aniposelib TOMLs, per-platform JSON variants.
 
-Spec [[calibration-export]] / ADR-0002. The canonical ``camera_array.toml`` keeps
-Caliscope's field semantics untouched (native fields as-is, extensions additive);
+Spec [[calibration-export]] / ADR-0002, ADR-0047. The canonical ``camera_array.toml``
+is Caliscope's native layout with its field semantics untouched (native fields
+as-is, extensions additive); ``camera_array_aniposelib.toml`` is the layout
+downstream tools read, written by Caliscope next to its own;
 the platform variants are **integration files, not engine assets** — every target
 still needs a ~10-line loader, but the dangerous 3D math (axis remap, left-handed
 mirror, quaternion convention) is done here and each file is self-describing.
@@ -82,20 +84,16 @@ CONVENTIONS: dict[str, Convention] = {
     ),
 }
 
-# Platform-variant format ids (the JSON targets); 'caliscope' (the TOML) is the
-# fifth selectable target, all optional and equal (ADR-0026).
-PLATFORM_FORMATS = tuple(CONVENTIONS)
-
 
 @dataclass(frozen=True)
 class ExportTarget:
     """A selectable export artifact for the export screen (ADR-0026)."""
 
-    id: str  # "caliscope" | platform format id
+    id: str  # "caliscope" | "aniposelib" | platform format id
     filename: str
     kind: str  # "toml" | "json" — drives the code-highlight language
     label: str  # sub-label: destination + axes/handedness
-    up: str  # "y" | "z" | "" (caliscope keeps OpenCV axes)
+    up: str  # "y" | "z" | "" (the TOMLs keep OpenCV axes)
     handedness: str  # "right" | "left" | ""
 
 
@@ -110,7 +108,17 @@ def export_targets() -> list[ExportTarget]:
             label="Caliscope · OpenCV axes",
             up="",
             handedness="",
-        )
+        ),
+        ExportTarget(
+            id="aniposelib",
+            # Caliscope v0.11.5's own name for this file, next to camera_array.toml.
+            filename="camera_array_aniposelib.toml",
+            kind="toml",
+            # Its consumers, as Caliscope v0.11.5's README names them.
+            label="aniposelib (Pose2Sim, anipose) · OpenCV axes",
+            up="",
+            handedness="",
+        ),
     ]
     for format_id, convention in CONVENTIONS.items():
         up_label = "Y-up" if convention.up == "y" else "Z-up"
@@ -163,39 +171,90 @@ def _translation_mm(camera: CameraConfig, square_size_mm: float) -> list[float]:
     return [float(v) * square_size_mm for v in camera.translation]
 
 
-def caliscope_document(
-    session: CalibrationSession, square_size_mm: float, units: str = "mm"
-) -> dict[str, Any]:
-    """The canonical ``camera_array.toml`` content (Caliscope semantics, ADR-0002).
+def caliscope_document(session: CalibrationSession, square_size_mm: float) -> dict[str, Any]:
+    """``camera_array.toml`` in Caliscope's NATIVE layout (ADR-0047).
 
-    ``distortions`` is written exactly as calibrated — the classic 5 coefficients
-    [k1,k2,p1,p2,k3] since ADR-0032 (real Caliscope parity); sessions calibrated
-    before that carry longer arrays, which OpenCV consumers accept by length.
-    ``units`` scales the extrinsic translations ("mm" or "m") like the platform
-    variants — Caliscope's own arrays are metre-scaled, so a drop-in export uses "m".
+    ``[cameras.<id>]`` tables, as Caliscope v0.11.5's ``CameraArray.to_toml``
+    writes them and ``from_toml`` reads them. The former top-level ``[cam_N]``
+    layout loaded as an EMPTY array, silently: ``from_toml`` returns
+    ``CameraArray({})`` for any file without a ``cameras`` table (so since 0.7).
+
+    Native fields keep Caliscope's semantics (ADR-0002): translations in METRES
+    whatever the export units — Caliscope's world unit, a mm value would read
+    1000x too large; rotation as a Rodrigues 3-vector; ``rotation_count = 0``
+    (no rotated sensor); ``fisheye = false``; ``distortions`` exactly as
+    calibrated, the classic 5 coefficients since ADR-0032. ``name`` and
+    ``device_path`` are additive extensions (``from_toml`` reads keys by name);
+    ``device_path`` reconciles camera id -> physical device without our session.
     """
-    scale = _unit_scale(units)
+    cameras: dict[str, Any] = {}
+    for camera in session.cameras:
+        entry: dict[str, Any] = {
+            "cam_id": camera.index,
+            "size": _output_size(camera),
+            "rotation_count": 0,
+            "error": camera.calibration_error,
+            "matrix": camera.matrix,
+            "distortions": camera.distortions,
+            "translation": _translation(camera, square_size_mm, "m"),
+            "rotation": _rotation(camera),
+            "grid_count": camera.grid_count,
+            "fisheye": False,
+            "name": camera.name,
+            "device_path": camera.device_path,
+        }
+        cameras[str(camera.index)] = {k: v for k, v in entry.items() if v is not None}
+    return {"cameras": cameras}
+
+
+def aniposelib_document(
+    session: CalibrationSession, square_size_mm: float, units: str = "m"
+) -> dict[str, Any]:
+    """``camera_array_aniposelib.toml``: top-level ``[cam_N]`` tables (ADR-0047).
+
+    The layout Caliscope v0.11.5 writes next to its native file for downstream
+    tools (``to_aniposelib_toml``): ``aniposelib.CameraGroup.load`` reads
+    ``name``, ``size``, ``matrix``, ``distortions``, ``rotation``,
+    ``translation`` and ``fisheye`` per table and skips ``metadata``. The tables
+    also carry what Caliscope <= 0.5.4 read from its ``config.toml`` (``port``,
+    ``rotation_count``, ``error``, ``grid_count``), so a METRE export pastes into
+    a legacy project unchanged — in mm its world would read 1000x too large.
+    aniposelib has no unit of its own: translations follow the export ``units``
+    (metres by default — what Caliscope writes).
+    """
     document: dict[str, Any] = {}
     for camera in session.cameras:
         entry: dict[str, Any] = {
-            "port": camera.index,
-            "name": camera.name,  # additive extension
-            # Additive extension: stable v4l identifier, so consumers can
-            # reconcile camera id -> physical device without our session files.
-            "device_path": camera.device_path,
+            "name": camera.name,
             "size": _output_size(camera),
             "matrix": camera.matrix,
             "distortions": camera.distortions,
+            "rotation": _rotation(camera),
+            "translation": _translation(camera, square_size_mm, units),
+            "fisheye": False,
+            "port": camera.index,
+            "rotation_count": 0,
             "error": camera.calibration_error,
             "grid_count": camera.grid_count,
+            "device_path": camera.device_path,
         }
-        if camera.rotation is not None:
-            entry["rotation"] = camera.rotation
-            entry["translation"] = [
-                scale * v for v in _translation_mm(camera, square_size_mm)
-            ]
         document[f"cam_{camera.index}"] = {k: v for k, v in entry.items() if v is not None}
+    # Not adjusted by anipose's own bundle adjustment (what Caliscope declares too).
+    document["metadata"] = {"adjusted": False}
     return document
+
+
+def _rotation(camera: CameraConfig) -> list[float]:
+    """The world->camera Rodrigues vector; fail loud when it is missing (ADR-0036)."""
+    if camera.rotation is None:
+        raise ValueError(f"camera {camera.name} has no extrinsic rotation — recompute first")
+    return list(camera.rotation)
+
+
+def _translation(camera: CameraConfig, square_size_mm: float, units: str) -> list[float]:
+    """The world->camera translation in ``units`` (from board squares)."""
+    scale = _unit_scale(units)
+    return [scale * v for v in _translation_mm(camera, square_size_mm)]
 
 
 def _quaternion_xyzw(rotation: NDArray[np.float64]) -> list[float]:
@@ -241,7 +300,6 @@ def platform_variant(
     project via the platform's own camera API instead. ``units`` scales world
     lengths ("mm" or "m"); intrinsics stay in pixels.
     """
-    scale = _unit_scale(units)
     convention = CONVENTIONS[format_id]
     basis = np.asarray(convention.basis, np.float64)
     forward = basis @ np.array([0.0, 0.0, 1.0])  # OpenCV optical axis, remapped
@@ -249,10 +307,8 @@ def platform_variant(
 
     cameras: list[dict[str, Any]] = []
     for camera in session.cameras:
-        rotation_w2c = np.asarray(
-            cv2.Rodrigues(np.asarray(camera.rotation or [0.0, 0.0, 0.0]))[0], np.float64
-        )
-        translation = scale * np.asarray(_translation_mm(camera, square_size_mm), np.float64)
+        rotation_w2c = np.asarray(cv2.Rodrigues(np.asarray(_rotation(camera)))[0], np.float64)
+        translation = np.asarray(_translation(camera, square_size_mm, units), np.float64)
         position = basis @ (-rotation_w2c.T @ translation)
         # Similarity keeps det=+1 under a mirror: the ONE place the LH flip happens.
         rotation_c2w = basis @ rotation_w2c.T @ basis.T
