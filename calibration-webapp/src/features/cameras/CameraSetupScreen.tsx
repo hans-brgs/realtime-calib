@@ -887,9 +887,9 @@ function LiveCameraSetup() {
                       you pick a larger frame.
                       <br />
                       <br />
-                      Lower rates are paced by the service: fewer frames to move over USB, and
-                      fewer to detect the board in later. A sweep does not need a high rate, it
-                      needs the board seen from many angles.
+                      Lower rates are paced by the service: fewer frames to move over USB, and fewer
+                      to detect the board in later. A sweep does not need a high rate, it needs the
+                      board seen from many angles.
                     </>,
                   )}
                   data={fpsOptions.map((f) => ({ value: String(f), label: `${f} fps` }))}

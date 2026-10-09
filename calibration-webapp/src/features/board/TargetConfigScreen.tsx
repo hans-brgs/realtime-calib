@@ -55,14 +55,13 @@ function dictionaryCapacity(name: string): number {
 // which is what this says instead.
 const MEASUREMENT_HELP = (
   <>
-    The one number that gives the reconstruction its real-world size. Everything else about
-    the target is geometry the app already knows; this is the only measurement it cannot
-    derive.
+    The one number that gives the reconstruction its real-world size. Everything else about the
+    target is geometry the app already knows; this is the only measurement it cannot derive.
     <br />
     <br />
-    Measure the <b>printed</b> target with a caliper — not the size you asked the printer
-    for. Printers scale, and a print 2% off makes every distance the array reports 2% off,
-    with nothing downstream able to detect it.
+    Measure the <b>printed</b> target with a caliper — not the size you asked the printer for.
+    Printers scale, and a print 2% off makes every distance the array reports 2% off, with nothing
+    downstream able to detect it.
   </>
 );
 
