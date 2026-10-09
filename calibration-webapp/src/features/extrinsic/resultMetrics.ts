@@ -10,13 +10,14 @@ export type QualityLevel = 'good' | 'watch' | 'bad';
 // nothing without that reference: the same rig at 4K and at 720p would be judged
 // on the same number.
 //
-// Anchored on the corner-detection floor rather than a round figure. A single
-// ArUco target's corners are measured to ~0.74 px RMS per axis at native
-// resolution (ADR-0043), i.e. ~0.52 px euclidean once halved to a 0.5-factor
-// output — no solve can go below that, so flagging it would be noise. "Good" sits
-// just above the floor and "watch" at roughly twice it, where the error is no
-// longer explained by detection alone. A ChArUco target refines its corners with
-// cornerSubPix and therefore sits well under both.
+// Anchored on what recorded hand-held sweeps achieve rather than a round figure:
+// four sessions from two rigs (three single-marker, one ChArUco, before Minimize)
+// give 0.15-0.86 px per camera, every one holding its target rigid to under 0.7 mm.
+// "Good" covers most of them and "watch" sits at twice it. The static scatter of
+// border-refined single-marker corners, ~0.12 px at a 0.5-factor output (ADR-0052),
+// is 10-53 % of the best cameras' variance; the rest is the target's motion between
+// cameras. Past "watch" a camera is beyond everything recorded: look for a cause of
+// its own (sync, focus, intrinsics).
 export const DEVIATION_GOOD_PX = 0.6;
 export const DEVIATION_WATCH_PX = 1.2;
 
