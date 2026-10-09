@@ -382,7 +382,7 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         </Group>
       )}
       {result.ba_converged !== false && <Box mb="md" />}
-      {/* Board rigidity (ADR-0044): the reprojection-INDEPENDENT judge. Thresholds
+      {/* Board rigidity (ADR-0044, ADR-0046): the reprojection-INDEPENDENT judge. Thresholds
           are the constraint tolerance (2 mm) and its 2.5x — stated in the popover,
           not left to the colour alone. */}
       {result.rigidity_mm != null && result.rigidity_mm > 0 && (
@@ -404,7 +404,9 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
               <br />
               <br />≤ {RIGIDITY_GOOD_MM} mm nominal (the tolerance the solver is given), ≤{' '}
               {RIGIDITY_WATCH_MM} mm worth a second look, beyond that the solve is bending a target
-              it was told to keep rigid — check the measured marker size first.
+              it was told to keep rigid — check that the printed target is flat and not stretched,
+              then the sweep (blur, sync). A wrongly measured size does not show here: it rescales
+              the whole export uniformly.
             </>
           }
         />
