@@ -131,8 +131,8 @@ def _warped_marker(
     base = size // 4
     canvas[base : base + side, base : base + side] = scaled
     centre = ((size - 1) / 2.0, (size - 1) / 2.0)  # pixel-centre coordinates
-    matrix = cv2.getRotationMatrix2D(centre, angle_deg, 1.0)
-    matrix[:, 2] += offset
+    matrix = np.asarray(cv2.getRotationMatrix2D(centre, angle_deg, 1.0), np.float64)
+    matrix[:, 2] += np.asarray(offset, np.float64)
     shifted = cv2.warpAffine(
         canvas, matrix, (size, size), flags=cv2.INTER_LINEAR, borderValue=255
     )
