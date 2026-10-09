@@ -20,9 +20,21 @@ logger = logging.getLogger(__name__)
 _FFMPEG = "ffmpeg"
 _FFPROBE = "ffprobe"
 # Quiet, overwrite, fail-fast — same posture as the preview transcode (ADR-0027).
-_BASE_ARGS = ("-hide_banner", "-loglevel", "error", "-y")
+# -nostdin: ffmpeg must never read the service's stdin (SYN-9).
+_BASE_ARGS = ("-nostdin", "-hide_banner", "-loglevel", "error", "-y")
 # Base vs average cadence divergence above this fraction => treat the source as VFR.
 _VFR_TOLERANCE = 0.01
+# Bounds of an ingest call (SYN-9): a stuck ffmpeg would hold the import, and the
+# service's operation lock with it (ADR-0050), forever. A probe is quick; a remux
+# or a CFR re-encode scales with the media, and is expected well under 1x real time.
+PROBE_TIMEOUT_S = 30.0
+_MIN_TRANSCODE_TIMEOUT_S = 120.0
+_TRANSCODE_TIMEOUT_PER_MEDIA_S = 4.0
+
+
+def transcode_timeout(duration_s: float) -> float:
+    """Time allowed to remux or re-encode a video lasting ``duration_s`` seconds."""
+    return max(_MIN_TRANSCODE_TIMEOUT_S, _TRANSCODE_TIMEOUT_PER_MEDIA_S * duration_s)
 
 
 class FfmpegError(RuntimeError):
@@ -59,17 +71,22 @@ def reencode_cfr_args(source: Path, destination: Path, fps: float) -> list[str]:
     ]
 
 
-def run_ffmpeg(args: list[str]) -> None:
+def run_ffmpeg(args: list[str], *, timeout_s: float) -> None:
     """Run an ffmpeg/ffprobe command, raising ``FfmpegError`` on failure.
 
     Synchronous by design: ingest runs in an executor (off the event loop), like
     the intrinsic/extrinsic compute. Mirrors the error handling of the preview
-    transcode's ``_run`` (recording/preview.py).
+    transcode's ``_run`` (recording/preview.py). Past ``timeout_s`` the process
+    is killed and the call fails.
     """
     try:
-        result = subprocess.run(args, capture_output=True, check=False)
+        result = subprocess.run(
+            args, capture_output=True, check=False, stdin=subprocess.DEVNULL, timeout=timeout_s
+        )
     except FileNotFoundError as exc:
         raise FfmpegError(f"{args[0]} not found in the container image") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegError(f"{args[0]} did not finish within {timeout_s:.0f} s") from exc
     if result.returncode != 0:
         message = result.stderr.decode(errors="replace").strip() or (
             f"{args[0]} exited with {result.returncode}"
@@ -97,9 +114,17 @@ def is_vfr(source: Path) -> bool:
         str(source),
     ]
     try:
-        result = subprocess.run(args, capture_output=True, check=False)
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            check=False,
+            stdin=subprocess.DEVNULL,
+            timeout=PROBE_TIMEOUT_S,
+        )
     except FileNotFoundError as exc:
         raise FfmpegError("ffprobe not found in the container image") from exc
+    except subprocess.TimeoutExpired as exc:
+        raise FfmpegError(f"ffprobe did not finish within {PROBE_TIMEOUT_S:.0f} s") from exc
     if result.returncode != 0:
         raise FfmpegError(result.stderr.decode(errors="replace").strip() or "ffprobe failed")
 

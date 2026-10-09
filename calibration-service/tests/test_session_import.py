@@ -11,6 +11,7 @@ import io
 import json
 import shutil
 import tarfile
+import time
 import zipfile
 from pathlib import Path
 
@@ -19,6 +20,13 @@ import pytest
 
 from calibration_service.models.session import CameraConfig, WizardStep
 from calibration_service.recording.extrinsic_recorder import read_timestamps
+from calibration_service.recording.ffmpeg import (
+    FfmpegError,
+    reencode_cfr_args,
+    remux_copy_args,
+    run_ffmpeg,
+    transcode_timeout,
+)
 from calibration_service.recording.replay import VideoProperties, video_properties
 from calibration_service.recording.video_writer import VideoRecorder
 from calibration_service.session.import_session import (
@@ -547,3 +555,21 @@ def test_failed_ingest_leaves_no_partial_session(tmp_path: Path) -> None:
         ingest(archive, "broken", sessions)
     assert not (sessions / "broken").exists()
     assert list_sessions(sessions) == []
+
+
+def test_a_stuck_ffmpeg_is_killed_at_its_timeout() -> None:
+    # SYN-9: an import blocked forever would hold the operation lock forever.
+    started = time.monotonic()
+    with pytest.raises(FfmpegError, match="did not finish"):
+        run_ffmpeg(["sleep", "5"], timeout_s=0.2)
+    assert time.monotonic() - started < 2.0
+
+
+def test_import_ffmpeg_calls_never_read_the_service_stdin(tmp_path: Path) -> None:
+    assert "-nostdin" in remux_copy_args(tmp_path / "a.mp4", tmp_path / "a.mkv")
+    assert "-nostdin" in reencode_cfr_args(tmp_path / "a.mp4", tmp_path / "a.mkv", 30.0)
+
+
+def test_the_transcode_timeout_scales_with_the_media() -> None:
+    assert transcode_timeout(0.0) == 120.0  # unknown duration: the floor
+    assert transcode_timeout(300.0) == 1200.0

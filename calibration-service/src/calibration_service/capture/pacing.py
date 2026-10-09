@@ -13,10 +13,11 @@ absolute grid — shared across cameras, which is what keeps their kept frames
 within one cell of each other.
 
 No sleeping here: the capture loop keeps DRAINING the driver (blocking
-``grab()`` at the driver's own rate — parked threads, ~free) so buffered
-frames never rot and timestamps stay honest even when a driver ignores
-``CAP_PROP_FPS``. OpenCV has no non-blocking grab, so this drain is the only
-implementable safeguard; the pacer only decides which drained frames to keep.
+``grab()`` at the driver's own rate — parked threads, ~free), which bounds
+how long a buffered frame waits even when a driver ignores ``CAP_PROP_FPS``;
+each frame's kernel timestamp stays its own whatever that wait (ADR-0049).
+OpenCV has no non-blocking grab, so this drain is the only implementable
+safeguard; the pacer only decides which drained frames to keep.
 
 Ready upgrade if rig validation shows a disappointing group spread: keep the
 frame CLOSEST to each cell boundary instead of the first one in the cell
@@ -53,7 +54,8 @@ class GridPacer:
         """True once per grid cell: for the first frame at/after each tick.
 
         Marks the cell as served — call exactly once per candidate frame.
-        ``now`` must come from the shared monotonic clock.
+        ``now`` must come from the shared monotonic clock: the frame's own
+        timestamp for the capture and detection grids (ADR-0049).
         """
         cell = int(now / self._period)
         if cell > self._last_cell:

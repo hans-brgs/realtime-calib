@@ -12,6 +12,7 @@ import numpy as np
 import pytest
 
 from calibration_service.capture.camera import CameraOpenError
+from calibration_service.capture.device import CameraDevice
 from calibration_service.config import LiveKitConfig
 from calibration_service.models.frame import Frame
 from calibration_service.models.session import CameraConfig, SessionMode
@@ -48,12 +49,13 @@ def test_load_from_files_session_resolves_no_targets(tmp_path: Path) -> None:
     session.mode = SessionMode.LOAD_FROM_FILES
     service = CameraPublishService(LiveKitConfig(), manager)
 
-    assert service._resolve_targets() == []
+    assert service._session_targets() == []
 
     # Sanity: the SAME session in realtime mode would publish — the guard is
     # what empties the set, not the empty device node.
     session.mode = SessionMode.NEW_REALTIME
-    assert len(service._resolve_targets()) == 1
+    targets = service._session_targets()
+    assert targets is not None and len(targets) == 1
 
 
 class _FakePublisher:
@@ -168,7 +170,7 @@ def test_leaving_a_recording_camera_finalises_the_recorder(tmp_path: Path) -> No
         service._recording_camera = "cam_0"
         publisher = _FakePublisher()
         task = await _done_task()
-        await service._stop_capture(publisher, "cam_0", task)  # type: ignore[arg-type]
+        await service._stop_capture(publisher, "cam_0", task, CameraDevice("cam_0"))  # type: ignore[arg-type]
         assert recorder.closed is True
         assert service._recorder is None
         assert service._recording_camera is None
@@ -184,7 +186,7 @@ def test_leaving_a_non_recording_camera_keeps_the_recorder(tmp_path: Path) -> No
         service._recorder = recorder  # type: ignore[assignment]
         service._recording_camera = "cam_0"
         task = await _done_task()
-        await service._stop_capture(_FakePublisher(), "cam_1", task)  # type: ignore[arg-type]
+        await service._stop_capture(_FakePublisher(), "cam_1", task, CameraDevice("cam_1"))  # type: ignore[arg-type]
         assert recorder.closed is False
         # The fake was force-assigned above; identity is the point of the check.
         assert service._recorder is recorder  # type: ignore[comparison-overlap]
@@ -205,8 +207,10 @@ def test_capture_loop_releases_the_camera_in_its_finally(tmp_path: Path) -> None
 
         service._capture_frames = hang  # type: ignore[method-assign, assignment]
         target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30)
+        device = CameraDevice("cam_0")
+        await device.open(lambda: camera)  # type: ignore[arg-type, return-value]
         task = asyncio.create_task(
-            service._capture_loop(asyncio.get_running_loop(), None, target, camera)  # type: ignore[arg-type]
+            service._capture_loop(asyncio.get_running_loop(), None, target, device)  # type: ignore[arg-type]
         )
         await asyncio.sleep(0.01)
         assert camera.released is False  # loop running: device held
@@ -256,13 +260,13 @@ async def _open_set_harness(
     stopped: list[str] = []
 
     async def fake_start(
-        _loop: object, _executor: object, _publisher: object, target: _PublishTarget
-    ) -> tuple[_FakeCamera, asyncio.Task[None]]:
+        _loop: object, _publisher: object, target: _PublishTarget
+    ) -> tuple[CameraDevice, asyncio.Task[None]]:
         opened.append(target)
         # A RUNNING loop: a done task now means "the camera ended on its own" (#46).
-        return _FakeCamera(), _running_task()
+        return CameraDevice(target.name), _running_task()
 
-    async def fake_stop(_publisher: object, name: str, _task: object) -> None:
+    async def fake_stop(_publisher: object, name: str, _task: object, _device: object) -> None:
         stopped.append(name)
 
     service._start_capture = fake_start  # type: ignore[method-assign, assignment]
@@ -283,13 +287,13 @@ def test_reorder_reopens_each_camera_on_its_new_device(tmp_path: Path) -> None:
         open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
 
         by_name = _targets("cam_0", "cam_1")  # cam_0 -> video0, cam_1 -> video1
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
         # Sets, not lists: the desired set is a `set`, so the open ORDER is not guaranteed.
         assert {t.device_node for t in opened} == {"/dev/video0", "/dev/video1"}
         assert stopped == []
 
         # Idempotence: an unchanged config must not churn the devices.
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
         assert len(opened) == 2
         assert stopped == []
 
@@ -298,7 +302,7 @@ def test_reorder_reopens_each_camera_on_its_new_device(tmp_path: Path) -> None:
             "cam_0": _PublishTarget("cam_0", 0, "/dev/video1", 1920, 1080, 30),
             "cam_1": _PublishTarget("cam_1", 1, "/dev/video0", 1920, 1080, 30),
         }
-        await service._reconcile_open_set(loop, None, None, swapped, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, swapped, open_cams)  # type: ignore[arg-type]
         assert sorted(stopped) == ["cam_0", "cam_1"]  # both closed...
         assert {t.device_node for t in opened[2:]} == {"/dev/video1", "/dev/video0"}  # ...reopened
         # What actually matters: each NAME is now bound to the other device.
@@ -319,11 +323,11 @@ def test_fps_change_reopens_the_camera(tmp_path: Path) -> None:
         loop = asyncio.get_running_loop()
         open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
 
-        await service._reconcile_open_set(loop, None, None, _targets("cam_0"), open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, _targets("cam_0"), open_cams)  # type: ignore[arg-type]
         assert [t.fps for t in opened] == [30]
 
         retuned = {"cam_0": _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 15)}
-        await service._reconcile_open_set(loop, None, None, retuned, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, retuned, open_cams)  # type: ignore[arg-type]
         assert stopped == ["cam_0"]
         assert [t.fps for t in opened] == [30, 15]
 
@@ -405,7 +409,7 @@ def test_a_camera_that_cannot_open_is_reported_and_backs_off(
         open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
         by_name = {"cam_0": _PublishTarget("cam_0", 0, "/dev/video4", 1920, 1080, 30)}
 
-        await service._reconcile_open_set(loop, None, publisher, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, publisher, by_name, open_cams)  # type: ignore[arg-type]
         assert attempts == ["/dev/video4"]
         assert open_cams == {}
         # OPENING went out before the attempt, so the webapp is never left stale.
@@ -416,7 +420,7 @@ def test_a_camera_that_cannot_open_is_reported_and_backs_off(
 
         # The next tick lands inside the 1 s backoff: no new attempt — the old
         # behaviour hammered the device (and the log) every second, forever.
-        await service._reconcile_open_set(loop, None, publisher, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, publisher, by_name, open_cams)  # type: ignore[arg-type]
         assert attempts == ["/dev/video4"]
 
     asyncio.run(scenario())
@@ -444,8 +448,7 @@ def test_a_configured_camera_at_the_wrong_resolution_is_refused(
         service = _service(tmp_path)
         loop = asyncio.get_running_loop()
         target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30, configured=True)
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            opened = await service._start_capture(loop, executor, _FakeLivePublisher(), target)  # type: ignore[arg-type]
+        opened = await service._start_capture(loop, _FakeLivePublisher(), target)  # type: ignore[arg-type]
         assert opened is None
         assert camera.released
         state = service._health.snapshot(loop.time())["cam_0"]
@@ -462,6 +465,10 @@ def test_a_configured_camera_at_its_resolution_goes_live(
     # pass the refusal test above and refuse every non-square camera on the rig.
     class _Camera1080p:
         released = False
+        clock = "host"
+
+        def choose_clock(self) -> str:
+            return self.clock
 
         def read(self) -> Frame:
             return Frame(0, 1, 0.0, np.zeros((1080, 1920, 3), np.uint8))
@@ -482,7 +489,7 @@ def test_a_configured_camera_at_its_resolution_goes_live(
         target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30, configured=True)
         with ThreadPoolExecutor(max_workers=1) as executor:
             service._capture_executor = executor
-            opened = await service._start_capture(loop, executor, _DisconnectedPublisher(), target)  # type: ignore[arg-type]
+            opened = await service._start_capture(loop, _DisconnectedPublisher(), target)  # type: ignore[arg-type]
             assert opened is not None
             assert service._health.snapshot(loop.time())["cam_0"]["state"] == "live"
             await opened[1]  # the loop ends (disconnected) and releases in its finally
@@ -500,7 +507,7 @@ def test_a_camera_lost_mid_capture_is_reported_and_not_reopened_at_once(
         loop = asyncio.get_running_loop()
         open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
         by_name = _targets("cam_0")
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
         assert len(opened) == 1
 
         # The capture loop gave up on a dead device.
@@ -512,7 +519,7 @@ def test_a_camera_lost_mid_capture_is_reported_and_not_reopened_at_once(
         camera, _task, target = open_cams["cam_0"]
         open_cams["cam_0"] = (camera, lost_task, target)
 
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
         assert stopped == ["cam_0"]  # cleaned up (recording finalised, track muted)
         assert len(opened) == 1  # not reopened inside the backoff
         state = service._health.snapshot(loop.time())["cam_0"]
@@ -528,7 +535,7 @@ def test_a_crashed_capture_loop_is_reported_as_a_camera_failure(tmp_path: Path) 
         loop = asyncio.get_running_loop()
         open_cams: dict[str, tuple[object, asyncio.Task[None], _PublishTarget]] = {}
         by_name = _targets("cam_0")
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
 
         async def crash() -> None:
             raise RuntimeError("boom")
@@ -538,7 +545,7 @@ def test_a_crashed_capture_loop_is_reported_as_a_camera_failure(tmp_path: Path) 
         camera, _task, target = open_cams["cam_0"]
         open_cams["cam_0"] = (camera, crashed, target)
 
-        await service._reconcile_open_set(loop, None, None, by_name, open_cams)  # type: ignore[arg-type]
+        await service._reconcile_open_set(loop, None, by_name, open_cams)  # type: ignore[arg-type]
         state = service._health.snapshot(loop.time())["cam_0"]
         assert state["state"] == "error"
         assert state["reason"] == "capture stopped unexpectedly (RuntimeError)"
@@ -547,8 +554,8 @@ def test_a_crashed_capture_loop_is_reported_as_a_camera_failure(tmp_path: Path) 
 
 
 class _DeadCamera(_FakeCamera):
-    def grab(self) -> bool:
-        return False
+    def grab(self) -> float | None:
+        return None
 
 
 def test_capture_loop_declares_a_camera_lost_after_sustained_grab_failures(
@@ -563,15 +570,18 @@ def test_capture_loop_declares_a_camera_lost_after_sustained_grab_failures(
     async def scenario() -> None:
         service = _service(tmp_path)
         target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30)
+        device = CameraDevice("cam_0")
+        await device.open(_DeadCamera)  # type: ignore[arg-type]
         with pytest.raises(camera_publish_service._CameraLostError, match="no frame"):
             await asyncio.wait_for(
                 service._capture_frames(
                     asyncio.get_running_loop(),
                     _Connected(),  # type: ignore[arg-type]
                     target,
-                    _DeadCamera(),  # type: ignore[arg-type]
+                    device,
                 ),
                 timeout=2.0,
             )
+        await device.release()
 
     asyncio.run(scenario())

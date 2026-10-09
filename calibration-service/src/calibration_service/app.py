@@ -7,6 +7,7 @@ camera is published as a LiveKit video track for the webapp preview.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
@@ -64,7 +65,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        await publish_service.stop()
+        try:
+            await publish_service.stop()
+        finally:
+            await preview_jobs.aclose()  # no transcode outlives the service (SYN-9)
 
 
 def create_app(session_manager: SessionManager | None = None) -> FastAPI:
@@ -76,6 +80,9 @@ def create_app(session_manager: SessionManager | None = None) -> FastAPI:
     app.state.preview_jobs = PreviewJobs()
     # Rig-level operator settings, persisted next to the sessions root (ADR-0036).
     app.state.settings = SettingsStore(app.state.session_manager.sessions_dir)
+    # One long or mutating operation at a time, service-wide (ADR-0050).
+    app.state.operation_lock = asyncio.Lock()
+    app.state.operation = None
     app.include_router(api_router)
 
     # Session-scoped routes call manager.current(); with no active session that

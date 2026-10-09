@@ -13,11 +13,13 @@ with its timestamp sidecars).
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 
+from calibration_service.concurrency import finish, settle
 from calibration_service.recording.replay import declared_fps, frame_count
 from calibration_service.tuning import TUNING
 
@@ -27,6 +29,7 @@ _FFMPEG = "ffmpeg"
 # x264 ultrafast at preview width: ~3 s for a 25 s 1080p MJPG on this project's
 # reference machine; -g 15 keeps seeks snappy (<= 14 frames to decode).
 _FFMPEG_ARGS = (
+    "-nostdin",  # never read the service's stdin (SYN-9)
     "-hide_banner",
     "-loglevel",
     "error",
@@ -102,6 +105,13 @@ class PreviewJobs:
         self._errors: dict[str, str] = {}
         self._frames: dict[str, int] = {}
         self._fps: dict[str, float] = {}
+
+    async def aclose(self) -> None:
+        """Cancel every running transcode and wait for it: no ffmpeg outlives us."""
+        running = [task for task in self._tasks.values() if not task.done()]
+        for task in running:
+            task.cancel()
+        await settle(running)
 
     def ensure(self, source: Path) -> None:
         """Enqueue a transcode unless one is running/done/failed for this source."""
@@ -189,9 +199,20 @@ class PreviewJobs:
         logger.info("transcoding preview: %s (%.6g fps)", source.name, fps)
         try:
             process = await asyncio.create_subprocess_exec(
-                *args, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+                *args,
+                stdin=asyncio.subprocess.DEVNULL,
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.PIPE,
             )
-            _, stderr = await process.communicate()
+            try:
+                _, stderr = await process.communicate()
+            except asyncio.CancelledError:
+                # A cancelled job leaves no ffmpeg behind (SYN-9): kill it and reap
+                # it, to the end even if cancelled again.
+                with contextlib.suppress(ProcessLookupError):
+                    process.kill()
+                await finish(process.wait())
+                raise
             if process.returncode != 0:
                 message = (stderr or b"").decode(errors="replace").strip() or (
                     f"ffmpeg exited with {process.returncode}"

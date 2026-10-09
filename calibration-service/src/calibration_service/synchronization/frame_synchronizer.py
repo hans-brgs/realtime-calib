@@ -1,11 +1,11 @@
 """Group per-camera detections into synchronized frames (ADR-0007).
 
-Software timestamp sync for free-running USB cameras: frames whose host-monotonic
-timestamps fall within a tolerance window (< 1/fps) form a synchronized group,
-kept only when a quorum (>= 2) of cameras participates. Semantics ported from
-samvision's ``FrameSynchronizer`` (the precedent ADR-0007 cites), minus the
-ring-slot ownership — payloads here are small detection records, not zero-copy
-frame views, so plain deques suffice:
+Software timestamp sync for free-running USB cameras: frames whose CLOCK_MONOTONIC
+timestamps (V4L2 buffer stamps, ADR-0049) fall within a tolerance window (< 1/fps)
+form a synchronized group, kept only when a quorum (>= 2) of cameras participates.
+Semantics ported from samvision's ``FrameSynchronizer`` (the precedent ADR-0007
+cites), minus the ring-slot ownership — payloads here are small detection records,
+not zero-copy frame views, so plain deques suffice:
 
 - **Heads-in-window matching** relative to the *newest* head timestamp.
 - **Anti-famine invariant**: any head outside the window is dropped on every
@@ -44,7 +44,7 @@ class SyncFrame[T]:
     """One camera's contribution to a synchronized group."""
 
     camera: str
-    timestamp: float  # host-monotonic capture time (ADR-0007)
+    timestamp: float  # CLOCK_MONOTONIC capture time (ADR-0007, ADR-0049)
     payload: T
 
 
