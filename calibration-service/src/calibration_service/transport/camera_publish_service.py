@@ -23,6 +23,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.capture.camera import CameraCapture, CameraOpenError, open_camera
+from calibration_service.capture.camera_health import CameraHealth, backoff_delay
 from calibration_service.capture.enumeration import enumerate_cameras
 from calibration_service.capture.pacing import GridPacer
 from calibration_service.config import LiveKitConfig
@@ -43,6 +44,7 @@ from calibration_service.synchronization.window import sync_window
 from calibration_service.telemetry import (
     TELEMETRY_TOPIC,
     SharpnessBaseline,
+    camera_state_payload,
     coverage_metrics_payload,
     covisibility_payload,
 )
@@ -116,6 +118,12 @@ _FIRST_FRAME_BACKOFF_S = 0.1
 _RECONNECT_BACKOFF_S = 2.0
 # Stagger camera opens to ease simultaneous USB bandwidth negotiation (4 cameras).
 _OPEN_STAGGER_S = 0.5
+# A live camera whose grab() keeps failing this long is declared lost (#46): its
+# capture loop ends and the reconcile reopens it under the health backoff. Before,
+# the loop retried forever on a device that was gone and the tile just froze.
+# Several frame periods even at the lowest offered rate, so a slow camera is never
+# mistaken for a dead one.
+_CAMERA_LOST_AFTER_S = 3.0
 # Single publisher participant; cameras are distinguished by their track name.
 _PARTICIPANT_IDENTITY = "service"
 # Telemetry cadence on the data channel (coverage metrics ~10 Hz, not per frame).
@@ -174,6 +182,28 @@ def _downscale(image: NDArray[np.uint8], size: tuple[int, int]) -> NDArray[np.ui
     if (image.shape[1], image.shape[0]) == size:
         return image
     return cast("NDArray[np.uint8]", cv2.resize(image, size, interpolation=cv2.INTER_AREA))
+
+
+class _CameraLostError(Exception):
+    """A live camera stopped delivering frames; ends its capture loop (#46)."""
+
+
+def _capture_end_reason(name: str, task: asyncio.Task[None]) -> str | None:
+    """Why a capture loop ended ON ITS OWN, or None when that is no fault.
+
+    A clean return means the room dropped — the whole session is tearing down,
+    not this camera. Anything else is reported as a camera failure, so a crashed
+    loop is reopened under the backoff instead of leaving a dead tile behind.
+    """
+    if task.cancelled():
+        return None
+    error = task.exception()
+    if error is None:
+        return None
+    if isinstance(error, _CameraLostError):
+        return str(error)
+    logger.error("camera %s capture loop crashed", name, exc_info=error)
+    return f"capture stopped unexpectedly ({type(error).__name__})"
 
 
 @dataclass(frozen=True)
@@ -244,6 +274,9 @@ class CameraPublishService:
         self._ext_sync: FrameSynchronizer[bool] | None = None
         self._ext_graph: CovisibilityGraph | None = None
         self._last_covisibility = 0.0
+        # Live capture health of every configured camera + its reopen backoff,
+        # broadcast as `camera_state` (spec realtime-telemetry, #46).
+        self._health = CameraHealth()
 
     def _settings(self) -> RuntimeSettings:
         """Current operator settings (TUNING defaults when no store is wired)."""
@@ -529,6 +562,7 @@ class CameraPublishService:
                     if await self._reconcile_tracks(publisher, targets, published, by_name):
                         break  # a track needs a new size -> reconnect to republish it
                 await self._reconcile_open_set(loop, executor, publisher, by_name, open_cams)
+                await self._send_camera_state(publisher, loop.time())
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONCILE_TICK_S)
         finally:
@@ -537,6 +571,7 @@ class CameraPublishService:
             for name in list(open_cams):
                 _camera, task, _target = open_cams.pop(name)
                 await self._stop_capture(publisher, name, task)
+                self._health.closed(name, loop.time())
             await publisher.aclose()
 
     async def _reconcile_tracks(
@@ -615,14 +650,34 @@ class CameraPublishService:
         and the reorder looked ignored until a manual reload happened to cycle the view
         (which closed and reopened everything). The same held for a resolution or fps
         change: the open V4L2 handle carries the values it was opened with.
+
+        A camera whose capture loop ENDED on its own (lost mid-capture, #46) is
+        cleaned up and reported failed; joiners in error wait out their backoff
+        (``CameraHealth``) instead of being retried on every tick.
         """
         desired = self._desired_cameras(by_name)
+        self._health.sync(by_name, desired, loop.time())
         for name in list(open_cams):
             _camera, task, opened_with = open_cams[name]
-            if name not in desired or by_name.get(name) != opened_with:
+            if task.done():
+                del open_cams[name]
+                reason = _capture_end_reason(name, task)
+                await self._stop_capture(publisher, name, task)
+                if reason is None:
+                    self._health.closed(name, loop.time())
+                else:
+                    self._report_failure(name, reason, loop.time())
+            elif name not in desired or by_name.get(name) != opened_with:
                 del open_cams[name]
                 await self._stop_capture(publisher, name, task)
-        joiners = [name for name in desired if name not in open_cams]
+                # Closed on purpose: a rebound device (reorder) or a new mode gets a
+                # fresh start rather than the old target's backoff.
+                self._health.closed(name, loop.time())
+        joiners = [
+            name
+            for name in desired
+            if name not in open_cams and self._health.may_open(name, loop.time())
+        ]
         for i, name in enumerate(joiners):
             target = by_name[name]
             opened = await self._start_capture(loop, executor, publisher, target)
@@ -638,7 +693,15 @@ class CameraPublishService:
         publisher: LiveKitPublisher,
         target: _PublishTarget,
     ) -> tuple[CameraCapture, asyncio.Task[None]] | None:
-        """Open a camera, push its first frame, unmute its track and start its loop."""
+        """Open a camera, push its first frame, unmute its track and start its loop.
+
+        Every outcome is reported to the health registry; a failure returns None and
+        the reconcile retries it once its backoff has elapsed.
+        """
+        self._health.opening(target.name, loop.time())
+        # The first-frame wait can take seconds: broadcast OPENING now rather than
+        # leaving the webapp on a stale snapshot for the whole attempt.
+        await self._send_camera_state(publisher, loop.time())
         try:
             camera = open_camera(
                 target.device_node,
@@ -648,12 +711,14 @@ class CameraPublishService:
                 fps=target.fps or None,
             )
         except CameraOpenError:
-            logger.exception("cannot open camera %s; skipping", target.device_node)
+            self._report_failure(
+                target.name, f"cannot open {target.device_node}", loop.time(), exc_info=True
+            )
             return None
         first = await self._read_first_frame(loop, executor, camera)
         if first is None:
-            logger.warning("camera %s produced no frame", target.name)
             camera.release()
+            self._report_failure(target.name, "opened but produced no frame", loop.time())
             return None
         size = _preview_size(first.image.shape[1], first.image.shape[0])
         publisher.push(target.name, _downscale(first.image, size))
@@ -662,8 +727,36 @@ class CameraPublishService:
             self._capture_loop(loop, publisher, target, camera),
             name=f"capture-{target.name}",
         )
+        failures = self._health.opened(target.name, loop.time())
+        if failures:
+            logger.info("camera %s recovered after %d failed attempt(s)", target.name, failures)
         logger.info("camera %s live (opened + unmuted)", target.name)
         return camera, task
+
+    def _report_failure(
+        self, name: str, reason: str, now: float, *, exc_info: bool = False
+    ) -> None:
+        """Record a camera failure and log it ONCE in full (#46).
+
+        The traceback goes out on the first failure only; retries get one short
+        line each — at most one per backoff step, no longer one per second forever.
+        """
+        failures = self._health.failed(name, reason, now)
+        if failures == 1:
+            logger.error("camera %s: %s; retrying with backoff", name, reason, exc_info=exc_info)
+        else:
+            logger.warning(
+                "camera %s: %s (attempt %d, next in %.0f s)",
+                name,
+                reason,
+                failures,
+                backoff_delay(failures),
+            )
+
+    async def _send_camera_state(self, publisher: LiveKitPublisher, now: float) -> None:
+        """Broadcast the full health snapshot (``camera_state``, lossy topic)."""
+        payload = camera_state_payload(self._health.snapshot(now))
+        await publisher.send_data(json.dumps(payload), TELEMETRY_TOPIC)
 
     async def _stop_capture(
         self,
@@ -676,9 +769,12 @@ class CameraPublishService:
         The loop OWNS the device and releases it in its own finally — awaiting the
         cancelled task here therefore returns only once the camera is closed.
         """
-        task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await task
+        if not task.done():
+            task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await task
+        # (A loop that ended on its own has already released the device; its outcome
+        # was read by the reconcile — awaiting it here would re-raise its error.)
         # If this camera was being recorded (operator left the intrinsic view or
         # switched camera mid-sweep), finalise the file now rather than leaving it open.
         if name == self._recording_camera:
@@ -729,7 +825,9 @@ class CameraPublishService:
         extrinsic sweep (ADR-0007) EVERY camera detects, on a shared wall-clock grid
         so the instants align across cameras, feeds the synchronizer/co-visibility,
         and records its own video + timestamp sidecar. A read failure (USB blip) is
-        skipped, not fatal.
+        skipped, not fatal — but a grab that keeps failing for ``_CAMERA_LOST_AFTER_S``
+        means the device is gone: the loop raises ``_CameraLostError`` and the
+        reconcile reopens it under the health backoff (#46).
         """
         executor = self._capture_executor
         preview_size = _preview_size(target.width, target.height) if target.width else None
@@ -751,11 +849,16 @@ class CameraPublishService:
         # preview extrinsic differ in scale — ADR-0038).
         sharpness_intrinsic = SharpnessBaseline()
         sharpness_extrinsic = SharpnessBaseline()
+        last_grab = loop.time()
         while not publisher.is_disconnected():
             if not await loop.run_in_executor(executor, camera.grab):
+                if loop.time() - last_grab >= _CAMERA_LOST_AFTER_S:
+                    # Unplugged / dead device: hand it back to the reconcile, which
+                    # reports it and reopens it under the backoff (#46).
+                    raise _CameraLostError(f"no frame for {_CAMERA_LOST_AFTER_S:.0f} s")
                 await asyncio.sleep(_EMPTY_READ_BACKOFF_S)
                 continue
-            now = loop.time()
+            now = last_grab = loop.time()
             # Grid selection over the continuous drain (ADR-0037): keep the first
             # frame of each cell, drop the rest UNDECODED. Draining at the driver's
             # own rate keeps buffered frames fresh and timestamps honest even when a
