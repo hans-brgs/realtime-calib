@@ -15,11 +15,8 @@ class Frame:
     ``timestamp`` is on CLOCK_MONOTONIC, the clock of ``time.monotonic``: the
     V4L2 buffer stamp of the frame, or the host clock at its grab when the
     driver's is unusable (one base per open, ADR-0049). It is the *only* basis
-    for cross-camera synchronization (ADR-0007), never ``frame_id`` (which is
-    per-camera and not comparable across cameras).
+    for cross-camera synchronization (ADR-0007).
     """
 
-    camera_index: int
-    frame_id: int
     timestamp: float  # CLOCK_MONOTONIC seconds (ADR-0007, ADR-0049)
     image: NDArray[np.uint8]  # BGR, at capture resolution

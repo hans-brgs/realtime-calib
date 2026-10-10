@@ -34,7 +34,7 @@ WIDTH, HEIGHT = 64, 48
 
 
 def _frame() -> Frame:
-    return Frame(0, 1, time.monotonic(), np.zeros((HEIGHT, WIDTH, 3), np.uint8))
+    return Frame(time.monotonic(), np.zeros((HEIGHT, WIDTH, 3), np.uint8))
 
 
 class _Capture:

@@ -299,6 +299,25 @@ def test_contour_refinement_failure_without_target_is_no_detection(
     assert not found
 
 
+def test_charuco_view_dropped_when_board_detection_raises(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    # An OpenCV assertion inside detectBoard drops that view, said once, instead of
+    # failing the compute.
+    class Raising:
+        def detectBoard(self, _gray: object) -> None:
+            raise cv2.error("forced")
+
+    board = _charuco()
+    image = _decode(render_board_png(board))
+    detector = BoardDetector(board)
+    detector._charuco = Raising()  # type: ignore[assignment]
+    with caplog.at_level(logging.WARNING, logger="calibration_service.detection.detector"):
+        assert not detector.detect(image).found
+        assert not detector.detect(image).found
+    assert sum("detectBoard raised" in r.getMessage() for r in caplog.records) == 1
+
+
 def test_charuco_view_dropped_when_subpixel_refinement_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

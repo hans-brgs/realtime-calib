@@ -28,24 +28,23 @@ import logging
 import sys
 from pathlib import Path
 
-import cv2
 import numpy as np
-from numpy.typing import NDArray
 
 from calibration_service.calibration.extrinsic import (
-    CameraModel,
     ExtrinsicResult,
     board_object_points,
     board_unit_mm,
-    compute_extrinsic_from_sweep,
-    derive_sweep_window,
+    camera_centres,
 )
-from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.models.board import CalibrationBoard
 from calibration_service.models.session import CalibrationSession
-from calibration_service.resolution import to_native
 from calibration_service.session.config_store import load_board_config
 from calibration_service.session.store import load_session
-from calibration_service.tuning import TUNING
+from calibration_service.session.workflow import (
+    output_scaled_errors,
+    solve_extrinsics,
+    sweep_settings,
+)
 
 
 def _load_session(directory: Path) -> CalibrationSession:
@@ -53,25 +52,6 @@ def _load_session(directory: Path) -> CalibrationSession:
     if not (directory / "session.toml").is_file():
         raise SystemExit(f"no session.toml under {directory}")
     return load_session(directory.parent, directory.name)
-
-
-def _camera_models(session: CalibrationSession) -> tuple[list[CameraModel], dict[str, float]]:
-    """Solver intrinsics at the RECORDING resolution + each camera's resize factor."""
-    models: list[CameraModel] = []
-    factors: dict[str, float] = {}
-    for camera in session.cameras:
-        if camera.matrix is None or camera.distortions is None:
-            raise SystemExit(f"{camera.name} has no intrinsics; calibrate it first")
-        factor = camera.resize_factor or 1.0
-        models.append(
-            CameraModel(
-                name=camera.name,
-                matrix=to_native(camera.matrix, (camera.width, camera.height), factor),
-                distortions=np.asarray(camera.distortions, np.float64),
-            )
-        )
-        factors[camera.name] = factor
-    return models, factors
 
 
 def board_rigidity_mm(
@@ -111,16 +91,6 @@ def board_rigidity_mm(
     }
 
 
-def camera_centers(result: ExtrinsicResult, unit_mm: float) -> dict[str, NDArray[np.float64]]:
-    """Camera positions in world coords (metres), from the world->cam poses."""
-    centers: dict[str, NDArray[np.float64]] = {}
-    for name in result.cameras:
-        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
-        translation = np.asarray(result.translations[name], np.float64)
-        centers[name] = (-rotation.T @ translation) * unit_mm / 1000.0
-    return centers
-
-
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("session_dir", type=Path)
@@ -146,41 +116,27 @@ def main(argv: list[str] | None = None) -> int:
     if extrinsic_board is None:
         raise SystemExit(f"no usable extrinsic board in config.toml: {'; '.join(issues)}")
 
-    models, factors = _camera_models(session)
-    names = [model.name for model in models]
-    sweep = directory / "extrinsic"
-    charuco = extrinsic_board.board_type is BoardType.CHARUCO
-    stride = args.stride or (
-        TUNING.extrinsic_stride_charuco if charuco else TUNING.extrinsic_stride_marker
-    )
-    max_groups = args.max_groups or (
-        TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker
-    )
-
-    if args.max_motion_px == "off":
-        max_motion_px: float | None = None
-    elif args.max_motion_px is None:
-        max_motion_px = TUNING.extrinsic_max_motion_px
-    else:
-        max_motion_px = float(args.max_motion_px)
-
-    window_s = derive_sweep_window(sweep, names)
-    result, ba_inputs = compute_extrinsic_from_sweep(
-        sweep,
+    # The service's own resolution of the knobs and of the solve (session.workflow).
+    gate = args.max_motion_px != "off"
+    settings = sweep_settings(
         extrinsic_board,
-        models,
-        anchor=names[0],
-        window_s=window_s,
-        stride=stride,
-        max_groups=max_groups,
-        min_shared=TUNING.min_shared,
-        max_motion_px=max_motion_px,
+        stride=args.stride,
+        max_groups=args.max_groups,
+        max_motion_px=float(args.max_motion_px) if gate and args.max_motion_px else None,
+        motion_gate=gate,
     )
-    scaled = result.scaled_errors(factors)
+    max_motion_px = settings.max_motion_px
+    try:
+        result, ba_inputs = solve_extrinsics(
+            directory / "extrinsic", session, extrinsic_board, settings
+        )
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from exc
+    scaled = output_scaled_errors(result, session)
     rigidity = board_rigidity_mm(result, ba_inputs.point_corner, extrinsic_board)
-    centers = camera_centers(result, board_unit_mm(extrinsic_board))
-
     unit_mm = board_unit_mm(extrinsic_board)
+    centers = {name: c * unit_mm / 1000.0 for name, c in camera_centres(result).items()}
+
     status = "converged" if result.ba_converged else "TRUNCATED"
     print(f"session      : {directory}")
     print(f"board        : {extrinsic_board.board_type.value}, unit {unit_mm:.1f} mm")

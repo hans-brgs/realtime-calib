@@ -410,3 +410,21 @@ def test_board_image_404_when_undefined(tmp_path: Path) -> None:
 def test_dictionaries_listed(tmp_path: Path) -> None:
     dicts = _client(tmp_path).get("/board/dictionaries").json()
     assert "DICT_5X5_100" in dicts
+
+
+def test_a_legacy_charuco_is_detected_only_as_legacy(tmp_path: Path) -> None:
+    # EXP-15: OpenCV >= 4.6 lays an even-row ChArUco out differently; a 7 x 8 board
+    # printed in the former layout gave no corner. Rendered legacy, it is detected
+    # with the flag and not without it (Caliscope v0.11.5 exposes the same switch).
+    from calibration_service.detection import BoardDetector
+
+    legacy = _charuco(columns=7, rows=8, legacy_pattern=True)
+    image = cv2.imdecode(np.frombuffer(render_board_png(legacy), np.uint8), cv2.IMREAD_COLOR)
+    found = BoardDetector(legacy).detect(image)
+    assert found.found and found.count >= 30
+    assert BoardDetector(_charuco(columns=7, rows=8)).detect(image).count == 0
+    # Persisted on the ChArUco block, absent (False) on a file written before.
+    save_board_config(tmp_path, "demo", legacy, None)
+    assert "legacy_pattern = true" in (tmp_path / "demo" / "config.toml").read_text()
+    intrinsic, _extrinsic, _inherited, issues = load_board_config(tmp_path, "demo")
+    assert intrinsic == legacy and issues == []

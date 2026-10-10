@@ -13,7 +13,7 @@ export type WizardStep =
 // ADR-0019: two entry modes replace new/resume/load_intrinsic/load_full.
 export type SessionMode = 'new-realtime' | 'load-from-files';
 
-export type CameraStatus = 'detected' | 'configured' | 'intrinsic_done' | 'extrinsic_done';
+export type CameraStatus = 'configured' | 'intrinsic_done' | 'extrinsic_done';
 
 export interface CameraConfig {
   index: number;
@@ -49,6 +49,7 @@ export interface Board {
   square_size_mm: number; // ChArUco measured square (metric scale)
   marker_size_mm: number; // measured marker side; metric scale for ArUco
   inverted: boolean;
+  legacy_pattern: boolean; // ChArUco: OpenCV's pre-4.6 layout (EXP-15)
 }
 
 export type BoardTarget = 'intrinsic' | 'extrinsic';
@@ -121,6 +122,7 @@ export interface BoardDefaults {
   square_size_mm: number;
   marker_size_mm: number;
   inverted: boolean;
+  legacy_pattern: boolean;
 }
 
 export interface PipelineDefaults {

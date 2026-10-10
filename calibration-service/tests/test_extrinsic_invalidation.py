@@ -141,8 +141,6 @@ def test_recomputing_intrinsics_needs_confirmation_and_discards_the_solve(
         matrix=[[101.0, 0.0, 32.0], [0.0, 101.0, 24.0], [0.0, 0.0, 1.0]],
         distortions=[0.0] * 5,
         error=0.2,
-        per_view_errors=[0.2] * 6,
-        grid_count=42,
         view_count=6,
         image_size=(64, 48),
     )
@@ -193,6 +191,7 @@ def test_rebuilding_the_cameras_drops_the_stale_solve_files(tmp_path: Path) -> N
         pytest.param(CHARUCO_EXTRINSIC, {"rows": 7}, id="charuco-rows"),
         pytest.param(CHARUCO_EXTRINSIC, {"marker_ratio": 0.6}, id="charuco-marker-ratio"),
         pytest.param(CHARUCO_EXTRINSIC, {"inverted": True}, id="charuco-inverted"),
+        pytest.param(CHARUCO_EXTRINSIC, {"legacy_pattern": True}, id="charuco-legacy-pattern"),
         pytest.param(MARKER, {"dictionary": "DICT_5X5_100"}, id="marker-dictionary"),
         pytest.param(MARKER, {"marker_id": 9}, id="marker-id"),
         pytest.param(MARKER, {"inverted": True}, id="marker-inverted"),

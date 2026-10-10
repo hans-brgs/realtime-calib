@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from calibration_service.board.charuco import charuco_board
 from calibration_service.board.dictionaries import resolve
 from calibration_service.detection.border_refine import (
     BorderRefusal,
@@ -233,9 +234,7 @@ class BoardDetector:
         self.border_attempts = 0  # single-marker views the border refinement ran on
         dictionary = resolve(board.dictionary)
         if board.board_type is BoardType.CHARUCO:
-            cv_board = cv2.aruco.CharucoBoard(
-                (board.columns, board.rows), 1.0, board.marker_ratio, dictionary
-            )
+            cv_board = charuco_board(board)
             charuco_params = cv2.aruco.CharucoParameters()
             charuco_params.tryRefineMarkers = True  # recover markers from interpolation
             self._charuco: cv2.aruco.CharucoDetector | None = cv2.aruco.CharucoDetector(
@@ -263,6 +262,7 @@ class BoardDetector:
         # Recovery paths taken (each logged loud once, then quiet).
         self._refine_failures = 0  # CONTOUR fallbacks
         self._subpix_failures = 0  # ChArUco views dropped
+        self._board_failures = 0  # ChArUco views detectBoard raised on
 
     def detect(self, image: NDArray[np.uint8]) -> BoardDetection:
         gray = _to_gray(image)
@@ -277,7 +277,19 @@ class BoardDetector:
         corners: NDArray[np.float32] | None = None
         ids: NDArray[np.int32] | None = None
         if self._charuco is not None:
-            corners_raw, ids_raw, _, _ = self._charuco.detectBoard(gray)
+            try:
+                corners_raw, ids_raw, _, _ = self._charuco.detectBoard(gray)
+            except cv2.error:
+                # One frame's OpenCV assertion must not fail the whole compute with a
+                # 500: the view is dropped and said once, like cornerSubPix below.
+                self._board_failures += 1
+                log = logger.warning if self._board_failures == 1 else logger.debug
+                log(
+                    "detectBoard raised; ChArUco view dropped (%d so far)",
+                    self._board_failures,
+                    exc_info=True,
+                )
+                return BoardDetection.empty()
             if corners_raw is not None and corners_raw.shape[0] >= 1 and ids_raw is not None:
                 # Sub-pixel refine the interpolated chessboard corners (calibration-grade).
                 refined = np.ascontiguousarray(corners_raw, dtype=np.float32)

@@ -52,6 +52,7 @@ from calibration_service.calibration.motion import (
 from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
+from calibration_service.session.layout import SWEEP_MANIFEST
 from calibration_service.synchronization import SyncFrame, SyncGroup
 from calibration_service.synchronization.window import sync_window
 from calibration_service.tuning import TUNING
@@ -128,7 +129,6 @@ class PairEstimate:
     rotation: NDArray[np.float64]  # 3x3
     translation: NDArray[np.float64]  # (3,)
     error: float  # stereoCalibrate RMSE (normalized units)
-    shared_groups: int
 
 
 @dataclass(frozen=True)
@@ -239,6 +239,41 @@ def _transform(
     return matrix
 
 
+def _pose(rvec: Any, tvec: Any) -> NDArray[np.float64]:
+    """The 4x4 pose of a Rodrigues vector and a translation."""
+    rotation, _ = cv2.Rodrigues(np.asarray(rvec, np.float64))
+    return _transform(np.asarray(rotation, np.float64), np.asarray(tvec, np.float64))
+
+
+def _rvec_t(pose: NDArray[np.float64]) -> tuple[NDArray[np.float64], NDArray[np.float64]]:
+    """The Rodrigues vector (3,) and the translation (3,) of a 4x4 pose."""
+    rvec, _ = cv2.Rodrigues(pose[:3, :3])
+    return np.asarray(rvec, np.float64).reshape(3), np.asarray(pose[:3, 3], np.float64)
+
+
+def _result_poses(result: ExtrinsicResult) -> dict[str, NDArray[np.float64]]:
+    """Each camera's 4x4 world -> camera pose, from a result's Rodrigues and t."""
+    return {n: _pose(result.rotations[n], result.translations[n]) for n in result.cameras}
+
+
+def _pose_lists(
+    poses: dict[str, NDArray[np.float64]],
+) -> tuple[dict[str, list[float]], dict[str, list[float]]]:
+    """Poses as a result stores them: Rodrigues vectors and translations, per camera."""
+    rotations: dict[str, list[float]] = {}
+    translations: dict[str, list[float]] = {}
+    for name, pose in poses.items():
+        rvec, tvec = _rvec_t(pose)
+        rotations[name] = [float(v) for v in rvec]
+        translations[name] = [float(v) for v in tvec]
+    return rotations, translations
+
+
+def _common_ids(det_a: GroupDetection, det_b: GroupDetection) -> NDArray[np.int32]:
+    """The corner (or marker-corner) ids two cameras saw in one group, sorted."""
+    return np.asarray(np.intersect1d(det_a.ids, det_b.ids), np.int32)
+
+
 def board_object_points(board: CalibrationBoard) -> NDArray[np.float64]:
     """3D reference points of the extrinsic target, indexed by detection corner id.
 
@@ -284,7 +319,7 @@ def _best_shared_count(groups: list[dict[str, GroupDetection]], board: Calibrati
                 det_a, det_b = group.get(cam_a), group.get(cam_b)
                 if det_a is None or det_b is None:
                     continue
-                if len(np.intersect1d(det_a.ids, det_b.ids)) >= min_corners:
+                if len(_common_ids(det_a, det_b)) >= min_corners:
                     shared += 1
             best = max(best, shared)
     return best
@@ -356,7 +391,7 @@ def stereo_pairwise(
                 det_a, det_b = group.get(cam_a), group.get(cam_b)
                 if det_a is None or det_b is None:
                     continue
-                common = np.intersect1d(det_a.ids, det_b.ids)
+                common = _common_ids(det_a, det_b)
                 if len(common) >= min_corners:
                     shared.append((index, len(common)))
             if len(shared) < min_shared:
@@ -372,7 +407,7 @@ def stereo_pairwise(
             points_b: list[NDArray[np.float32]] = []
             for index in _diverse_group_indices(shared, boards_cap):
                 det_a, det_b = groups[index][cam_a], groups[index][cam_b]
-                common = np.intersect1d(det_a.ids, det_b.ids)
+                common = _common_ids(det_a, det_b)
                 sel_a = np.searchsorted(det_a.ids, common)
                 sel_b = np.searchsorted(det_b.ids, common)
                 object_points.append(chess[common].astype(np.float32))
@@ -403,7 +438,6 @@ def stereo_pairwise(
                 rotation=np.asarray(rotation, np.float64),
                 translation=np.asarray(translation, np.float64).reshape(3),
                 error=float(rmse),
-                shared_groups=len(shared),
             )
             logger.info(
                 "pair %s-%s: %d shared groups, stereo RMSE %.4f",
@@ -787,17 +821,12 @@ def bundle_adjust(
 
     x0 = np.zeros(n_cam_params + 3 * len(points3d))
     for name, slot in free_slot.items():
-        pose = poses[name]
-        rvec, _ = cv2.Rodrigues(pose[:3, :3])
-        x0[6 * slot : 6 * slot + 3] = rvec.reshape(3)
-        x0[6 * slot + 3 : 6 * slot + 6] = pose[:3, 3]
+        x0[6 * slot : 6 * slot + 3], x0[6 * slot + 3 : 6 * slot + 6] = _rvec_t(poses[name])
     x0[n_cam_params:] = points3d.ravel()
 
     # The anchor is held at its CURRENT pose (identity right after chaining, but a
     # reorientation may have moved the world frame — Minimize must not undo it).
-    anchor_rvec_m, _ = cv2.Rodrigues(poses[anchor][:3, :3])
-    anchor_rvec = np.asarray(anchor_rvec_m, np.float64).reshape(3)
-    anchor_tvec = np.asarray(poses[anchor][:3, 3], np.float64)
+    anchor_rvec, anchor_tvec = _rvec_t(poses[anchor])
 
     masks = [obs_camera == c for c in range(len(camera_order))]
     identity_k = np.eye(3)
@@ -890,9 +919,8 @@ def bundle_adjust(
 
     solved: dict[str, NDArray[np.float64]] = {anchor: poses[anchor].copy()}
     for name, slot in free_slot.items():
-        rmat, _ = cv2.Rodrigues(solution[6 * slot : 6 * slot + 3])
-        solved[name] = _transform(
-            np.asarray(rmat, np.float64), solution[6 * slot + 3 : 6 * slot + 6]
+        solved[name] = _pose(
+            solution[6 * slot : 6 * slot + 3], solution[6 * slot + 3 : 6 * slot + 6]
         )
     return solved, solution[n_cam_params:].reshape(-1, 3), status
 
@@ -912,11 +940,10 @@ def _observation_residuals_px(
         mask = obs_camera == cam
         if not bool(mask.any()):
             continue
-        pose = poses[name]
-        rvec, _ = cv2.Rodrigues(pose[:3, :3])
+        rvec, tvec = _rvec_t(poses[name])
         model = models[name]
         projected, _ = cv2.projectPoints(
-            points3d[obs_point[mask]], rvec, pose[:3, 3], model.matrix, model.distortions
+            points3d[obs_point[mask]], rvec, tvec, model.matrix, model.distortions
         )
         diff = projected.reshape(-1, 2) - obs_px[mask]
         errors[mask] = np.linalg.norm(diff, axis=1)
@@ -1004,7 +1031,7 @@ def _group_board_quads(
     points3d: NDArray[np.float64],
     chess: NDArray[np.float64],
     group_count: int,
-    min_corners: int = _MIN_COMMON_CORNERS,
+    min_corners: int,
 ) -> list[list[list[float]] | None]:
     """Per group, the board's 4 outline corners in world coords (Kabsch fit).
 
@@ -1098,11 +1125,7 @@ def quad_origin_transform(
 
 def camera_centres(result: ExtrinsicResult) -> dict[str, NDArray[np.float64]]:
     """Each camera's optical centre in the result's world (``-R^T t``, target units)."""
-    centres: dict[str, NDArray[np.float64]] = {}
-    for name in result.cameras:
-        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
-        centres[name] = -rotation.T @ np.asarray(result.translations[name], np.float64)
-    return centres
+    return {n: -pose[:3, :3].T @ pose[:3, 3] for n, pose in _result_poses(result).items()}
 
 
 def reorient_result(result: ExtrinsicResult, transform: NDArray[np.float64]) -> ExtrinsicResult:
@@ -1116,16 +1139,11 @@ def reorient_result(result: ExtrinsicResult, transform: NDArray[np.float64]) -> 
     g_rotation = transform[:3, :3]
     g_translation = transform[:3, 3]
 
-    rotations: dict[str, list[float]] = {}
-    translations: dict[str, list[float]] = {}
-    for name in result.cameras:
-        r_matrix = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
-        t_vector = np.asarray(result.translations[name], np.float64)
-        new_r = r_matrix @ g_rotation.T
-        new_t = t_vector - new_r @ g_translation
-        rvec, _ = cv2.Rodrigues(new_r)
-        rotations[name] = [float(v) for v in np.asarray(rvec).reshape(3)]
-        translations[name] = [float(v) for v in new_t]
+    reposed: dict[str, NDArray[np.float64]] = {}
+    for name, pose in _result_poses(result).items():
+        new_r = pose[:3, :3] @ g_rotation.T
+        reposed[name] = _transform(new_r, pose[:3, 3] - new_r @ g_translation)
+    rotations, translations = _pose_lists(reposed)
 
     points = np.asarray(result.points, np.float64)
     moved_points = points @ g_rotation.T + g_translation if len(points) else points
@@ -1178,10 +1196,7 @@ def refine_result(
     recalibrate reset). Holds the anchor at its current pose, so an operator
     reorientation (origin/±xyz) is preserved. No re-detection.
     """
-    poses: dict[str, NDArray[np.float64]] = {}
-    for name in result.cameras:
-        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
-        poses[name] = _transform(rotation, np.asarray(result.translations[name], np.float64))
+    poses = _result_poses(result)
 
     obs_camera = np.asarray(ba_inputs.obs_camera, np.intp)
     obs_point = np.asarray(ba_inputs.obs_point, np.intp)
@@ -1225,46 +1240,78 @@ def refine_result(
         model_map,
     )
 
-    rotations: dict[str, list[float]] = {}
-    translations: dict[str, list[float]] = {}
-    for name, pose in solved.items():
-        rvec, _ = cv2.Rodrigues(pose[:3, :3])
-        rotations[name] = [float(v) for v in np.asarray(rvec).reshape(3)]
-        translations[name] = [float(v) for v in pose[:3, 3]]
-
-    chess = board_object_points(board)
-    return ExtrinsicResult(
+    return _solved_result(
         cameras=result.cameras,
-        rotations=rotations,
-        translations=translations,
-        per_camera_error=per_camera,
-        error=overall,
-        pair_errors=result.pair_errors,
+        board=board,
+        solved=solved,
+        points=refined,
+        point_group=point_group,
+        point_corner=point_corner,
+        used_obs_camera=obs_camera[keep],
+        per_camera=per_camera,
+        overall=overall,
+        ba_status=ba_status,
         group_count=result.group_count,
-        point_count=len(refined),
-        points=[[float(v) for v in point] for point in refined],
-        point_groups=result.point_groups,
-        ba_converged=ba_status.converged,
-        ba_nfev=ba_status.nfev,
+        pair_errors=result.pair_errors,
         # The Minimize report: how many observations survived the filter, out of
         # the FULL persisted set (this run always re-filters from it).
-        observations_used=int(keep.sum()),
         observations_total=len(keep),
-        per_camera_observations={
-            name: int((obs_camera[keep] == index).sum())
-            for index, name in enumerate(result.cameras)
-        },
-        rigidity_mm=rigidity_mm(refined, point_group, point_corner, board),
         # Minimize re-solves the same views: the refinement's counts still hold.
         border_refusals=result.border_refusals,
         border_attempts=result.border_attempts,
         moving_groups=result.moving_groups,
+    )
+
+
+def _solved_result(
+    *,
+    cameras: list[str],
+    board: CalibrationBoard,
+    solved: dict[str, NDArray[np.float64]],
+    points: NDArray[np.float64],
+    point_group: NDArray[np.intp],
+    point_corner: NDArray[np.int32],
+    used_obs_camera: NDArray[np.intp],
+    per_camera: dict[str, float],
+    overall: float,
+    ba_status: BAStatus,
+    group_count: int,
+    pair_errors: dict[str, float],
+    observations_total: int,
+    border_refusals: dict[str, dict[str, int]] | None = None,
+    border_attempts: dict[str, int] | None = None,
+    moving_groups: int = 0,
+) -> ExtrinsicResult:
+    """The result of a bundle-adjusted solve: a fresh compute's or a Minimize's."""
+    rotations, translations = _pose_lists(solved)
+    return ExtrinsicResult(
+        cameras=cameras,
+        rotations=rotations,
+        translations=translations,
+        per_camera_error=per_camera,
+        error=overall,
+        pair_errors=pair_errors,
+        group_count=group_count,
+        point_count=len(points),
+        points=[[float(v) for v in point] for point in points],
+        point_groups=[int(g) for g in point_group],
+        ba_converged=ba_status.converged,
+        ba_nfev=ba_status.nfev,
+        observations_used=len(used_obs_camera),
+        observations_total=observations_total,
+        per_camera_observations={
+            name: int((used_obs_camera == index).sum()) for index, name in enumerate(cameras)
+        },
+        rigidity_mm=rigidity_mm(points, point_group, point_corner, board),
+        border_refusals=border_refusals or {},
+        border_attempts=border_attempts or {},
+        moving_groups=moving_groups,
         board_quads=_group_board_quads(
             point_group,
             point_corner,
-            refined,
-            chess,
-            result.group_count,
+            points,
+            board_object_points(board),
+            group_count,
             min_corners=_min_corners(board),
         ),
     )
@@ -1584,7 +1631,7 @@ def _warn_on_mixed_clocks(directory: Path) -> None:
     base. The solve still runs: the manifest says why it may be poorer.
     """
     try:
-        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest = json.loads((directory / SWEEP_MANIFEST).read_text())
         clocks = {str(c["name"]): str(c.get("clock", "unknown")) for c in manifest["cameras"]}
     except (OSError, ValueError, KeyError, TypeError):
         return
@@ -1732,45 +1779,21 @@ def _solve_groups(
         by_name,
     )
 
-    rotations: dict[str, list[float]] = {}
-    translations: dict[str, list[float]] = {}
-    for name, pose in solved.items():
-        rvec, _ = cv2.Rodrigues(pose[:3, :3])
-        rotations[name] = [float(v) for v in rvec.reshape(3)]
-        translations[name] = [float(v) for v in pose[:3, 3]]
-
-    chess = board_object_points(board)
-    result = ExtrinsicResult(
+    result = _solved_result(
         cameras=order,
-        rotations=rotations,
-        translations=translations,
-        per_camera_error=per_camera,
-        error=overall,
-        pair_errors={f"{a}|{b}": pair.error for (a, b), pair in pairs.items()},
-        group_count=len(detections),
-        point_count=len(points_opt),
-        points=[[float(v) for v in point] for point in points_opt],
-        point_groups=[int(g) for g in triangulation.point_group],
-        ba_converged=ba_status.converged,
-        ba_nfev=ba_status.nfev,
+        board=board,
+        solved=solved,
+        points=points_opt,
+        point_group=triangulation.point_group,
+        point_corner=triangulation.point_corner,
         # A full solve uses every observation (Minimize is what filters).
-        observations_used=len(triangulation.obs_camera),
+        used_obs_camera=triangulation.obs_camera,
+        per_camera=per_camera,
+        overall=overall,
+        ba_status=ba_status,
+        group_count=len(detections),
+        pair_errors={f"{a}|{b}": pair.error for (a, b), pair in pairs.items()},
         observations_total=len(triangulation.obs_camera),
-        board_quads=_group_board_quads(
-            triangulation.point_group,
-            triangulation.point_corner,
-            points_opt,
-            chess,
-            len(detections),
-            min_corners=_min_corners(board),
-        ),
-        per_camera_observations={
-            name: int((triangulation.obs_camera == index).sum())
-            for index, name in enumerate(order)
-        },
-        rigidity_mm=rigidity_mm(
-            points_opt, triangulation.point_group, triangulation.point_corner, board
-        ),
     )
     ba_inputs = BAInputs(
         obs_camera=[int(v) for v in triangulation.obs_camera],

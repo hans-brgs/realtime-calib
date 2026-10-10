@@ -32,6 +32,7 @@ class BoardDefaults:
     marker_size_mm: float = 30.0
     marker_id: int = 0
     inverted: bool = False
+    legacy_pattern: bool = False
 
 
 @dataclass(frozen=True)

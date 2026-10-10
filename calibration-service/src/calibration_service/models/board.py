@@ -3,7 +3,7 @@
 A board carries two kinds of parameters:
 
 - **geometry** (renders the printable PNG): type, dictionary, columns/rows,
-  marker/square ratio, inversion;
+  marker/square ratio, inversion, legacy layout;
 - **metric** (`*_mm`): the *measured* physical sizes the operator enters after
   printing — they carry the metric scale, not the render (ADR-0020).
 
@@ -40,3 +40,6 @@ class CalibrationBoard:
     square_size_mm: float = 40.0  # ChArUco measured square (metric scale)
     marker_size_mm: float = 30.0  # measured marker side; the metric scale for ArUco
     inverted: bool = False
+    # ChArUco only: OpenCV's pre-4.6 layout, which differs for an even row count; a
+    # board printed by an older tool otherwise detects no corner (EXP-15).
+    legacy_pattern: bool = False

@@ -46,11 +46,8 @@ function normalizeBoard(board: Board): Board {
 }
 
 // Marker capacity from a predefined dictionary name (mirrors the backend): the
-// trailing number, e.g. DICT_5X5_100 -> 100; DICT_ARUCO_ORIGINAL -> 1024.
+// trailing number, e.g. DICT_5X5_100 -> 100.
 function dictionaryCapacity(name: string): number {
-  if (name === 'DICT_ARUCO_ORIGINAL') {
-    return 1024;
-  }
   const tail = Number(name.split('_').at(-1));
   return Number.isFinite(tail) ? tail : 50;
 }
@@ -600,6 +597,17 @@ function TargetConfigForm({
                 onChange={(e) => patch({ inverted: e.currentTarget.checked })}
                 label="Inverted (ink saving)"
               />
+              {board.board_type === 'charuco' && (
+                <Switch
+                  mt="xs"
+                  checked={board.legacy_pattern}
+                  onChange={(e) => patch({ legacy_pattern: e.currentTarget.checked })}
+                  {...labelWithHelp(
+                    'Legacy layout (OpenCV < 4.6)',
+                    'For a board printed by an older tool: OpenCV 4.6 changed the ChArUco layout of an even row count, and such a board detects no corner without this switch.',
+                  )}
+                />
+              )}
             </Paper>
           )}
 

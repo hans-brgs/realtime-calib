@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import numpy as np
 import rtoml
 from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -30,11 +29,9 @@ from calibration_service.atomic_io import atomic_write_text, replace_directory
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
 from calibration_service.calibration import (
     BAInputs,
-    CameraModel,
     ExtrinsicResult,
     axis_rotation_transform,
     board_unit_mm,
-    compute_extrinsic_from_sweep,
     compute_intrinsic_from_video,
     derive_sweep_window,
     quad_origin_transform,
@@ -71,9 +68,20 @@ from calibration_service.recording import (
     preview_path,
 )
 from calibration_service.recording.ffmpeg import FfmpegError
-from calibration_service.resolution import to_native
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
+from calibration_service.session.layout import (
+    BA_INPUTS_FILE,
+    REFERENCE_FILE,
+    RESULT_FILE,
+    SWEEP_MANIFEST,
+)
 from calibration_service.session.manager import SessionManager
+from calibration_service.session.workflow import (
+    native_camera_model,
+    output_scaled_errors,
+    solve_extrinsics,
+    sweep_settings,
+)
 from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.site_template import (
     SiteTemplate,
@@ -239,6 +247,7 @@ class BoardIn(BaseModel):
     square_size_mm: float = Field(default=TUNING.board.square_size_mm, gt=0.0)
     marker_size_mm: float = Field(default=TUNING.board.marker_size_mm, gt=0.0)
     inverted: bool = TUNING.board.inverted
+    legacy_pattern: bool = TUNING.board.legacy_pattern  # ChArUco: OpenCV's pre-4.6 layout
 
 
 class BoardConfigRequest(BaseModel):
@@ -329,6 +338,7 @@ def _board_out(board: CalibrationBoard | None) -> BoardOut | None:
         square_size_mm=board.square_size_mm,
         marker_size_mm=board.marker_size_mm,
         inverted=board.inverted,
+        legacy_pattern=board.legacy_pattern,
     )
 
 
@@ -343,6 +353,7 @@ def _to_board(item: BoardIn) -> CalibrationBoard:
         square_size_mm=item.square_size_mm,
         marker_size_mm=item.marker_size_mm,
         inverted=item.inverted,
+        legacy_pattern=item.legacy_pattern,
     )
 
 
@@ -422,7 +433,33 @@ def _require_camera(session: CalibrationSession, camera: str) -> CameraConfig:
 
 
 # Any: a JSON object's values are untyped until a dataclass or the route reads them.
-def _read_json(path: Path) -> dict[str, Any]:
+# The solve files (result.json, ba_inputs.json, reference.json) carry a schema
+# version: a payload written by a newer service is refused by its number, not by
+# whichever field happens to differ. Absent = written before the field (version 0).
+SOLVE_SCHEMA_VERSION = 1
+
+
+def _write_solve_file(path: Path, payload: dict[str, Any]) -> None:
+    atomic_write_text(path, json.dumps({"schema_version": SOLVE_SCHEMA_VERSION, **payload}))
+
+
+def _read_solve_file(path: Path, *, remedy: str = "recompute") -> dict[str, Any]:
+    """The payload without its version; 422 when a newer service wrote it.
+
+    A rolled-back service therefore refuses the files a newer one wrote, by number.
+    """
+    data = _read_json(path, remedy=remedy)
+    version = data.pop("schema_version", 0)
+    if type(version) is not int or not 0 <= version <= SOLVE_SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{path.name} has schema version {version!r}, this service reads up to "
+            f"{SOLVE_SCHEMA_VERSION} — {remedy}",
+        )
+    return data
+
+
+def _read_json(path: Path, *, remedy: str = "recompute") -> dict[str, Any]:
     """A persisted JSON payload; an unreadable one is a 422 naming the file.
 
     These files are written by the service itself, so a parse error means a
@@ -432,10 +469,10 @@ def _read_json(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text())
     except ValueError as exc:  # JSONDecodeError, UnicodeDecodeError
         raise HTTPException(
-            status_code=422, detail=f"{path.name} is unreadable ({exc}) — recompute"
+            status_code=422, detail=f"{path.name} is unreadable ({exc}) — {remedy}"
         ) from exc
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — recompute")
+        raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — {remedy}")
     return payload
 
 
@@ -1043,32 +1080,6 @@ class ExtrinsicComputeRequest(BaseModel):
     )
 
 
-def _native_camera_model(camera: CameraConfig) -> CameraModel:
-    """Solver intrinsics at the RECORDING resolution (undo the ADR-0015 scaling)."""
-    assert camera.matrix is not None  # callers refuse uncalibrated cameras first
-    return CameraModel(
-        name=camera.name,
-        matrix=to_native(camera.matrix, (camera.width, camera.height), camera.resize_factor or 1.0),
-        distortions=np.asarray(camera.distortions, np.float64),
-    )
-
-
-def _output_scaled_errors(
-    result: ExtrinsicResult, session: CalibrationSession
-) -> ExtrinsicResult:
-    """Extrinsic pixel errors at the operator's output resolution (ADR-0042).
-
-    The solver reports at the native recording resolution; every operator-facing
-    surface (session state, result.json, webapp) speaks output pixels — the same
-    contract the intrinsic path applies via ``IntrinsicResult.scaled``
-    (ADR-0015). Applied exactly once, on the compute and minimize exits;
-    reorientation carries the already-scaled errors through untouched.
-    """
-    return result.scaled_errors(
-        {camera.name: camera.resize_factor or 1.0 for camera in session.cameras}
-    )
-
-
 @router.post("/extrinsic/compute", response_model=SessionOut)
 @_exclusive("an extrinsic compute")
 async def compute_extrinsic(
@@ -1095,79 +1106,48 @@ async def compute_extrinsic(
             detail=f"cameras missing intrinsics: {', '.join(uncalibrated) or 'need >= 2'}",
         )
     directory = manager.extrinsic_dir()
-    if not (directory / "manifest.json").is_file():
+    if not (directory / SWEEP_MANIFEST).is_file():
         raise HTTPException(status_code=404, detail="no extrinsic recording")
 
     service = get_publish_service(request)
     if service is not None:
         await service.stop_extrinsic_recording()
 
-    anchor = min(session.cameras, key=lambda c: c.index)  # index 0 = anchor (ADR-0012)
-    models = [_native_camera_model(c) for c in session.cameras]
-    # Window from the RECORDED cadence (sidecars), not the configured fps: the
-    # effective write rate can sit well below it (ADR-0007 intent = real interval).
-    try:
-        window_s = derive_sweep_window(directory, [c.name for c in session.cameras])
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # Resolve omitted knobs against TUNING in one place (ADR-0036); an explicit
-    # value is honoured verbatim — the Pydantic bounds already rejected nonsense.
-    max_spread_s = (
-        params.max_spread_ms / 1000.0 if params.max_spread_ms is not None else None
+    # Omitted knobs resolve against TUNING in one place (ADR-0036); an explicit value
+    # is honoured verbatim — the Pydantic bounds already rejected nonsense.
+    settings = sweep_settings(
+        board,
+        stride=params.stride,
+        max_groups=params.max_groups,
+        min_shared=params.min_shared,
+        max_spread_ms=params.max_spread_ms,
+        max_motion_px=params.max_motion_px,
     )
-    charuco = board.board_type is BoardType.CHARUCO
-    stride = (
-        params.stride
-        if params.stride is not None
-        else (TUNING.extrinsic_stride_charuco if charuco else TUNING.extrinsic_stride_marker)
-    )
-    max_groups = (
-        params.max_groups
-        if params.max_groups is not None
-        else (TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker)
-    )
-    min_shared = params.min_shared if params.min_shared is not None else TUNING.min_shared
-    max_motion_px = (
-        params.max_motion_px if params.max_motion_px is not None else TUNING.extrinsic_max_motion_px
-    )
-
     loop = asyncio.get_running_loop()
     try:
         result, ba_inputs = await loop.run_in_executor(
-            None,
-            lambda: compute_extrinsic_from_sweep(
-                directory,
-                board,
-                models,
-                anchor=anchor.name,
-                window_s=window_s,
-                stride=stride,
-                max_groups=max_groups,
-                max_spread_s=max_spread_s,
-                min_shared=min_shared,
-                max_motion_px=max_motion_px,
-            ),
+            None, lambda: solve_extrinsics(directory, session, board, settings)
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Errors leave the solver in native px; the operator contract is output px
     # (ADR-0042). ba_inputs stay native — they are solver-domain data.
-    result = _output_scaled_errors(result, session)
+    result = output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
-    atomic_write_text(directory / "result.json", json.dumps(asdict(result)))
+    _write_solve_file(directory / RESULT_FILE, asdict(result))
     # BA observations: lets Minimize refine later without redetecting the videos.
-    atomic_write_text(directory / "ba_inputs.json", json.dumps(asdict(ba_inputs)))
+    _write_solve_file(directory / BA_INPUTS_FILE, asdict(ba_inputs))
     return _session_out(session, manager)
 
 
 @router.get("/extrinsic/result")
 async def extrinsic_result(request: Request) -> dict[str, object]:
     """Serve the persisted array solve (poses + errors) for the Result 3D view."""
-    path = get_manager(request).extrinsic_dir() / "result.json"
+    path = get_manager(request).extrinsic_dir() / RESULT_FILE
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
-    return _read_json(path)
+    return _read_solve_file(path)
 
 
 class OrientRequest(BaseModel):
@@ -1188,11 +1168,11 @@ class OrientRequest(BaseModel):
 
 
 def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
-    path = manager.extrinsic_dir() / "result.json"
+    path = manager.extrinsic_dir() / RESULT_FILE
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
     try:
-        return ExtrinsicResult(**_read_json(path))
+        return ExtrinsicResult(**_read_solve_file(path))
     except TypeError as exc:  # unknown or missing key: a payload of another schema
         raise HTTPException(
             status_code=422, detail=f"result.json is unreadable ({exc}) — recompute"
@@ -1201,7 +1181,7 @@ def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
 
 def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) -> None:
     manager.set_extrinsic_result(result)
-    atomic_write_text(manager.extrinsic_dir() / "result.json", json.dumps(asdict(result)))
+    _write_solve_file(manager.extrinsic_dir() / RESULT_FILE, asdict(result))
 
 
 @router.post("/extrinsic/orient")
@@ -1287,16 +1267,16 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     if board is None:
         raise HTTPException(status_code=422, detail="no extrinsic board defined")
     result = _load_extrinsic_result(manager)
-    ba_path = manager.extrinsic_dir() / "ba_inputs.json"
+    ba_path = manager.extrinsic_dir() / BA_INPUTS_FILE
     if not ba_path.is_file():
         raise HTTPException(status_code=404, detail="no BA observations (recompute first)")
     try:
-        ba_inputs = BAInputs(**_read_json(ba_path))
+        ba_inputs = BAInputs(**_read_solve_file(ba_path))
     except TypeError as exc:  # unknown or missing key: a payload of another schema
         raise HTTPException(
             status_code=422, detail=f"ba_inputs.json is unreadable ({exc}) — recompute"
         ) from exc
-    models = [_native_camera_model(c) for c in session.cameras if c.matrix is not None]
+    models = [native_camera_model(c) for c in session.cameras if c.matrix is not None]
     anchor = min(session.cameras, key=lambda c: c.index)
 
     loop = asyncio.get_running_loop()
@@ -1308,16 +1288,13 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Refine recomputes errors in native px; re-express them in output px
     # (ADR-0042) before persisting, like the compute exit.
-    refined = _output_scaled_errors(refined, session)
+    refined = output_scaled_errors(refined, session)
     # Minimize keeps the anchor pose, so the framing marker and a re-alignment on a
     # reference stay meaningful.
     refined = replace(refined, framed_group=result.framed_group, alignment=result.alignment)
     _store_extrinsic_result(manager, refined)
     payload: dict[str, object] = asdict(refined)
     return payload
-
-
-_REFERENCE_FILE = "reference.json"
 
 
 class ReferenceRequest(BaseModel):
@@ -1329,15 +1306,12 @@ class ReferenceRequest(BaseModel):
 
 def _stored_reference(manager: SessionManager) -> Reference | None:
     """The deposited reference, None when there is none; 422 when its file is unreadable."""
-    path = manager.extrinsic_dir() / _REFERENCE_FILE
+    path = manager.extrinsic_dir() / REFERENCE_FILE
     if not path.is_file():
         return None
     try:
-        return reference_from_payload(_read_json(path))
-    except HTTPException as exc:  # not JSON, or not an object
-        raise HTTPException(
-            status_code=422, detail="reference.json is unreadable — deposit it again"
-        ) from exc
+        # A reference survives a recompute: the remedy is to deposit it again.
+        return reference_from_payload(_read_solve_file(path, remedy="deposit it again"))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=422, detail=f"reference.json is unreadable ({exc}) — deposit it again"
@@ -1383,7 +1357,7 @@ async def put_extrinsic_reference(request: Request, body: ReferenceRequest) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(directory / _REFERENCE_FILE, json.dumps(reference_payload(reference)))
+    _write_solve_file(directory / REFERENCE_FILE, reference_payload(reference))
     return _reference_state(manager, reference)
 
 
@@ -1400,7 +1374,7 @@ async def get_extrinsic_reference(request: Request) -> dict[str, object]:
 @router.delete("/extrinsic/reference")
 async def delete_extrinsic_reference(request: Request) -> dict[str, object]:
     """Forget the reference; an applied re-alignment keeps its world."""
-    path = get_manager(request).extrinsic_dir() / _REFERENCE_FILE
+    path = get_manager(request).extrinsic_dir() / REFERENCE_FILE
     existed = path.is_file()
     path.unlink(missing_ok=True)
     return {"deleted": existed}
@@ -1425,7 +1399,7 @@ async def extrinsic_groups(
     manager = get_manager(request)
     session = manager.current()
     directory = manager.extrinsic_dir()
-    if not (directory / "manifest.json").is_file():
+    if not (directory / SWEEP_MANIFEST).is_file():
         raise HTTPException(status_code=404, detail="no extrinsic recording")
     names = [c.name for c in session.cameras]
     loop = asyncio.get_running_loop()
@@ -1574,11 +1548,11 @@ def _stored_result(manager: SessionManager) -> ExtrinsicResult | None:
 
 
 def _stored_ba_inputs(manager: SessionManager) -> BAInputs | None:
-    path = manager.extrinsic_dir() / "ba_inputs.json"
+    path = manager.extrinsic_dir() / BA_INPUTS_FILE
     if not path.is_file():
         return None
     try:
-        return BAInputs(**_read_json(path))
+        return BAInputs(**_read_solve_file(path))
     except (TypeError, HTTPException) as exc:
         logger.warning("export checks: ba_inputs.json is unreadable (%s)", exc)
         return None

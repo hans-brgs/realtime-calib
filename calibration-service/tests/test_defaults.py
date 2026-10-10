@@ -18,6 +18,7 @@ from calibration_service.app import create_app
 from calibration_service.calibration.extrinsic import BAInputs, ExtrinsicResult
 from calibration_service.calibration.intrinsic import IntrinsicResult
 from calibration_service.recording import VideoRecorder
+from calibration_service.session import workflow
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport import api as api_module
 from calibration_service.tuning import TUNING
@@ -49,8 +50,6 @@ def _intrinsic_result() -> IntrinsicResult:
         matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         distortions=[0.0] * 8,
         error=0.12,
-        per_view_errors=[0.1] * 6,
-        grid_count=42,
         view_count=6,
         image_size=(64, 48),
         coverage=((0.0, 1.0),),
@@ -172,7 +171,7 @@ def test_extrinsic_compute_resolves_board_type_defaults(
         captured.update(kwargs)
         return fixture, ba_fixture
 
-    monkeypatch.setattr(api_module, "compute_extrinsic_from_sweep", fake_compute)
+    monkeypatch.setattr(workflow, "compute_extrinsic_from_sweep", fake_compute)
 
     # Empty body: the ChArUco board-type defaults apply.
     assert client.post("/extrinsic/compute").status_code == 200

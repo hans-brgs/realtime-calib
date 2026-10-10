@@ -88,8 +88,6 @@ def test_intrinsic_result_scaled() -> None:
         matrix=[[1337.0, 0.0, 993.0], [0.0, 1337.0, 544.0], [0.0, 0.0, 1.0]],
         distortions=[0.1, -0.05, 0.0, 0.0, 0.0],
         error=0.62,
-        per_view_errors=[0.6, 0.7],
-        grid_count=1000,
         view_count=20,
         image_size=(1920, 1080),
     )
@@ -758,8 +756,6 @@ def test_the_uncertainty_scales_to_the_output_resolution() -> None:
         matrix=[[700.0, 0.0, 479.5], [0.0, 700.0, 269.5], [0.0, 0.0, 1.0]],
         distortions=[0.0] * 5,
         error=0.4,
-        per_view_errors=[],
-        grid_count=0,
         view_count=6,
         image_size=(960, 540),
         uncertainty=((1.0, 2.0), (3.0, None)),

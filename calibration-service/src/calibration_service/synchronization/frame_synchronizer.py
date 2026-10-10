@@ -11,13 +11,13 @@ not zero-copy frame views, so plain deques suffice:
 - **Anti-famine invariant**: any head outside the window is dropped on every
   pass, even when the others synchronize — a lagging camera can never freeze
   the pipeline, and a stale head can never pair with a newer frame anyway.
-- **Instant batching**: don't emit a partial group while live cameras may still
-  land in the same instant; emit once the live set is complete OR the wait
-  budget (``wait_depth`` buffered frames) is exhausted — quorum >= 2 applies.
+- **Instant batching**: don't emit a partial group while other cameras may still
+  land in the same instant; emit once every camera is in OR the wait budget
+  (``wait_depth`` buffered frames) is exhausted — quorum >= 2 applies.
 
-The same class serves the live capture (incremental ``add`` + ``try_emit``) and
-the offline compute over recorded sidecar timestamps (``add`` everything, then
-``drain`` — flush mode, no waiting).
+It serves the live capture only (incremental ``add`` + ``try_emit``), for the
+co-visibility gauges; the compute groups the recorded sidecars offline
+(``sweep_groups``).
 """
 
 from __future__ import annotations
@@ -69,13 +69,6 @@ class FrameSynchronizer[T]:
         self._buffers: dict[str, deque[SyncFrame[T]]] = {
             name: deque(maxlen=_MAX_BUFFER) for name in self._cameras
         }
-        # Live cameras expected in a *complete* group; a dead camera must not
-        # add wait_depth frames of latency to every group (samvision pattern).
-        self._active_count = len(self._cameras)
-
-    def set_active_count(self, count: int) -> None:
-        """Update how many live cameras a complete group should contain."""
-        self._active_count = max(1, min(count, len(self._cameras)))
 
     def add(self, camera: str, timestamp: float, payload: T) -> None:
         """Buffer one camera's timestamped payload (unknown cameras ignored)."""
@@ -83,53 +76,30 @@ class FrameSynchronizer[T]:
         if buffer is not None:
             buffer.append(SyncFrame(camera, timestamp, payload))
 
-    def try_emit(self, *, flush: bool = False) -> SyncGroup[T] | None:
-        """Return the next synchronized group, or ``None`` if not ready.
-
-        ``flush=True`` (offline drain) emits as soon as the quorum is met, without
-        waiting for stragglers — all data is already buffered. In flush mode a pass
-        that only dropped stale heads RETRIES with the advanced heads instead of
-        returning ``None``: ``drain()`` reads ``None`` as "done", and bailing after
-        a cleanup pass would silently discard the rest of the sweep (real-rig bug:
-        only the first seconds of an 18 s recording ever got grouped).
-        """
-        while True:
-            heads = [buffer[0] for buffer in self._buffers.values() if buffer]
-            if len(heads) < _QUORUM:
-                return None
-
-            newest = max(frame.timestamp for frame in heads)
-            in_window = [f for f in heads if newest - f.timestamp <= self._window_s]
-
-            # Anti-famine: drop every stale head each pass (see module docstring).
-            dropped = 0
-            for frame in heads:
-                if newest - frame.timestamp > self._window_s:
-                    self._buffers[frame.camera].popleft()
-                    dropped += 1
-
-            if len(in_window) >= _QUORUM:
-                complete = len(in_window) >= self._active_count
-                waited_enough = any(
-                    len(self._buffers[f.camera]) >= self._wait_depth for f in in_window
-                )
-                if flush or complete or waited_enough:
-                    members = [self._buffers[f.camera].popleft() for f in in_window]
-                    timestamps = [m.timestamp for m in members]
-                    return SyncGroup(
-                        frames={m.camera: m for m in members},
-                        timestamp=sum(timestamps) / len(timestamps),
-                        spread=max(timestamps) - min(timestamps),
-                    )
-                return None  # live: instant batching — let stragglers land first
-
-            if flush and dropped:
-                continue  # progress was made; the next heads may pair up
+    def try_emit(self) -> SyncGroup[T] | None:
+        """Return the next synchronized group, or ``None`` if not ready."""
+        heads = [buffer[0] for buffer in self._buffers.values() if buffer]
+        if len(heads) < _QUORUM:
             return None
 
-    def drain(self) -> list[SyncGroup[T]]:
-        """Emit every remaining group (offline mode: everything is buffered)."""
-        groups: list[SyncGroup[T]] = []
-        while (group := self.try_emit(flush=True)) is not None:
-            groups.append(group)
-        return groups
+        newest = max(frame.timestamp for frame in heads)
+        in_window = [f for f in heads if newest - f.timestamp <= self._window_s]
+
+        # Anti-famine: drop every stale head each pass (see module docstring).
+        for frame in heads:
+            if newest - frame.timestamp > self._window_s:
+                self._buffers[frame.camera].popleft()
+
+        if len(in_window) < _QUORUM:
+            return None
+        complete = len(in_window) == len(self._cameras)
+        waited_enough = any(len(self._buffers[f.camera]) >= self._wait_depth for f in in_window)
+        if not (complete or waited_enough):
+            return None  # instant batching — let stragglers land first
+        members = [self._buffers[f.camera].popleft() for f in in_window]
+        timestamps = [m.timestamp for m in members]
+        return SyncGroup(
+            frames={m.camera: m for m in members},
+            timestamp=sum(timestamps) / len(timestamps),
+            spread=max(timestamps) - min(timestamps),
+        )

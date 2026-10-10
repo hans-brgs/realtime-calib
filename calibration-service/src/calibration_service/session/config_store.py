@@ -60,6 +60,8 @@ def _board_to_dict(board: CalibrationBoard, *, carries_scale: bool) -> dict[str,
         data["square_size_mm"] = round(board.square_size_mm, _MM_DECIMALS)
         data["marker_size_mm"] = round(board.marker_size_mm, _MM_DECIMALS)
     data["inverted"] = board.inverted
+    if board.board_type is BoardType.CHARUCO:
+        data["legacy_pattern"] = board.legacy_pattern
     if board.board_type is BoardType.ARUCO:
         # A single-marker target has no squares: the scale is marker_size_mm and
         # marker_ratio is render-only for ChArUco. Serializing them here would
@@ -79,7 +81,8 @@ def _board_from_dict(data: Mapping[str, Any], *, carries_scale: bool) -> Calibra
     Keys absent BY DESIGN (ArUco blocks never serialize squares/ratio; ChArUco
     never uses marker_id; the intrinsic block carries no size) get neutral TUNING
     values nothing reads. ``inverted`` is a render preference: absent = not
-    inverted, low stakes.
+    inverted, low stakes; an absent ``legacy_pattern`` (written before EXP-15) is
+    OpenCV's current layout, the only one detected then.
     """
     board_type = BoardType(data["board_type"])
     required = ["dictionary", "columns", "rows"]
@@ -101,6 +104,7 @@ def _board_from_dict(data: Mapping[str, Any], *, carries_scale: bool) -> Calibra
         square_size_mm=float(data.get("square_size_mm", TUNING.board.square_size_mm)),
         marker_size_mm=float(data.get("marker_size_mm", TUNING.board.marker_size_mm)),
         inverted=bool(data.get("inverted", False)),
+        legacy_pattern=bool(data.get("legacy_pattern", False)),
     )
 
 

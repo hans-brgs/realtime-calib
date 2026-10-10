@@ -24,13 +24,14 @@ from numpy.typing import NDArray
 
 from calibration_service.atomic_io import atomic_write_text
 from calibration_service.recording.video_writer import VideoRecorder
+from calibration_service.session.layout import SWEEP_MANIFEST
 from calibration_service.session.store import session_dir
 from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
 _EXTRINSIC_DIR = "extrinsic"
-_MANIFEST_FILE = "manifest.json"
+_MANIFEST_FILE = SWEEP_MANIFEST
 
 
 def extrinsic_dir(sessions_dir: Path, session_id: str) -> Path:
