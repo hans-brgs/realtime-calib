@@ -15,7 +15,7 @@ import numpy as np
 import pytest
 from numpy.typing import NDArray
 
-from calibration_service.calibration.extrinsic import _warn_on_mixed_clocks
+from calibration_service.calibration.extrinsic.sweep import _warn_on_mixed_clocks
 from calibration_service.capture.camera import CameraCapture
 from calibration_service.capture.device import CameraDevice
 from calibration_service.config import LiveKitConfig
