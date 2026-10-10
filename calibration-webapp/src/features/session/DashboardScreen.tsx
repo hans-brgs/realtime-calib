@@ -14,6 +14,7 @@ import { IconChevronRight, IconFolder, IconVideo, type IconProps } from '@tabler
 import { type ComponentType, type CSSProperties, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { InfoPopover } from '@/components/InfoPopover';
 import { ImportSessionModal } from '@/features/session/ImportSessionModal';
 import { NewSessionModal } from '@/features/session/NewSessionModal';
 import {
@@ -216,11 +217,14 @@ export function DashboardScreen() {
     <Box p={{ base: 'md', sm: 'xl' }} maw={1180}>
       <NewSessionModal opened={newOpened} onClose={closeNew} />
       <ImportSessionModal opened={importOpened} onClose={closeImport} />
-      <Title order={1}>Welcome to the calibration bench</Title>
-      <Text c="dark.2" mt={9} maw={600} fz="0.9rem">
-        Prepare and validate your optical systems with sub-millimetric precision. Choose a workflow
-        to begin — or resume a recent session.
-      </Text>
+      {/* The welcome text behind an info button, like every wizard screen's header. */}
+      <Group gap={8} wrap="nowrap">
+        <Title order={1}>Welcome to the calibration bench</Title>
+        <InfoPopover label="About the calibration bench" width={300} position="bottom-start">
+          Prepare and validate your optical systems with sub-millimetric precision. Choose a
+          workflow to begin — or resume a recent session.
+        </InfoPopover>
+      </Group>
 
       <SimpleGrid cols={{ base: 1, sm: 2 }} spacing="md" mt="lg">
         {cards.map((card) => (

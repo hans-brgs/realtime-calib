@@ -289,7 +289,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
       <ScreenHeader
         panelToggle
         title="Camera Setup"
-        subtitle={
+        info={
           <>
             Imported session — the cameras derive from the uploaded videos.{' '}
             <Text span c="var(--rc-accent-bright)" inherit>
@@ -711,7 +711,7 @@ function LiveCameraSetup() {
       <ScreenHeader
         panelToggle
         title="Camera Setup"
-        subtitle={
+        info={
           <>
             Detect USB cameras, set the shared capture format, and order the indices.{' '}
             <Text span c="var(--rc-accent-bright)" inherit>
@@ -764,7 +764,6 @@ function LiveCameraSetup() {
         }}
       >
         <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <SectionLabel>Preview · map physical ↔ index</SectionLabel>
           {/* Fills the column height; the tile grid letterboxes inside with no scroll.
               minHeight floors it so the stacked mobile layout keeps a usable preview. */}
           <Box style={{ flex: 1, minHeight: 'min(58vh, 560px)' }}>
