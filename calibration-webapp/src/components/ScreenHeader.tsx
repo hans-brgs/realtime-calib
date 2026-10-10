@@ -28,7 +28,9 @@ export function ScreenHeader({ title, subtitle, right, panelToggle = false }: Sc
       gap="md"
       mb="lg"
     >
-      <Box style={{ flex: 1, minWidth: 0 }}>
+      {/* Locked: basis 0 so the subtitle, not the actions, gives way. Compact: the
+          natural width, so the actions can wrap under it. */}
+      <Box style={compact ? undefined : { flex: 1, minWidth: 0 }}>
         <Title order={2}>{title}</Title>
         {subtitle ? (
           <Text c="dark.2" fz="0.84rem" mt={6} maw={640}>
@@ -36,7 +38,7 @@ export function ScreenHeader({ title, subtitle, right, panelToggle = false }: Sc
           </Text>
         ) : null}
       </Box>
-      {panelToggle ? (
+      {panelToggle && !compact ? (
         <Group gap={9} wrap="nowrap">
           {right}
           <SidePanelToggle />

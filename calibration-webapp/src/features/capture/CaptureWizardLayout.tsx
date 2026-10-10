@@ -59,7 +59,9 @@ export function CaptureWizardLayout({
           minHeight: 0,
           display: 'grid',
           gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
-          gap: 22,
+          // Folded: a second row under the view for the step's action (below).
+          gridTemplateRows: panelCollapsed ? 'minmax(0, 1fr) auto' : undefined,
+          gap: panelCollapsed ? 12 : 22,
         }}
       >
         <Box
@@ -162,9 +164,25 @@ export function CaptureWizardLayout({
                 {message}
               </Text>
             )}
-            {action}
+            {!panelCollapsed && action}
           </Box>
         </Paper>
+
+        {/* Folded panel: the step's action (Start/Stop REC, Compute, Validate…) and its
+            error stay reachable under the view, at the panel's width — folding is for
+            a wider view while recording, not for losing the Stop button (ADR-0041 §5:
+            the action stays reachable). Rendered here instead of in the hidden panel,
+            never in both. */}
+        {panelCollapsed && (
+          <Box style={{ justifySelf: 'end', width: 'clamp(280px, 26%, 360px)' }}>
+            {message && (
+              <Text fz="0.72rem" c="var(--rc-error)" mb="xs">
+                {message}
+              </Text>
+            )}
+            {action}
+          </Box>
+        )}
       </Box>
     </>
   );

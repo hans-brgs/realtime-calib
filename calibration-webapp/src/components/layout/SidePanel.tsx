@@ -30,11 +30,18 @@ export function SidePanelToggle() {
   if (compact) {
     return null;
   }
-  const label = collapsed ? 'Show the side panel' : 'Hide the side panel';
+  const label = collapsed ? 'Expand side panel' : 'Collapse side panel';
   const Icon = collapsed ? IconLayoutSidebarRightExpand : IconLayoutSidebarRightCollapse;
   return (
     <Tooltip label={label} position="left" withArrow>
-      <ActionIcon variant="default" size={38} radius="md" aria-label={label} onClick={toggle}>
+      <ActionIcon
+        variant="default"
+        size={38}
+        radius="md"
+        aria-label={label}
+        aria-expanded={!collapsed}
+        onClick={toggle}
+      >
         <Icon size={18} />
       </ActionIcon>
     </Tooltip>
