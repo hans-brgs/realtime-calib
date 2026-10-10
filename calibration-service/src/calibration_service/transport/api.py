@@ -6,16 +6,19 @@ Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 from __future__ import annotations
 
 import asyncio
+import functools
 import io
 import json
 import logging
 import shutil
 import tempfile
 import zipfile
+from collections.abc import AsyncIterator, Awaitable, Callable
+from contextlib import asynccontextmanager
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 import numpy as np
 import rtoml
@@ -417,6 +420,68 @@ def get_publish_service(request: Request) -> CameraPublishService | None:
     return service if isinstance(service, CameraPublishService) else None
 
 
+# Machine-readable code of the 409 that reconfiguring requests get while a
+# recording runs (ADR-0050): a sweep survives view changes, and its recorder,
+# whose folder is fixed at start, would take other cameras' or another
+# session's frames.
+RECORDING = "recording"
+
+
+# Machine-readable code of the 409 a long or mutating request gets while another
+# runs (ADR-0050): one at a time, service-wide. A compute finishing after a
+# session change wrote into the NEW session; a start truncated the video a
+# compute was reading.
+BUSY = "busy"
+
+
+@asynccontextmanager
+async def _operation_slot(request: Request, operation: str) -> AsyncIterator[None]:
+    """Hold the service's operation lock for ``operation``, or refuse with 409.
+
+    Taken without waiting: a queued request would replay an operator's click long
+    after its context changed. The lock is never waited on, so it binds to no loop.
+    """
+    lock = cast(asyncio.Lock, request.app.state.operation_lock)
+    if lock.locked():
+        running = request.app.state.operation or "another operation"
+        raise HTTPException(
+            status_code=409,
+            detail={"code": BUSY, "message": f"{running} is running — retry when it ends"},
+        )
+    async with lock:
+        request.app.state.operation = operation
+        try:
+            yield
+        finally:
+            request.app.state.operation = None
+
+
+def _exclusive[**P, T](
+    operation: str,
+) -> Callable[[Callable[P, Awaitable[T]]], Callable[P, Awaitable[T]]]:
+    """Route decorator: run the endpoint inside the operation slot (ADR-0050)."""
+
+    def decorate(endpoint: Callable[P, Awaitable[T]]) -> Callable[P, Awaitable[T]]:
+        @functools.wraps(endpoint)
+        async def guarded(*args: P.args, **kwargs: P.kwargs) -> T:
+            request = cast(Request, kwargs["request"])  # FastAPI passes keywords
+            async with _operation_slot(request, operation):
+                return await endpoint(*args, **kwargs)
+
+        return guarded
+
+    return decorate
+
+
+def _refuse_while_recording(request: Request, action: str) -> None:
+    service = get_publish_service(request)
+    if service is not None and service.is_recording():
+        raise HTTPException(
+            status_code=409,
+            detail={"code": RECORDING, "message": f"stop the recording before {action}"},
+        )
+
+
 @router.get("/session", response_model=SessionOut)
 async def get_session(request: Request) -> SessionOut:
     """The active session, or 404 when none is active (ADR-0028) — the webapp maps
@@ -455,6 +520,7 @@ class SessionRef(BaseModel):
 
 
 @router.post("/sessions", response_model=SessionOut)
+@_exclusive("creating a session")
 async def create_session_route(request: Request, body: SessionRef) -> SessionOut:
     """Create a fresh session with a unique folder name and make it active (ADR-0028).
 
@@ -462,6 +528,7 @@ async def create_session_route(request: Request, body: SessionRef) -> SessionOut
     session is empty (step ``intrinsic_board``); ``refresh()`` re-syncs the live
     cameras (the M4-hardened teardown) onto it.
     """
+    _refuse_while_recording(request, "creating a session")
     manager = get_manager(request)
     try:
         session = manager.create(body.session_id)
@@ -476,8 +543,10 @@ async def create_session_route(request: Request, body: SessionRef) -> SessionOut
 
 
 @router.post("/sessions/open", response_model=SessionOut)
+@_exclusive("opening a session")
 async def open_session_route(request: Request, body: SessionRef) -> SessionOut:
     """Make an existing session the active one (ADR-0028). 404 if it does not exist."""
+    _refuse_while_recording(request, "opening another session")
     manager = get_manager(request)
     try:
         session = manager.open(body.session_id)
@@ -492,6 +561,7 @@ async def open_session_route(request: Request, body: SessionRef) -> SessionOut:
 
 
 @router.post("/sessions/import", response_model=SessionOut)
+@_exclusive("a session import")
 async def import_session_route(
     request: Request,
     file: UploadFile,
@@ -506,6 +576,7 @@ async def import_session_route(
     400 on an unreadable archive. On success the imported session becomes the
     active one and its preview transcodes are kicked off in the background.
     """
+    _refuse_while_recording(request, "importing a session")
     manager = get_manager(request)
     sessions_dir = manager.sessions_dir
     loop = asyncio.get_running_loop()
@@ -551,11 +622,15 @@ async def import_session_route(
 
 @router.post("/cameras/detect", response_model=list[DetectedCameraOut])
 async def detect_cameras(request: Request) -> list[DetectedCameraOut]:
-    return [_device_out(d) for d in get_manager(request).detect()]
+    # v4l2-ctl per device: off the event loop (QLT-2); it reads no session state.
+    devices = await asyncio.to_thread(get_manager(request).detect)
+    return [_device_out(d) for d in devices]
 
 
 @router.post("/cameras/config", response_model=SessionOut)
+@_exclusive("a camera reconfiguration")
 async def configure_cameras(request: Request, body: ConfigRequest) -> SessionOut:
+    _refuse_while_recording(request, "reconfiguring the cameras")
     configs = [_to_camera_config(body.prefix, item) for item in body.cameras]
     manager = get_manager(request)
     session = manager.configure_cameras(configs)
@@ -629,6 +704,7 @@ async def set_capture_view(request: Request, body: CaptureViewRequest) -> dict[s
 
 
 @router.post("/intrinsic/{camera}/start")
+@_exclusive("an intrinsic recording start")
 async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
     """Begin recording the intrinsic sweep of ``camera`` (record → compute → review)."""
     service = get_publish_service(request)
@@ -731,6 +807,7 @@ class ComputeRequest(BaseModel):
 
 
 @router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
+@_exclusive("an intrinsic compute")
 async def compute_intrinsic(
     request: Request, camera: str, body: ComputeRequest | None = None
 ) -> SessionOut:
@@ -824,6 +901,7 @@ async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
 
 
 @router.post("/extrinsic/start")
+@_exclusive("an extrinsic recording start")
 async def start_extrinsic(request: Request) -> dict[str, object]:
     """Begin the synchronized multi-camera extrinsic sweep (ADR-0007/0023).
 
@@ -934,6 +1012,7 @@ def _output_scaled_errors(
 
 
 @router.post("/extrinsic/compute", response_model=SessionOut)
+@_exclusive("an extrinsic compute")
 async def compute_extrinsic(
     request: Request, body: ExtrinsicComputeRequest | None = None
 ) -> SessionOut:
@@ -1062,6 +1141,7 @@ def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) ->
 
 
 @router.post("/extrinsic/orient")
+@_exclusive("a reorientation")
 async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, object]:
     """Apply a rigid world-frame change to the solved array and persist it.
 
@@ -1100,6 +1180,7 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
 
 
 @router.post("/extrinsic/minimize")
+@_exclusive("a Minimize")
 async def minimize_extrinsic(request: Request) -> dict[str, object]:
     """Filter outliers + re-run the bundle adjustment (spec 'Minimize').
 
@@ -1405,6 +1486,7 @@ async def export_archive(request: Request) -> Response:
 
 
 @router.post("/board", response_model=SessionOut)
+@_exclusive("a board definition")
 async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut:
     # Fail early: calibrate_intrinsic is ChArUco-only, so accepting a single
     # ArUco marker here would only fail at compute time, after the whole sweep.

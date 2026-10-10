@@ -44,6 +44,7 @@ from calibration_service.recording.ffmpeg import (
     reencode_cfr_args,
     remux_copy_args,
     run_ffmpeg,
+    transcode_timeout,
 )
 from calibration_service.recording.replay import (
     VideoProperties,
@@ -294,6 +295,15 @@ def _source_fps(source: Path) -> float:
     return fps
 
 
+def _duration_s(source: Path) -> float:
+    """The media duration, for the transcode timeout; 0 when it cannot be read."""
+    try:
+        props = video_properties(source)
+    except ValueError:
+        return 0.0
+    return props.frames / props.fps if props.fps > 0 and props.frames > 0 else 0.0
+
+
 def _normalise_video(source: Path, destination: Path) -> VideoProperties:
     """Bring one uploaded video into the canonical layout (ADR-0035).
 
@@ -301,14 +311,15 @@ def _normalise_video(source: Path, destination: Path) -> VideoProperties:
     CFR MJPG only when the source is VFR or the remuxed file does not probe usable.
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
+    timeout_s = transcode_timeout(_duration_s(source))
     if not is_vfr(source):
-        run_ffmpeg(remux_copy_args(source, destination))
+        run_ffmpeg(remux_copy_args(source, destination), timeout_s=timeout_s)
         props = _probe_or_none(destination)
         if props is not None:
             return props
         logger.warning("remuxed %s is unreadable; falling back to CFR re-encode", source.name)
         destination.unlink(missing_ok=True)
-    run_ffmpeg(reencode_cfr_args(source, destination, _source_fps(source)))
+    run_ffmpeg(reencode_cfr_args(source, destination, _source_fps(source)), timeout_s=timeout_s)
     props = _probe_or_none(destination)
     if props is None:
         raise ImportValidationError(f"cannot read video {source.name!r} after normalisation")
@@ -514,6 +525,8 @@ def _write_manifest(directory: Path, plan: ImportPlan, props: dict[int, VideoPro
                 "height": props[video.index].height,
                 "fps": max(1, round(props[video.index].fps)),
                 "frames": props[video.index].frames,
+                # Imported timestamps: their base is not known (ADR-0049).
+                "clock": "unknown",
             }
             for video in plan.extrinsic
         ]

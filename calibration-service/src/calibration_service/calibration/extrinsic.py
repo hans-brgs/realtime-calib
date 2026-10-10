@@ -28,6 +28,7 @@ translations stay in squares until the export scales by ``square_size_mm``
 
 from __future__ import annotations
 
+import json
 import logging
 from dataclasses import dataclass, field, replace
 from itertools import combinations
@@ -1411,6 +1412,22 @@ def _board_rigidity(
     )
 
 
+def _warn_on_mixed_clocks(directory: Path) -> None:
+    """Warn when the sweep's cameras were not all stamped on the same base (ADR-0049).
+
+    A camera on host timestamps against others on kernel ones carries a 20 to
+    44 ms bias in every group; a "mixed" camera was reopened mid-sweep on another
+    base. The solve still runs: the manifest says why it may be poorer.
+    """
+    try:
+        manifest = json.loads((directory / "manifest.json").read_text())
+        clocks = {str(c["name"]): str(c.get("clock", "unknown")) for c in manifest["cameras"]}
+    except (OSError, ValueError, KeyError, TypeError):
+        return
+    if "mixed" in clocks.values() or len(set(clocks.values()) - {"unknown"}) > 1:
+        logger.warning("sweep cameras were stamped on different time bases: %s", clocks)
+
+
 def compute_extrinsic_from_sweep(
     directory: Path,
     board: CalibrationBoard,
@@ -1437,6 +1454,7 @@ def compute_extrinsic_from_sweep(
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
     by_name = {model.name: model for model in models}
+    _warn_on_mixed_clocks(directory)
 
     groups = sweep_groups(directory, [model.name for model in models], window_s)
 

@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import shutil
+import time
 from pathlib import Path
 
 import cv2
@@ -113,3 +115,39 @@ def test_real_transcode_preserves_frames_and_cfr_at_source_fps(
         assert capture.get(cv2.CAP_PROP_FPS) == pytest.approx(fps)
     finally:
         capture.release()
+
+
+def test_a_cancelled_transcode_leaves_no_ffmpeg_running(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # SYN-9: cancelling the job used to abandon ffmpeg, still encoding.
+    source = tmp_path / "cam_0.mkv"
+    _record(source, 2)
+    pidfile = tmp_path / "ffmpeg.pid"
+    monkeypatch.setattr(
+        preview_module,
+        "transcode_args",
+        lambda s, d, fps: ["/bin/sh", "-c", f"echo $$ > {pidfile}; exec sleep 30"],
+    )
+
+    async def scenario() -> int:
+        jobs = PreviewJobs()
+        jobs.ensure(source)
+        for _ in range(500):
+            if pidfile.is_file() and pidfile.read_text().strip():
+                break
+            await asyncio.sleep(0.01)
+        pid = int(pidfile.read_text())
+        started = time.monotonic()
+        await jobs.aclose()  # what the service's shutdown calls
+        assert time.monotonic() - started < 5.0  # killed, not waited out (sleep 30)
+        return pid
+
+    pid = asyncio.run(scenario())
+    with pytest.raises(ProcessLookupError):
+        os.kill(pid, 0)  # killed AND reaped
+
+
+def test_the_preview_transcode_never_reads_the_service_stdin(tmp_path: Path) -> None:
+    args = preview_module.transcode_args(tmp_path / "a.mkv", tmp_path / "a.mp4", 30.0)
+    assert "-nostdin" in args

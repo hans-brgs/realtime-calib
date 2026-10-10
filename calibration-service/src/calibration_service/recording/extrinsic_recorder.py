@@ -2,11 +2,13 @@
 
 Spec [[calibration-recording]] / ADR-0007: ``extrinsic/<cam>.mkv`` (MJPG, same
 rationale as the intrinsic capture) plus ``extrinsic/<cam>.timestamps`` — one
-host-monotonic timestamp per written frame, line-aligned with the video frame
-index. The sidecars are the ONLY way to re-synchronize the recordings at compute
-or replay time (frame numbers are not comparable across free-running cameras).
-A ``manifest.json`` lists the per-camera artifacts so the compute can open the
-set without the session object.
+CLOCK_MONOTONIC timestamp per written frame (the V4L2 buffer stamp, or the host
+clock at grab, ADR-0049), line-aligned with the video frame index. The sidecars
+are the ONLY way to re-synchronize the recordings at compute or replay time
+(frame numbers are not comparable across free-running cameras). A
+``manifest.json`` lists the per-camera artifacts, and the timestamp base each
+camera's frames were written with, so the compute can open the set without the
+session object.
 """
 
 from __future__ import annotations
@@ -69,8 +71,11 @@ class ExtrinsicRecorder:
             spec.name: (directory / f"{spec.name}.timestamps").open("w", encoding="ascii")
             for spec in cameras
         }
+        # Timestamp bases seen per camera: two when it was reopened mid-sweep on
+        # another base (ADR-0049) — the manifest then says "mixed".
+        self._clocks: dict[str, set[str]] = {spec.name: set() for spec in cameras}
 
-    def write(self, camera: str, image: NDArray[np.uint8], timestamp: float) -> None:
+    def write(self, camera: str, image: NDArray[np.uint8], timestamp: float, clock: str) -> None:
         """Append one frame + its capture timestamp for ``camera``.
 
         Called concurrently from different capture loops — safe because each
@@ -82,6 +87,7 @@ class ExtrinsicRecorder:
             return
         recorder.write(image)  # raises on a refused frame: no sidecar line without it
         sidecar.write(f"{timestamp:.6f}\n")
+        self._clocks[camera].add(clock)
 
     def frames(self) -> dict[str, int]:
         return {name: recorder.frames for name, recorder in self._recorders.items()}
@@ -103,6 +109,7 @@ class ExtrinsicRecorder:
                     "height": spec.height,
                     "fps": spec.fps,
                     "frames": counts[spec.name],
+                    "clock": _clock_label(self._clocks[spec.name]),
                 }
                 for spec in self._specs
             ]
@@ -111,6 +118,17 @@ class ExtrinsicRecorder:
         atomic_write_text(self._directory / _MANIFEST_FILE, json.dumps(manifest, indent=2))
         logger.info("extrinsic sweep closed: %s", counts)
         return counts
+
+
+def _clock_label(clocks: set[str]) -> str:
+    """The manifest ``clock`` of one camera: its base, "mixed", or "unknown" (ADR-0049).
+
+    "unknown" when the camera wrote no frame: it must not read as a base that
+    differs from the others.
+    """
+    if len(clocks) > 1:
+        return "mixed"
+    return next(iter(clocks), "unknown")
 
 
 def read_timestamps(path: Path) -> list[float]:

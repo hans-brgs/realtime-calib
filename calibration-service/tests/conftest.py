@@ -11,3 +11,4 @@ from __future__ import annotations
 import os
 
 os.environ.setdefault("OPENBLAS_CORETYPE", "Haswell")
+os.environ.setdefault("OPENCV_VIDEOIO_V4L_SELECT_TIMEOUT", "2")

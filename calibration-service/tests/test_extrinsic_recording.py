@@ -25,9 +25,9 @@ def test_records_one_video_and_sidecar_per_camera(tmp_path: Path) -> None:
     recorder = ExtrinsicRecorder(
         tmp_path, [CameraSpec("cam_0", 64, 48, 30), CameraSpec("cam_1", 64, 48, 30)]
     )
-    recorder.write("cam_0", _image(), 10.000000)
-    recorder.write("cam_1", _image(), 10.005)
-    recorder.write("cam_0", _image(), 10.033)
+    recorder.write("cam_0", _image(), 10.000000, "v4l2")
+    recorder.write("cam_1", _image(), 10.005, "v4l2")
+    recorder.write("cam_0", _image(), 10.033, "v4l2")
     counts = recorder.close()
 
     assert counts == {"cam_0": 2, "cam_1": 1}
@@ -43,7 +43,7 @@ def test_records_one_video_and_sidecar_per_camera(tmp_path: Path) -> None:
 
 def test_manifest_lists_every_camera_artifact(tmp_path: Path) -> None:
     recorder = ExtrinsicRecorder(tmp_path, [CameraSpec("cam_0", 64, 48, 15)])
-    recorder.write("cam_0", _image(), 1.0)
+    recorder.write("cam_0", _image(), 1.0, "v4l2")
     recorder.close()
 
     manifest = json.loads((tmp_path / "manifest.json").read_text())
@@ -56,13 +56,44 @@ def test_manifest_lists_every_camera_artifact(tmp_path: Path) -> None:
             "height": 48,
             "fps": 15,
             "frames": 1,
+            "clock": "v4l2",  # the timestamp base of its frames (ADR-0049)
         }
     ]
 
 
+def test_a_camera_without_frames_reads_unknown_not_a_base(tmp_path: Path) -> None:
+    # A camera that wrote nothing must not look like a base differing from the others.
+    recorder = ExtrinsicRecorder(
+        tmp_path, [CameraSpec("cam_0", 64, 48, 30), CameraSpec("cam_1", 64, 48, 30)]
+    )
+    recorder.write("cam_0", _image(), 1.0, "v4l2")
+    recorder.close()
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert {c["name"]: c["clock"] for c in manifest["cameras"]} == {
+        "cam_0": "v4l2",
+        "cam_1": "unknown",
+    }
+
+
+def test_a_camera_reopened_on_another_base_is_marked_mixed(tmp_path: Path) -> None:
+    recorder = ExtrinsicRecorder(
+        tmp_path, [CameraSpec("cam_0", 64, 48, 30), CameraSpec("cam_1", 64, 48, 30)]
+    )
+    recorder.write("cam_0", _image(), 1.0, "v4l2")
+    recorder.write("cam_0", _image(), 1.1, "host")  # reopened mid-sweep
+    recorder.write("cam_1", _image(), 1.0, "v4l2")
+    recorder.close()
+
+    manifest = json.loads((tmp_path / "manifest.json").read_text())
+    assert {c["name"]: c["clock"] for c in manifest["cameras"]} == {
+        "cam_0": "mixed",
+        "cam_1": "v4l2",
+    }
+
+
 def test_unknown_camera_writes_are_ignored(tmp_path: Path) -> None:
     recorder = ExtrinsicRecorder(tmp_path, [CameraSpec("cam_0", 64, 48, 30)])
-    recorder.write("cam_9", _image(), 1.0)  # not part of the sweep -> no-op
+    recorder.write("cam_9", _image(), 1.0, "v4l2")  # not part of the sweep -> no-op
     assert recorder.close() == {"cam_0": 0}
 
 
@@ -70,8 +101,8 @@ def test_a_refused_frame_writes_no_sidecar_line(tmp_path: Path) -> None:
     # Sidecar line i must mean decoded frame i (ADR-0007): a frame the video
     # refuses must not leave a timestamp behind.
     recorder = ExtrinsicRecorder(tmp_path, [CameraSpec("cam_0", 64, 48, 30)])
-    recorder.write("cam_0", np.zeros((48, 64, 3), np.uint8), 1.0)
+    recorder.write("cam_0", np.zeros((48, 64, 3), np.uint8), 1.0, "v4l2")
     with pytest.raises(RecordingError):
-        recorder.write("cam_0", np.zeros((96, 128, 3), np.uint8), 2.0)
+        recorder.write("cam_0", np.zeros((96, 128, 3), np.uint8), 2.0, "v4l2")
     assert recorder.close() == {"cam_0": 1}
     assert read_timestamps(tmp_path / "cam_0.timestamps") == [1.0]

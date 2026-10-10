@@ -17,6 +17,7 @@ import logging
 import os
 import re
 import subprocess
+from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -70,18 +71,29 @@ def _candidate_paths() -> list[tuple[str, str]]:
     return sorted((stable, node) for node, stable in by_node.items())
 
 
-def enumerate_cameras(*, probe: bool = True) -> list[DetectedCamera]:
+def enumerate_cameras(
+    *, probe: bool = True, known: Mapping[str, tuple[int, int, float]] | None = None
+) -> list[DetectedCamera]:
     """List available capture cameras.
 
     With ``probe=True`` (default), each candidate is opened and one frame is
     read; only devices that actually yield a frame are returned, with their
     real resolution/fps. ``probe=False`` lists candidates without opening them
     (no resolution/fps), useful for tests and quick listings.
+
+    ``known`` maps the device nodes the caller already holds open to their
+    ``(width, height, fps)``: they are listed without being opened again (a
+    second open of a streaming device fails with EBUSY) and keep their slot, so
+    the indices of the other cameras do not shift.
     """
     detected: list[DetectedCamera] = []
     for stable, node in _candidate_paths():
         if not probe:
             detected.append(DetectedCamera(len(detected), stable, node, 0, 0, 0.0))
+            continue
+        if known is not None and node in known:
+            width, height, fps = known[node]
+            detected.append(DetectedCamera(len(detected), stable, node, width, height, fps))
             continue
 
         cap = cv2.VideoCapture(node, cv2.CAP_V4L2)

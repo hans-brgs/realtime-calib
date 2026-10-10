@@ -14,18 +14,22 @@ import asyncio
 import contextlib
 import json
 import logging
+from collections.abc import Mapping
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
+from functools import partial
 from typing import cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from calibration_service.capture.camera import CameraCapture, CameraOpenError, open_camera
+from calibration_service.capture.camera import CameraOpenError, open_camera
 from calibration_service.capture.camera_health import CameraHealth, backoff_delay
+from calibration_service.capture.device import CameraDevice
 from calibration_service.capture.enumeration import enumerate_cameras
 from calibration_service.capture.pacing import GridPacer
+from calibration_service.concurrency import finish, run_steps, run_to_completion, settle
 from calibration_service.config import LiveKitConfig
 from calibration_service.detection import BoardDetection, BoardDetector
 from calibration_service.models.frame import Frame
@@ -112,7 +116,10 @@ def _detect_only(
 
 
 _EMPTY_READ_BACKOFF_S = 0.005
-_FIRST_FRAME_ATTEMPTS = 60
+# A camera gets this long to deliver its first frame. A deadline, not a number of
+# attempts: one attempt on a camera that does not stream lasts a whole V4L2
+# select() timeout, and 60 of them once held the reconcile for minutes.
+_FIRST_FRAME_DEADLINE_S = 6.0
 _FIRST_FRAME_BACKOFF_S = 0.1
 # Backoff before reconnecting (LiveKit dropped / cameras unavailable).
 _RECONNECT_BACKOFF_S = 2.0
@@ -144,10 +151,10 @@ _EXTRINSIC_DETECT_RATE_HZ = 15
 # encoder. The publication rate follows the preview_fps knob (TUNING), capped by
 # the capture rate — see _publish_rate().
 _PREVIEW_MAX_WIDTH = 960
-# Dedicated capture thread pool (ADR-0021): isolate the blocking cv2 reads/decodes/
-# writes from the default executor (shared with the intrinsic compute + sync HTTP
-# routes). Sized for a handful of cameras each parking a thread in a blocking grab()
-# plus brief retrieve/detect/write bursts; threads parked in grab() cost ~no CPU.
+# Shared per-frame pool (ADR-0021, ADR-0050): downscale, detection, drawing and
+# recording writes, kept off the default executor (shared with the computes and
+# sync HTTP routes). Never a device call: each open camera has its own thread
+# (CameraDevice), the only one allowed to touch it.
 _CAPTURE_THREADS = 16
 # Re-check the desired camera set at least this often (also woken immediately on a
 # view / active-camera change), and use it to notice a dropped room.
@@ -204,6 +211,16 @@ def _capture_end_reason(name: str, task: asyncio.Task[None]) -> str | None:
         return str(error)
     logger.error("camera %s capture loop crashed", name, exc_info=error)
     return f"capture stopped unexpectedly ({type(error).__name__})"
+
+
+def _log_unexpected_end(name: str, task: asyncio.Task[None]) -> None:
+    """Log a loop that ended with an error while it was being stopped.
+
+    A loop that fails ON ITS OWN is reported by the reconcile
+    (``_capture_end_reason``); this covers the error raised once cancelled.
+    """
+    if task.done() and not task.cancelled() and (error := task.exception()) is not None:
+        logger.error("camera %s capture loop failed while stopping", name, exc_info=error)
 
 
 @dataclass(frozen=True)
@@ -280,10 +297,18 @@ class CameraPublishService:
         # Live capture health of every configured camera + its reopen backoff,
         # broadcast as `camera_state` (spec realtime-telemetry, #46).
         self._health = CameraHealth()
+        # Every capture loop alive, with its device (ADR-0050): whoever stops a
+        # loop releases its device again, since a loop cancelled before its first
+        # step never runs its finally; stop() settles what a teardown left behind.
+        self._capture_devices: dict[asyncio.Task[None], CameraDevice] = {}
 
     def _settings(self) -> RuntimeSettings:
         """Current operator settings (TUNING defaults when no store is wired)."""
         return self._settings_store.current if self._settings_store else RuntimeSettings()
+
+    def is_recording(self) -> bool:
+        """Whether an intrinsic or extrinsic recording is running (ADR-0050, 409 recording)."""
+        return self._recorder is not None or self._extrinsic is not None
 
     def set_active_view(self, view: str | None) -> None:
         """Report the operator's current wizard view; drives the live set (ADR-0021)."""
@@ -362,9 +387,10 @@ class CameraPublishService:
         if self._previews is not None:
             for name in names:  # overwrite in progress: stale previews out
                 self._previews.invalidate(self._sessions.extrinsic_dir() / f"{name}.mkv")
-        # Sync window from the slowest camera's configured period — same derivation
-        # rule as the offline solve (sync_window, ADR-0037): the live gauges group
-        # exactly like the compute will.
+        # Sync window from the slowest camera's configured period — the same window
+        # RULE as the offline solve (sync_window, ADR-0037 §5). The machineries stay
+        # distinct (live streaming grouping vs offline nearest matching), so the
+        # live gauges only approximate the groups the compute will form.
         window = sync_window(max(1.0 / (c.fps or TUNING.default_fps) for c in cameras))
         async with self._extrinsic_stop_lock:
             self._extrinsic_locks = {name: asyncio.Lock() for name in names}
@@ -384,21 +410,29 @@ class CameraPublishService:
             if recorder is None:
                 return {}
             self._extrinsic = None  # loops stop scheduling new writes
-            # Wait out in-flight writes: once each per-camera lock is acquired, no
-            # write scheduled against the old recorder can still be running.
-            for lock in self._extrinsic_locks.values():
-                async with lock:
-                    pass
             self._ext_sync = None
             self._ext_graph = None
-            loop = asyncio.get_running_loop()
-            counts = await loop.run_in_executor(None, recorder.close)
+            # To its end even if cancelled: an abandoned close leaves N open videos
+            # and no manifest (ADR-0050).
+            counts = await finish(self._close_extrinsic(recorder, self._extrinsic_locks))
         self._reconcile.set()
         if self._previews is not None:
             for name, frames in counts.items():
                 if frames > 0:  # kick the preview transcodes NOW (ADR-0027)
                     self._previews.ensure(self._sessions.extrinsic_dir() / f"{name}.mkv")
         return counts
+
+    @staticmethod
+    async def _close_extrinsic(
+        recorder: ExtrinsicRecorder, locks: Mapping[str, asyncio.Lock]
+    ) -> dict[str, int]:
+        # Wait out in-flight writes: once each per-camera lock is acquired, no
+        # write scheduled against the old recorder can still be running (a write
+        # holds its lock until it really ended, even when cancelled).
+        for lock in locks.values():
+            async with lock:
+                pass
+        return await asyncio.get_running_loop().run_in_executor(None, recorder.close)
 
     def _feed_extrinsic(
         self, camera: str, timestamp: float, detection: BoardDetection, now: float
@@ -459,21 +493,36 @@ class CameraPublishService:
         self._task = asyncio.create_task(self._run(), name="camera-publish")
 
     async def _stop_locked(self) -> None:
+        """Stop the session, then every capture loop still alive, then the pool.
+
+        No device may still be held when the next session reopens it: the
+        session teardown releases its cameras, and whatever outlived it is
+        cancelled, awaited and released here (ADR-0050). The shared pool holds
+        no device call, so its shutdown only waits for per-frame work.
+        """
         if self._task is None:
             return
-        self._task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await self._task
-        self._task = None
-        if self._capture_executor is not None:
-            executor = self._capture_executor
-            self._capture_executor = None
-            # wait=True: no capture thread may still touch a V4L2 handle when the
-            # next session reopens the devices (bounded by one in-flight grab).
-            # Run OFF the event loop — a synchronous wait would freeze it.
-            await asyncio.get_running_loop().run_in_executor(
-                None, lambda: executor.shutdown(wait=True, cancel_futures=True)
-            )
+        task, self._task = self._task, None
+        executor, self._capture_executor = self._capture_executor, None
+
+        async def end_session() -> None:
+            task.cancel()
+            await settle([task])
+
+        async def end_capture_loops() -> None:
+            loops = dict(self._capture_devices)
+            for loop_task in loops:
+                loop_task.cancel()
+            await settle(loops)
+            for loop_task, device in loops.items():
+                await device.release()
+                self._capture_devices.pop(loop_task, None)
+
+        async def stop_pool() -> None:
+            if executor is not None:  # off the loop: a synchronous wait would freeze it
+                await asyncio.to_thread(executor.shutdown, wait=True, cancel_futures=True)
+
+        await run_steps((end_session, end_capture_loops, stop_pool), logger, "stopping capture")
 
     async def _run(self) -> None:
         """Session loop: hold one persistent publish session; when it returns (network
@@ -492,7 +541,11 @@ class CameraPublishService:
             with contextlib.suppress(TimeoutError):
                 await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONNECT_BACKOFF_S)
 
-    def _resolve_targets(self) -> list[_PublishTarget]:
+    def _session_targets(self) -> list[_PublishTarget] | None:
+        """The targets the active session defines; None when cameras must be enumerated.
+
+        Read on the event loop: the session manager is only ever touched from it (QLT-7).
+        """
         session = self._sessions.current_or_none()
         if session is None:
             return []  # no active session (dashboard): idle, don't touch V4L2 (ADR-0028)
@@ -508,12 +561,25 @@ class CameraPublishService:
                 )
                 for c in session.cameras
             ]
-        # Not configured yet: publish detected cameras for identification.
+        return None  # not configured yet: publish the detected cameras for identification
+
+    async def _resolve_targets(self, held: Mapping[str, _PublishTarget]) -> list[_PublishTarget]:
+        """Targets of the current session; the identification probe runs off the loop.
+
+        The probe opens each device to read its real size, which fixes the track
+        size and the mode requested at open. A device the service already holds
+        is not opened again (EBUSY, QLT-8): it keeps its slot, size and rate.
+        """
+        targets = self._session_targets()
+        if targets is not None:
+            return targets
+        known = {t.device_node: (t.width, t.height, float(t.fps)) for t in held.values()}
+        detected = await asyncio.to_thread(enumerate_cameras, known=known)
         return [
             _PublishTarget(
                 f"cam_{d.index}", d.index, d.device_node, d.width, d.height, TUNING.default_fps
             )
-            for d in enumerate_cameras()
+            for d in detected
         ]
 
     async def _publish_session(self) -> None:
@@ -528,10 +594,9 @@ class CameraPublishService:
         close/resize.
         """
         loop = asyncio.get_running_loop()
-        executor = self._capture_executor
-        if executor is None:
+        if self._capture_executor is None:
             return
-        targets = await loop.run_in_executor(executor, self._resolve_targets)
+        targets = await self._resolve_targets({})
         if not targets:
             # No active session (dashboard) is the normal idle state, not a fault — stay
             # disconnected until a session with cameras appears (refresh() wakes _run).
@@ -550,34 +615,74 @@ class CameraPublishService:
             self._config, identity=_PARTICIPANT_IDENTITY, room=self._config.room_name
         )
         publisher = LiveKitPublisher()
-        # The target each open camera was OPENED with, kept alongside the handle: it is
+        # The target each open camera was OPENED with, kept alongside its device: it is
         # what tells a reorder apart from a no-op (see _reconcile_open_set).
-        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None], _PublishTarget]] = {}
+        open_cams: dict[str, tuple[CameraDevice, asyncio.Task[None], _PublishTarget]] = {}
         try:
             await publisher.connect(self._config.url, token)
-            await publisher.await_connected()  # WebRTC handshake before media (#449)
+            if not await publisher.await_connected():  # WebRTC handshake before media (#449)
+                # Never publish over a half-open connection (QLT-9): end this session,
+                # and _run's backoff reconnects.
+                logger.warning("LiveKit connection not established; retrying")
+                return
             self._targets_dirty = True  # publish the initial track set on the first tick
             while not publisher.is_disconnected():
                 self._reconcile.clear()
                 if self._targets_dirty:
                     self._targets_dirty = False
-                    targets = await loop.run_in_executor(executor, self._resolve_targets)
+                    held = {name: target for name, (_d, _t, target) in open_cams.items()}
+                    targets = await self._resolve_targets(held)
                     if not targets:
                         break  # session closed -> graceful disconnect (ADR-0029)
                     if await self._reconcile_tracks(publisher, targets, published, by_name):
                         break  # a track needs a new size -> reconnect to republish it
-                await self._reconcile_open_set(loop, executor, publisher, by_name, open_cams)
+                await self._reconcile_open_set(loop, publisher, by_name, open_cams)
                 await self._send_camera_state(publisher, loop.time())
                 with contextlib.suppress(TimeoutError):
                     await asyncio.wait_for(self._reconcile.wait(), timeout=_RECONCILE_TICK_S)
         finally:
+            await self._teardown(loop, publisher, open_cams)
+
+    async def _teardown(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        publisher: LiveKitPublisher,
+        open_cams: dict[str, tuple[CameraDevice, asyncio.Task[None], _PublishTarget]],
+    ) -> None:
+        """Close the session: sweep, every camera, then the connection (ADR-0050).
+
+        Each step runs to its end and a failure is logged, never skipping the next:
+        a second cancellation must not abandon cameras, nor the connection. Every
+        loop is cancelled BEFORE any is awaited, so one camera's slow release
+        (a frozen grab) never keeps the others open.
+        """
+        cameras = dict(open_cams)
+        open_cams.clear()
+
+        async def end_sweep() -> None:
             # A room drop mid-sweep must not leave N dangling video files open.
             await self.stop_extrinsic_recording()
-            for name in list(open_cams):
-                _camera, task, _target = open_cams.pop(name)
-                await self._stop_capture(publisher, name, task)
+
+        async def end_capture_loops() -> None:
+            for _device, task, _target in cameras.values():
+                task.cancel()
+            await settle([task for _device, task, _target in cameras.values()])
+
+        async def release_cameras() -> None:
+            # Again, idempotent: a loop cancelled before its first step never ran
+            # its finally. Concurrently, so one frozen device does not delay others.
+            await asyncio.gather(*(device.release() for device, _t, _tg in cameras.values()))
+            for name, (_device, task, _target) in cameras.items():
+                self._capture_devices.pop(task, None)
+                _log_unexpected_end(name, task)
                 self._health.closed(name, loop.time())
-            await publisher.aclose()
+
+        async def end_intrinsic_recording() -> None:
+            if self._recording_camera in cameras:
+                await self.stop_intrinsic_recording()
+
+        steps = (end_sweep, end_capture_loops, release_cameras, end_intrinsic_recording)
+        await run_steps((*steps, publisher.aclose), logger, "closing the publish session")
 
     async def _reconcile_tracks(
         self,
@@ -640,10 +745,9 @@ class CameraPublishService:
     async def _reconcile_open_set(
         self,
         loop: asyncio.AbstractEventLoop,
-        executor: ThreadPoolExecutor,
         publisher: LiveKitPublisher,
         by_name: dict[str, _PublishTarget],
-        open_cams: dict[str, tuple[CameraCapture, asyncio.Task[None], _PublishTarget]],
+        open_cams: dict[str, tuple[CameraDevice, asyncio.Task[None], _PublishTarget]],
     ) -> None:
         """Make the set of open cameras match the desired set: close leavers, open joiners.
 
@@ -659,22 +763,26 @@ class CameraPublishService:
         A camera whose capture loop ENDED on its own (lost mid-capture, #46) is
         cleaned up and reported failed; joiners in error wait out their backoff
         (``CameraHealth``) instead of being retried on every tick.
+
+        No camera's exception leaves this method: one failing camera is reported
+        and backed off, it never ends the session, whose reconnect ADR-0029
+        keeps for a real network drop.
         """
         desired = self._desired_cameras(by_name)
         self._health.sync(by_name, desired, loop.time())
         for name in list(open_cams):
-            _camera, task, opened_with = open_cams[name]
+            device, task, opened_with = open_cams[name]
             if task.done():
                 del open_cams[name]
                 reason = _capture_end_reason(name, task)
-                await self._stop_capture(publisher, name, task)
+                await self._stop_capture(publisher, name, task, device)
                 if reason is None:
                     self._health.closed(name, loop.time())
                 else:
                     self._report_failure(name, reason, loop.time())
             elif name not in desired or by_name.get(name) != opened_with:
                 del open_cams[name]
-                await self._stop_capture(publisher, name, task)
+                await self._stop_capture(publisher, name, task, device)
                 # Closed on purpose: a rebound device (reorder) or a new mode gets a
                 # fresh start rather than the old target's backoff.
                 self._health.closed(name, loop.time())
@@ -685,7 +793,11 @@ class CameraPublishService:
         ]
         for i, name in enumerate(joiners):
             target = by_name[name]
-            opened = await self._start_capture(loop, executor, publisher, target)
+            try:
+                opened = await self._start_capture(loop, publisher, target)
+            except Exception:
+                self._report_failure(name, "could not start capture", loop.time(), exc_info=True)
+                opened = None
             if opened is not None:
                 open_cams[name] = (*opened, target)
             if i + 1 < len(joiners):
@@ -694,63 +806,79 @@ class CameraPublishService:
     async def _start_capture(
         self,
         loop: asyncio.AbstractEventLoop,
-        executor: ThreadPoolExecutor,
         publisher: LiveKitPublisher,
         target: _PublishTarget,
-    ) -> tuple[CameraCapture, asyncio.Task[None]] | None:
+    ) -> tuple[CameraDevice, asyncio.Task[None]] | None:
         """Open a camera, push its first frame, unmute its track and start its loop.
 
         Every outcome is reported to the health registry; a failure returns None and
-        the reconcile retries it once its backoff has elapsed.
+        the reconcile retries it once its backoff has elapsed. The device belongs to
+        this method until its loop task exists, so every way out before that point
+        (a failure, an exception, a cancellation) releases it here; after it, the
+        loop owns it (ADR-0050).
         """
         self._health.opening(target.name, loop.time())
         # The first-frame wait can take seconds: broadcast OPENING now rather than
         # leaving the webapp on a stale snapshot for the whole attempt.
         await self._send_camera_state(publisher, loop.time())
+        device = CameraDevice(target.name)
         try:
-            camera = open_camera(
-                target.device_node,
-                target.index,
-                width=target.width or None,
-                height=target.height or None,
-                fps=target.fps or None,
-            )
-        except CameraOpenError:
-            self._report_failure(
-                target.name, f"cannot open {target.device_node}", loop.time(), exc_info=True
-            )
+            refusal = await self._bring_up(publisher, target, device)
+        except BaseException:
+            await device.release()
+            raise
+        if refusal is not None:
+            await device.release()
+            self._report_failure(target.name, refusal, loop.time())
             return None
-        first = await self._read_first_frame(loop, executor, camera)
+        task = asyncio.create_task(
+            self._capture_loop(loop, publisher, target, device),
+            name=f"capture-{target.name}",
+        )
+        self._capture_devices[task] = device
+        failures = self._health.opened(target.name, loop.time())
+        if failures:
+            logger.info("camera %s recovered after %d failed attempt(s)", target.name, failures)
+        logger.info("camera %s live (opened + unmuted)", target.name)
+        return device, task
+
+    async def _bring_up(
+        self, publisher: LiveKitPublisher, target: _PublishTarget, device: CameraDevice
+    ) -> str | None:
+        """Open the device and publish its first frame; the reason of a refusal, or None."""
+        try:
+            await device.open(
+                partial(
+                    open_camera,
+                    target.device_node,
+                    target.index,
+                    width=target.width or None,
+                    height=target.height or None,
+                    fps=target.fps or None,
+                )
+            )
+        except CameraOpenError as exc:
+            logger.debug("camera %s: %s", target.name, exc)
+            return f"cannot open {target.device_node}"
+        first = await self._read_first_frame(device)
         if first is None:
-            camera.release()
-            self._report_failure(target.name, "opened but produced no frame", loop.time())
-            return None
+            return "opened but produced no frame"
         height, width = first.image.shape[:2]
         if target.configured and (width, height) != (target.width, target.height):
             # The requested mode is only a hint to the driver. A configured camera
             # streaming another size would record frames the writer cannot take
             # (it refuses them) and calibrate a resolution the session does not
             # describe — refuse it visibly instead.
-            camera.release()
-            self._report_failure(
-                target.name,
+            return (
                 f"delivers {width}x{height}, not the configured "
-                f"{target.width}x{target.height} — pick a mode the camera supports",
-                loop.time(),
+                f"{target.width}x{target.height} — pick a mode the camera supports"
             )
-            return None
+        # The timestamp base, once per open, before the loop (ADR-0049).
+        await device.choose_clock()
         size = _preview_size(width, height)
         publisher.push(target.name, _downscale(first.image, size))
         publisher.unmute(target.name)  # first frame ready before unmuting (#449)
-        task = asyncio.create_task(
-            self._capture_loop(loop, publisher, target, camera),
-            name=f"capture-{target.name}",
-        )
-        failures = self._health.opened(target.name, loop.time())
-        if failures:
-            logger.info("camera %s recovered after %d failed attempt(s)", target.name, failures)
-        logger.info("camera %s live (opened + unmuted)", target.name)
-        return camera, task
+        return None
 
     def _report_failure(
         self, name: str, reason: str, now: float, *, exc_info: bool = False
@@ -782,43 +910,58 @@ class CameraPublishService:
         publisher: LiveKitPublisher,
         name: str,
         task: asyncio.Task[None],
+        device: CameraDevice,
     ) -> None:
-        """Cancel a camera's loop and mute its track (ADR-0021).
+        """Stop a camera's loop, release its device and mute its track (ADR-0021/0050).
 
-        The loop OWNS the device and releases it in its own finally — awaiting the
-        cancelled task here therefore returns only once the camera is closed.
+        Each step runs to its end even if the caller is cancelled meanwhile; the
+        caller's cancellation is re-raised once the camera is closed, never
+        swallowed (the old ``suppress(CancelledError)`` here ate a stop() that
+        landed during a close, and stop() then waited forever).
         """
-        if not task.done():
+
+        async def end_loop() -> None:
+            if task.done():
+                return  # ended on its own: the reconcile already read its outcome
             task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
-        # (A loop that ended on its own has already released the device; its outcome
-        # was read by the reconcile — awaiting it here would re-raise its error.)
-        # If this camera was being recorded (operator left the intrinsic view or
-        # switched camera mid-sweep), finalise the file now rather than leaving it open.
-        if name == self._recording_camera:
-            await self.stop_intrinsic_recording()
-        publisher.mute(name)  # keep the track (unpublish leaks, #449); just stop media
-        logger.info("camera %s muted", name)
+            await settle([task])
+            _log_unexpected_end(name, task)
+
+        async def release_device() -> None:
+            # Idempotent: a loop cancelled before its first step never ran its finally.
+            await device.release()
+            self._capture_devices.pop(task, None)
+
+        async def end_recording() -> None:
+            # Operator left the intrinsic view or switched camera mid-sweep:
+            # finalise the file now rather than leaving it open.
+            if name == self._recording_camera:
+                await self.stop_intrinsic_recording()
+
+        async def mute() -> None:
+            publisher.mute(name)  # keep the track (unpublish leaks, #449); just stop media
+            logger.info("camera %s muted", name)
+
+        await run_steps((end_loop, release_device, end_recording, mute), logger, f"stopping {name}")
 
     async def _capture_loop(
         self,
         loop: asyncio.AbstractEventLoop,
         publisher: LiveKitPublisher,
         target: _PublishTarget,
-        camera: CameraCapture,
+        device: CameraDevice,
     ) -> None:
-        """Run one camera's frame loop; the LOOP owns the device.
+        """Run one camera's frame loop; the LOOP owns the device (ADR-0050).
 
-        Releasing in our finally runs strictly after the in-flight executor call
-        returned (a running executor future cannot be cancelled), so release never
-        races a live V4L2 grab — a concurrent release wedged /dev/videoX on the
-        real rig (endless select() timeouts until service restart).
+        The release posted by our finally queues behind any call still on the
+        device's own thread, so it never races a live V4L2 grab — a concurrent
+        release wedged /dev/videoX on the real rig (endless select() timeouts
+        until service restart). It runs to its end even if cancelled again.
         """
         try:
-            await self._capture_frames(loop, publisher, target, camera)
+            await self._capture_frames(loop, publisher, target, device)
         finally:
-            camera.release()
+            await device.release()
             logger.info("camera %s released", target.name)
 
     async def _capture_frames(
@@ -826,7 +969,7 @@ class CameraPublishService:
         loop: asyncio.AbstractEventLoop,
         publisher: LiveKitPublisher,
         target: _PublishTarget,
-        camera: CameraCapture,
+        device: CameraDevice,
     ) -> None:
         """Read one camera and push every frame to its track until the room disconnects.
 
@@ -847,13 +990,20 @@ class CameraPublishService:
         skipped, not fatal — but a grab that keeps failing for ``_CAMERA_LOST_AFTER_S``
         means the device is gone: the loop raises ``_CameraLostError`` and the
         reconcile reopens it under the health backoff (#46).
+
+        An exception in the processing of one frame (detection, drawing, push,
+        write) skips that frame: a transient fault no longer costs a reopen, a
+        second or more of hole in a sweep. Failures that last as long as the loss
+        rule end the loop with the last error, for #48 to report and reopen.
         """
         executor = self._capture_executor
         preview_size = _preview_size(target.width, target.height) if target.width else None
         # Absolute-grid pacing (ADR-0037): one pacer per cadence, all cells derive
-        # from the shared monotonic clock (loop.time()), so equal-rate pacers tick
-        # on the SAME instants across cameras. Capture = recording cadence; the
-        # detection grids are independent of the publication rate.
+        # from the shared monotonic clock, so equal-rate pacers tick on the SAME
+        # instants across cameras. The capture (recording) and detection grids run
+        # on each frame's own timestamp (ADR-0049): on the kernel clock the cameras
+        # keep and detect the same real cell. Publication and the service's own
+        # durations (loss, telemetry, co-visibility) stay on loop.time().
         fps = target.fps or TUNING.default_fps
         capture_pacer = GridPacer(fps)
         publish_rate = _publish_rate(target.fps, self._settings().preview_fps)
@@ -869,8 +1019,11 @@ class CameraPublishService:
         sharpness_intrinsic = SharpnessBaseline()
         sharpness_extrinsic = SharpnessBaseline()
         last_grab = loop.time()
+        failing_since: float | None = None  # first frame of the current failure series
+        failed_frames = 0
         while not publisher.is_disconnected():
-            if not await loop.run_in_executor(executor, camera.grab):
+            stamp = await device.grab()  # the frame's timestamp (ADR-0049), or None
+            if stamp is None:
                 if loop.time() - last_grab >= _CAMERA_LOST_AFTER_S:
                     # Unplugged / dead device: hand it back to the reconcile, which
                     # reports it and reopens it under the backoff (#46).
@@ -880,127 +1033,159 @@ class CameraPublishService:
             now = last_grab = loop.time()
             # Grid selection over the continuous drain (ADR-0037): keep the first
             # frame of each cell, drop the rest UNDECODED. Draining at the driver's
-            # own rate keeps buffered frames fresh and timestamps honest even when a
-            # driver ignores CAP_PROP_FPS; a late frame never shifts the cells.
-            if not capture_pacer.due(now):
+            # own rate bounds the age of a queued frame, and its kernel stamp stays
+            # its own whatever that age; a late frame never shifts the cells.
+            if not capture_pacer.due(stamp):
                 await asyncio.sleep(0)
                 continue
-            frame = await loop.run_in_executor(executor, camera.retrieve)
+            frame = await device.retrieve()
             if frame is None:
                 continue
-            if preview_size is None:
-                preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
+            try:
+                if preview_size is None:
+                    preview_size = _preview_size(frame.image.shape[1], frame.image.shape[0])
 
-            sweeping = self._extrinsic is not None  # synchronized recording running
-            # Detection also runs on EVERY camera while the operator is on the
-            # extrinsic view BEFORE starting the sweep (overlay = "does it detect?"
-            # sanity check) — but the synchronizer/co-visibility only feed while
-            # actually recording (a preview must not inflate the pair counts).
-            extrinsic = sweeping or self._active_view == _EXTRINSIC_VIEW
-            active = extrinsic or self._active_intrinsic == target.name
-            if not active:
-                detector = None
-            elif detector is not None and detector_extrinsic != extrinsic:
-                detector = None  # board target changed (intrinsic <-> extrinsic sweep)
+                sweeping = self._extrinsic is not None  # synchronized recording running
+                # Detection also runs on EVERY camera while the operator is on the
+                # extrinsic view BEFORE starting the sweep (overlay = "does it detect?"
+                # sanity check) — but the synchronizer/co-visibility only feed while
+                # actually recording (a preview must not inflate the pair counts).
+                extrinsic = sweeping or self._active_view == _EXTRINSIC_VIEW
+                active = extrinsic or self._active_intrinsic == target.name
+                if not active:
+                    detector = None
+                elif detector is not None and detector_extrinsic != extrinsic:
+                    detector = None  # board target changed (intrinsic <-> extrinsic sweep)
 
-            # The preview_fps setting applies LIVE: swap the publication pacer as
-            # soon as the operator changes it (no reconnect — the track's
-            # max_framerate stays an encoder hint until the next republish).
-            rate = _publish_rate(target.fps, self._settings().preview_fps)
-            if rate != publish_rate:
-                publish_rate = rate
-                publish_pacer = GridPacer(rate)
-            publish_due = publish_pacer.due(now)
-            preview: NDArray[np.uint8] | None = None
-            if active:
-                if detector is None:
-                    detector = self._build_detector(extrinsic=extrinsic)
-                    detector_extrinsic = extrinsic
-                # Detection fires on its OWN absolute grid, decoupled from the
-                # publication cadence (ADR-0037): a reduced preview_fps must not
-                # throttle the sync groups / co-visibility / gauges. During a sweep
-                # all cameras detect the SAME instants (shared cells).
-                detect_pacer = detect_pacer_extrinsic if extrinsic else detect_pacer_intrinsic
-                if detector is not None and detect_pacer.due(now):
-                    if publish_due:
-                        # Fused path: one downscale serves both detection and drawing.
-                        preview, detection = await loop.run_in_executor(
-                            executor, _process_frame, detector, frame.image, preview_size
-                        )
-                    else:
-                        detection = await loop.run_in_executor(
-                            executor, _detect_only, detector, frame.image, preview_size
-                        )
-                    last_detection = detection
-                    if sweeping:
-                        covis = self._feed_extrinsic(target.name, frame.timestamp, detection, now)
-                        if covis is not None:
-                            await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
-                    # Feed the relative gauge every detection tick (~15-30 Hz), even
-                    # when telemetry is throttled, so its window tracks real cadence.
-                    baseline = sharpness_extrinsic if extrinsic else sharpness_intrinsic
-                    sharpness_ok = baseline.ok(detection.sharpness)
-                    if now - last_telemetry >= _TELEMETRY_PERIOD_S:
-                        last_telemetry = now
-                        phase = "extrinsic" if extrinsic else "intrinsic"
-                        payload = json.dumps(
-                            coverage_metrics_payload(
-                                target.name, detection, phase, sharpness_ok=sharpness_ok
+                # The preview_fps setting applies LIVE: swap the publication pacer as
+                # soon as the operator changes it (no reconnect — the track's
+                # max_framerate stays an encoder hint until the next republish).
+                rate = _publish_rate(target.fps, self._settings().preview_fps)
+                if rate != publish_rate:
+                    publish_rate = rate
+                    publish_pacer = GridPacer(rate)
+                publish_due = publish_pacer.due(now)
+                preview: NDArray[np.uint8] | None = None
+                if active:
+                    if detector is None:
+                        detector = self._build_detector(extrinsic=extrinsic)
+                        detector_extrinsic = extrinsic
+                    # Detection fires on its OWN absolute grid, decoupled from the
+                    # publication cadence (ADR-0037): a reduced preview_fps must not
+                    # throttle the sync groups / co-visibility / gauges. During a sweep
+                    # all cameras detect the SAME instants (shared cells).
+                    detect_pacer = detect_pacer_extrinsic if extrinsic else detect_pacer_intrinsic
+                    if detector is not None and detect_pacer.due(stamp):
+                        if publish_due:
+                            # Fused path: one downscale serves both detection and drawing.
+                            preview, detection = await loop.run_in_executor(
+                                executor, _process_frame, detector, frame.image, preview_size
                             )
+                        else:
+                            detection = await loop.run_in_executor(
+                                executor, _detect_only, detector, frame.image, preview_size
+                            )
+                        last_detection = detection
+                        if sweeping:
+                            covis = self._feed_extrinsic(
+                                target.name, frame.timestamp, detection, now
+                            )
+                            if covis is not None:
+                                await publisher.send_data(json.dumps(covis), TELEMETRY_TOPIC)
+                        # Feed the relative gauge every detection tick (~15-30 Hz), even
+                        # when telemetry is throttled, so its window tracks real cadence.
+                        baseline = sharpness_extrinsic if extrinsic else sharpness_intrinsic
+                        sharpness_ok = baseline.ok(detection.sharpness)
+                        if now - last_telemetry >= _TELEMETRY_PERIOD_S:
+                            last_telemetry = now
+                            phase = "extrinsic" if extrinsic else "intrinsic"
+                            payload = json.dumps(
+                                coverage_metrics_payload(
+                                    target.name, detection, phase, sharpness_ok=sharpness_ok
+                                )
+                            )
+                            await publisher.send_data(payload, TELEMETRY_TOPIC)
+                    elif publish_due:
+                        # Redraw the last detection (no re-detect) so the overlay is steady.
+                        preview = await loop.run_in_executor(
+                            executor,
+                            _draw_preview,
+                            frame.image,
+                            last_detection,
+                            preview_size,
                         )
-                        await publisher.send_data(payload, TELEMETRY_TOPIC)
                 elif publish_due:
-                    # Redraw the last detection (no re-detect) so the overlay is steady.
                     preview = await loop.run_in_executor(
-                        executor,
-                        _draw_preview,
-                        frame.image,
-                        last_detection,
-                        preview_size,
+                        executor, _downscale, frame.image, preview_size
                     )
-            elif publish_due:
-                preview = await loop.run_in_executor(
-                    executor, _downscale, frame.image, preview_size
-                )
 
-            if publish_due and preview is not None:
-                # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
-                # detect-at-preview both sides) showed running it in the executor vs
-                # synchronously here is a wash (~25 fps both): the sweep is bound by
-                # 4-camera single-process serialization, not this call. Kept inline —
-                # simplest, one fewer executor hop.
-                publisher.push(target.name, preview)
+                if publish_due and preview is not None:
+                    # push() is a blocking ~8 ms FFI call. A clean A/B (identical sweep,
+                    # detect-at-preview both sides) showed running it in the executor vs
+                    # synchronously here is a wash (~25 fps both): the sweep is bound by
+                    # 4-camera single-process serialization, not this call. Kept inline —
+                    # simplest, one fewer executor hop.
+                    publisher.push(target.name, preview)
 
-            # Record the RAW native frame (detection fidelity), off the event loop.
-            # EVERY frame kept by the capture grid is written while recording — the
-            # mkv cadence IS the capture cadence (ADR-0037); the sidecars carry the
-            # true timestamps for the extrinsic sync.
-            if sweeping:
-                lock = self._extrinsic_locks.get(target.name)
-                recorder = self._extrinsic
-                if lock is not None and recorder is not None:
-                    async with lock:
-                        if self._extrinsic is recorder:  # not closed meanwhile
-                            await loop.run_in_executor(
-                                executor,
-                                recorder.write,
-                                target.name,
-                                frame.image,
-                                frame.timestamp,
+                # Record the RAW native frame (detection fidelity), off the event loop.
+                # EVERY frame kept by the capture grid is written while recording — the
+                # mkv cadence IS the capture cadence (ADR-0037); the sidecars carry the
+                # true timestamps for the extrinsic sync.
+                if sweeping:
+                    lock = self._extrinsic_locks.get(target.name)
+                    recorder = self._extrinsic
+                    if lock is not None and recorder is not None:
+                        async with lock:
+                            if self._extrinsic is recorder:  # not closed meanwhile
+                                # To its end even if cancelled: the lock is released only
+                                # once the write really ended, so stop never closes a
+                                # writer mid-write (ADR-0050).
+                                await run_to_completion(
+                                    loop.run_in_executor(
+                                        executor,
+                                        recorder.write,
+                                        target.name,
+                                        frame.image,
+                                        frame.timestamp,
+                                        device.clock,
+                                    )
+                                )
+                elif self._active_intrinsic == target.name:
+                    async with self._recorder_lock:
+                        if self._recorder is not None:
+                            await run_to_completion(
+                                loop.run_in_executor(executor, self._recorder.write, frame.image)
                             )
-            elif self._active_intrinsic == target.name:
-                async with self._recorder_lock:
-                    if self._recorder is not None:
-                        await loop.run_in_executor(executor, self._recorder.write, frame.image)
+            except Exception:
+                # One frame's processing failed: skip it (the grab and loss logic
+                # above, and cancellation, stay outside this guard). A series as
+                # long as the loss rule ends the loop with its last error (#48).
+                now = loop.time()
+                if failing_since is None:
+                    failing_since = now
+                    logger.exception(
+                        "camera %s: frame processing failed; skipping frames", target.name
+                    )
+                failed_frames += 1
+                if now - failing_since >= _CAMERA_LOST_AFTER_S:
+                    raise
+                await asyncio.sleep(0)
+                continue
+            if failing_since is not None:
+                logger.info(
+                    "camera %s recovered after %d failed frame(s)", target.name, failed_frames
+                )
+                failing_since = None
+                failed_frames = 0
             await asyncio.sleep(0)
         logger.info("capture loop %s exiting (disconnected)", target.name)
 
     @staticmethod
-    async def _read_first_frame(
-        loop: asyncio.AbstractEventLoop, executor: ThreadPoolExecutor, camera: CameraCapture
-    ) -> Frame | None:
-        for _ in range(_FIRST_FRAME_ATTEMPTS):
-            frame = await loop.run_in_executor(executor, camera.read)
+    async def _read_first_frame(device: CameraDevice) -> Frame | None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _FIRST_FRAME_DEADLINE_S
+        while loop.time() < deadline:
+            frame = await device.read()
             if frame is not None:
                 return frame
             await asyncio.sleep(_FIRST_FRAME_BACKOFF_S)

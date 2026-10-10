@@ -831,8 +831,8 @@ def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
     )
     frame = np.zeros((48, 64, 3), dtype=np.uint8)
     for g in range(3):  # aligned timestamps -> 3 clean groups
-        recorder.write("cam_0", frame, g / 30.0)
-        recorder.write("cam_1", frame, g / 30.0 + 0.002)
+        recorder.write("cam_0", frame, g / 30.0, "v4l2")
+        recorder.write("cam_1", frame, g / 30.0 + 0.002, "v4l2")
     recorder.close()
 
     body = client.get("/extrinsic/groups").json()
