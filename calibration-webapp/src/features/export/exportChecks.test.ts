@@ -14,6 +14,7 @@ describe('formatCheckValue', () => {
     expect(formatCheckValue(check('epipolar', 0.3565))).toBe('worst pair 0.36 px');
     expect(formatCheckValue(check('target_rigidity', 0.0038))).toBe('0.38 % of its size');
     expect(formatCheckValue(check('frame', 5.04))).toBe('5.0° off level');
+    expect(formatCheckValue(check('reference', 0.0581))).toBe('residual 5.8 cm');
   });
 
   it('says nothing for a check without a value, or no camera below the floor', () => {

@@ -380,6 +380,9 @@ export interface ExtrinsicResultPayload {
   // is the metric that catches a result which looks good and is not. Absent on
   // results persisted before ADR-0044; 0 when no group triangulated two corners.
   rigidity_mm?: number;
+  // The reference calibration the world was re-aligned on (ADR-0061); null until that
+  // gesture, dropped by a rotate or a framing, kept by a Minimize.
+  alignment?: AppliedAlignment | null;
 }
 
 export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
@@ -389,7 +392,9 @@ export const fetchExtrinsicResult = (): Promise<ExtrinsicResultPayload> =>
 // set_frame puts the origin + axes on a group's board with its normal on the up axis
 // (the single framing gesture); rotate turns the frame ±90° about an axis.
 export type OrientRequest =
-  { op: 'set_frame'; group: number } | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number };
+  | { op: 'set_frame'; group: number }
+  | { op: 'rotate'; axis: 'x' | 'y' | 'z'; degrees: number }
+  | { op: 'align'; mode: AlignmentMode };
 
 export const orientExtrinsic = (body: OrientRequest): Promise<ExtrinsicResultPayload> =>
   postJson<ExtrinsicResultPayload>('/extrinsic/orient', body);
@@ -429,6 +434,70 @@ export const confirmCameraSetup = (): Promise<Session> => postJson<Session>('/ca
 
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>
   getJson<{ targets: ExportTarget[] }>('/export/conventions').then((r) => r.targets);
+
+// Re-alignment of the world on a reference calibration (ADR-0061). "floor" keeps the
+// framed floor (a yaw and a horizontal shift), "rigid" is a 6-DoF fit; neither scales.
+export type AlignmentMode = 'floor' | 'rigid';
+
+export interface AppliedAlignment {
+  reference: string;
+  mode: AlignmentMode;
+  matched_by: 'device_path' | 'port';
+  rotation_deg: number;
+  translation_m: number[];
+  residual_rms_m: number;
+}
+
+// One mode's fit of the current solve onto the reference; `refused` says why not.
+export interface AlignmentReport {
+  mode: AlignmentMode;
+  refused: string | null;
+  matched_by: 'device_path' | 'port' | null;
+  cameras: string[];
+  rotation_deg: number | null;
+  translation_m: number[] | null;
+  residual_rms_m: number | null;
+  residuals_m: Record<string, number>;
+  vertical_offset_m: number | null;
+  tilt_deg: number | null;
+  angle_sigma_deg: number | null;
+  scale_ratio: number | null;
+}
+
+export interface ReferenceState {
+  reference: { name: string; format: 'opencv-v1' | 'bare'; cameras: { port: number }[] };
+  applied: AppliedAlignment | null;
+  preview: Partial<Record<AlignmentMode, AlignmentReport>>;
+}
+
+// null = no reference deposited (404).
+export const fetchReference = async (): Promise<ReferenceState | null> => {
+  const response = await fetch(`${API_URL}/extrinsic/reference`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw await errorFrom(response, `GET /extrinsic/reference failed: ${response.status}`);
+  }
+  return (await response.json()) as ReferenceState;
+};
+
+export const putReference = async (name: string, document: unknown): Promise<ReferenceState> => {
+  const response = await fetch(`${API_URL}/extrinsic/reference`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name, document }),
+  });
+  if (!response.ok) {
+    throw await errorFrom(response, `PUT /extrinsic/reference failed: ${response.status}`);
+  }
+  return (await response.json()) as ReferenceState;
+};
+
+export const deleteReference = async (): Promise<void> => {
+  const response = await fetch(`${API_URL}/extrinsic/reference`, { method: 'DELETE' });
+  if (!response.ok) {
+    throw await errorFrom(response, `DELETE /extrinsic/reference failed: ${response.status}`);
+  }
+};
 
 // One pre-export check (GET /export/checks, ADR-0057): judged backend-side.
 export interface ExportCheck {
