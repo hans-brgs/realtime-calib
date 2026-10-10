@@ -23,13 +23,13 @@ COPY ./calibration-webapp/. .
 # Vite inlines it into the VITE_* URLs at build time.
 ARG VITE_HOST_IP
 ENV VITE_HOST_IP=${VITE_HOST_IP}
-ENV VITE_API_URL=https://${VITE_HOST_IP}/api
-ENV VITE_LIVEKIT_URL=wss://${VITE_HOST_IP}/livekit
-ENV VITE_TOKEN_URL=https://${VITE_HOST_IP}/token
+ENV VITE_API_URL=http://${VITE_HOST_IP}/api
+ENV VITE_LIVEKIT_URL=ws://${VITE_HOST_IP}/livekit
+ENV VITE_TOKEN_URL=http://${VITE_HOST_IP}/token
 RUN yarn build
 
 # -----------------------------------------------------------------------------
-# Stage 3 — Caddy serving the built webapp (Caddyfile + certs mounted at runtime).
+# Stage 3 — Caddy serving the built webapp (Caddyfile mounted at runtime).
 # -----------------------------------------------------------------------------
 FROM caddy:2.10.2-alpine
 COPY --from=builder /app/dist /srv/webapp

@@ -3,10 +3,10 @@
 # Machine-specific values are injected by docker-compose.yml via environment:
 #   - API keys : LIVEKIT_KEYS="<key>: <secret>"
 #   - node IP  : NODE_IP=<HOST_IP>   (fills rtc.node_ip, WebRTC media)
-# Caddy terminates TLS; LiveKit listens in plain HTTP/WS internally.
+# Caddy proxies the signaling; LiveKit listens in plain HTTP/WS.
 # =============================================================================
 
-# WebSocket/signal port (HTTP internally, Caddy handles TLS).
+# WebSocket/signal port (plain HTTP, proxied by Caddy at /livekit).
 port: 7880
 
 # Listen on all container interfaces (reachable at the container IP / via Caddy).
