@@ -1394,7 +1394,7 @@ async def extrinsic_groups(
     Synchronizes the timestamp sidecars only (no video decoding). This lists the
     spread-filtered CANDIDATES; the compute keeps the sharpest ~max_groups of them
     (ADR-0033 — result.group_count reports how many). The window derives from the
-    RECORDED cadence (sidecar median inter-frame delta), not the config fps.
+    RECORDED cadence (sidecar mean period), not the config fps.
     """
     manager = get_manager(request)
     session = manager.current()

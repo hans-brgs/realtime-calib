@@ -588,6 +588,21 @@ def test_derive_sweep_window_follows_recorded_cadence(tmp_path: Path) -> None:
         derive_sweep_window(tmp_path, ["cam_9"])
 
 
+def test_derive_sweep_window_ignores_kernel_stamp_quantization(tmp_path: Path) -> None:
+    from calibration_service.calibration.extrinsic import derive_sweep_window
+
+    # Real-rig regression (Test_v2): uvcvideo's kernel stamps of a 30 fps sweep land
+    # on a coarse grid — intervals of 20/40/40 ms, median 40 ms. The window must
+    # follow the true 33.3 ms period, below one frame interval, not the median.
+    intervals = [0.020, 0.040, 0.040] * 40
+    stamps = np.concatenate([[100.0], 100.0 + np.cumsum(intervals)])
+    (tmp_path / "cam_0.timestamps").write_text("".join(f"{t:.6f}\n" for t in stamps))
+    assert float(np.median(intervals)) == pytest.approx(0.040)
+    window = derive_sweep_window(tmp_path, ["cam_0"])
+    assert window == pytest.approx(0.95 / 30, rel=0.01)
+    assert window < 1 / 30
+
+
 MARKER_BOARD = CalibrationBoard(
     board_type=BoardType.ARUCO,
     dictionary="DICT_4X4_100",

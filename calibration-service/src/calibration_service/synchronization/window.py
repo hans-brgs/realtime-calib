@@ -4,8 +4,8 @@ One rule for both worlds: the grouping tolerance is just below one frame
 interval (never chain two consecutive frames of the same camera into one
 group), clamped against degenerate cadences. The LIVE synchronizer feeds it
 the slowest camera's configured period; the OFFLINE solve feeds it the max of
-the median recorded inter-frame deltas (imported sessions have no capture
-grid — there, the measurement stays the truth). Before ADR-0037 the two paths
+the mean recorded periods (imported sessions have no capture grid — there, the
+measurement stays the truth). Before ADR-0037 the two paths
 used diverging factors (1.2 live vs 0.95 offline): the live gauges grouped
 more generously than the solve ever would.
 """
