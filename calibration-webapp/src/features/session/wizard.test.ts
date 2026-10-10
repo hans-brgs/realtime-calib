@@ -16,6 +16,7 @@ function board(): Board {
     square_size_mm: 40,
     marker_size_mm: 30,
     inverted: false,
+    legacy_pattern: false,
   };
 }
 

@@ -597,6 +597,17 @@ function TargetConfigForm({
                 onChange={(e) => patch({ inverted: e.currentTarget.checked })}
                 label="Inverted (ink saving)"
               />
+              {board.board_type === 'charuco' && (
+                <Switch
+                  mt="xs"
+                  checked={board.legacy_pattern}
+                  onChange={(e) => patch({ legacy_pattern: e.currentTarget.checked })}
+                  {...labelWithHelp(
+                    'Legacy layout (OpenCV < 4.6)',
+                    'For a board printed by an older tool: OpenCV 4.6 changed the ChArUco layout of an even row count, and such a board detects no corner without this switch.',
+                  )}
+                />
+              )}
             </Paper>
           )}
 

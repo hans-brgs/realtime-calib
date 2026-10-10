@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from calibration_service.board.charuco import charuco_board
 from calibration_service.board.dictionaries import (
     SUPPORTED_DICTIONARIES,
     dictionary_capacity,
@@ -14,6 +15,7 @@ from calibration_service.board.validate import validate_board
 __all__ = [
     "PX_PER_SQUARE",
     "SUPPORTED_DICTIONARIES",
+    "charuco_board",
     "dictionary_capacity",
     "is_supported",
     "render_board_png",

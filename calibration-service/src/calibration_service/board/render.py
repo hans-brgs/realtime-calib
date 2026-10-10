@@ -10,6 +10,7 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+from calibration_service.board.charuco import charuco_board
 from calibration_service.board.dictionaries import resolve
 from calibration_service.board.validate import validate_board
 from calibration_service.models.board import BoardType, CalibrationBoard
@@ -30,9 +31,7 @@ def render_board_png(board: CalibrationBoard, px_per_square: int = PX_PER_SQUARE
         margin = round(px_per_square * _MARGIN_RATIO)
         width = board.columns * px_per_square + 2 * margin
         height = board.rows * px_per_square + 2 * margin
-        cv_board = cv2.aruco.CharucoBoard(
-            (board.columns, board.rows), 1.0, board.marker_ratio, dictionary
-        )
+        cv_board = charuco_board(board)
         image = cv_board.generateImage((width, height), marginSize=margin, borderBits=_BORDER_BITS)
     else:
         # A single ArUco marker (dictionary + id), with a white quiet zone (Caliscope-style).

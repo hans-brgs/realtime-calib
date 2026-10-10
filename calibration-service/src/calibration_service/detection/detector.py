@@ -19,6 +19,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from calibration_service.board.charuco import charuco_board
 from calibration_service.board.dictionaries import resolve
 from calibration_service.detection.border_refine import (
     BorderRefusal,
@@ -233,9 +234,7 @@ class BoardDetector:
         self.border_attempts = 0  # single-marker views the border refinement ran on
         dictionary = resolve(board.dictionary)
         if board.board_type is BoardType.CHARUCO:
-            cv_board = cv2.aruco.CharucoBoard(
-                (board.columns, board.rows), 1.0, board.marker_ratio, dictionary
-            )
+            cv_board = charuco_board(board)
             charuco_params = cv2.aruco.CharucoParameters()
             charuco_params.tryRefineMarkers = True  # recover markers from interpolation
             self._charuco: cv2.aruco.CharucoDetector | None = cv2.aruco.CharucoDetector(

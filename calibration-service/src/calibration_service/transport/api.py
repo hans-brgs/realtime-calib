@@ -239,6 +239,7 @@ class BoardIn(BaseModel):
     square_size_mm: float = Field(default=TUNING.board.square_size_mm, gt=0.0)
     marker_size_mm: float = Field(default=TUNING.board.marker_size_mm, gt=0.0)
     inverted: bool = TUNING.board.inverted
+    legacy_pattern: bool = TUNING.board.legacy_pattern  # ChArUco: OpenCV's pre-4.6 layout
 
 
 class BoardConfigRequest(BaseModel):
@@ -329,6 +330,7 @@ def _board_out(board: CalibrationBoard | None) -> BoardOut | None:
         square_size_mm=board.square_size_mm,
         marker_size_mm=board.marker_size_mm,
         inverted=board.inverted,
+        legacy_pattern=board.legacy_pattern,
     )
 
 
@@ -343,6 +345,7 @@ def _to_board(item: BoardIn) -> CalibrationBoard:
         square_size_mm=item.square_size_mm,
         marker_size_mm=item.marker_size_mm,
         inverted=item.inverted,
+        legacy_pattern=item.legacy_pattern,
     )
 
 

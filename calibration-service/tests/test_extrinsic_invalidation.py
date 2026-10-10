@@ -191,6 +191,7 @@ def test_rebuilding_the_cameras_drops_the_stale_solve_files(tmp_path: Path) -> N
         pytest.param(CHARUCO_EXTRINSIC, {"rows": 7}, id="charuco-rows"),
         pytest.param(CHARUCO_EXTRINSIC, {"marker_ratio": 0.6}, id="charuco-marker-ratio"),
         pytest.param(CHARUCO_EXTRINSIC, {"inverted": True}, id="charuco-inverted"),
+        pytest.param(CHARUCO_EXTRINSIC, {"legacy_pattern": True}, id="charuco-legacy-pattern"),
         pytest.param(MARKER, {"dictionary": "DICT_5X5_100"}, id="marker-dictionary"),
         pytest.param(MARKER, {"marker_id": 9}, id="marker-id"),
         pytest.param(MARKER, {"inverted": True}, id="marker-inverted"),

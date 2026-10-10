@@ -31,7 +31,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
-from calibration_service.board.dictionaries import resolve
+from calibration_service.board.charuco import charuco_board
 from calibration_service.calibration.uncertainty import (
     ROBUST_COVERAGE,
     intrinsic_covariances,
@@ -346,9 +346,7 @@ def select_keyframes(
 
 
 def _cv_charuco_board(board: CalibrationBoard) -> cv2.aruco.CharucoBoard:
-    return cv2.aruco.CharucoBoard(
-        (board.columns, board.rows), 1.0, board.marker_ratio, resolve(board.dictionary)
-    )
+    return charuco_board(board)
 
 
 def calibrate_intrinsic(

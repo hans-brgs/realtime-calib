@@ -13,6 +13,7 @@ const CHARUCO: Board = {
   square_size_mm: 40,
   marker_size_mm: 30,
   inverted: false,
+  legacy_pattern: false,
 };
 
 const MARKER: Board = { ...CHARUCO, board_type: 'aruco', marker_id: 8, marker_size_mm: 297.5 };

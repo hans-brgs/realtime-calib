@@ -94,6 +94,7 @@ def _extrinsic_geometry(board: CalibrationBoard | None) -> tuple[object, ...] | 
             board.rows,
             board.marker_ratio,
             board.inverted,
+            board.legacy_pattern,
         )
     # A single marker ignores the grid fields and the marker/square ratio.
     return (board.board_type, board.dictionary, board.marker_id, board.inverted)
