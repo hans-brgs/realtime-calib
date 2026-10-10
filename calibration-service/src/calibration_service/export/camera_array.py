@@ -120,6 +120,15 @@ def export_targets() -> list[ExportTarget]:
             up="",
             handedness="",
         ),
+        # The generic consumer contract (ADR-0057): always metres, versioned.
+        ExportTarget(
+            id="opencv",
+            filename="camera_array_opencv.json",
+            kind="json",
+            label="OpenCV pipelines · Y-up · right-handed · metres",
+            up="y",
+            handedness="right",
+        ),
     ]
     for format_id, convention in CONVENTIONS.items():
         up_label = "Y-up" if convention.up == "y" else "Z-up"

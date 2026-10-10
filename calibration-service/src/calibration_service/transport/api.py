@@ -43,10 +43,14 @@ from calibration_service.calibration import (
     sweep_groups,
 )
 from calibration_service.export import (
+    WorldFrame,
     aniposelib_document,
     caliscope_document,
     export_targets,
+    opencv_document,
     platform_variant,
+    run_checks,
+    world_frame,
 )
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.camera import CameraDevice
@@ -1391,15 +1395,59 @@ def _reject_unknown_formats(formats: list[str]) -> None:
 
 
 def _render_target(
-    session: CalibrationSession, target_id: str, square: float, units: str
+    session: CalibrationSession, target_id: str, square: float, units: str, world: WorldFrame
 ) -> tuple[str, str]:
     """Serialized content of one export target — no disk write (dry-run + write)."""
     if target_id == "caliscope":
         return "toml", rtoml.dumps(caliscope_document(session, square))
     if target_id == "aniposelib":
         return "toml", rtoml.dumps(aniposelib_document(session, square, units=units))
+    if target_id == "opencv":
+        stamp = datetime.now(UTC).isoformat(timespec="seconds")
+        document = opencv_document(session, square, world, exported_at=stamp)
+        return "json", json.dumps(document, indent=2)
     variant = platform_variant(session, target_id, square, units=units)
     return "json", json.dumps(variant, indent=2)
+
+
+def _stored_result(manager: SessionManager) -> ExtrinsicResult | None:
+    """The persisted solve, or None when there is none or it is unreadable."""
+    try:
+        return _load_extrinsic_result(manager)
+    except HTTPException as exc:
+        logger.warning("export: no usable extrinsic result (%s)", exc.detail)
+        return None
+
+
+def _stored_ba_inputs(manager: SessionManager) -> BAInputs | None:
+    path = manager.extrinsic_dir() / "ba_inputs.json"
+    if not path.is_file():
+        return None
+    try:
+        return BAInputs(**_read_json(path))
+    except (TypeError, HTTPException) as exc:
+        logger.warning("export checks: ba_inputs.json is unreadable (%s)", exc)
+        return None
+
+
+def _export_world(
+    manager: SessionManager, session: CalibrationSession, board: CalibrationBoard
+) -> tuple[ExtrinsicResult | None, WorldFrame]:
+    result = _stored_result(manager)
+    anchor = min(session.cameras, key=lambda c: c.index).name
+    try:
+        return result, world_frame(result, board, anchor)
+    except Exception as exc:  # a malformed result must not fail the export (ADR-0057)
+        logger.warning("export: the world's provenance could not be read (%s)", exc)
+        return result, WorldFrame("unknown", f"unknown: {exc}", None)
+
+
+def _checks_payload(
+    manager: SessionManager, session: CalibrationSession, board: CalibrationBoard
+) -> dict[str, object]:
+    result, world = _export_world(manager, session, board)
+    checks = run_checks(session, result, _stored_ba_inputs(manager), board, world)
+    return {"checks": [asdict(check) for check in checks]}
 
 
 @router.post("/export")
@@ -1415,13 +1463,16 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
     square = board_unit_mm(board)  # square side (ChArUco) or marker side (ArUco)
     units = body.units if body.units is not None else session.export_units
     selected = set(body.formats)
+    _, world = _export_world(manager, session, board)
     contents: dict[str, str] = {}
     files: list[dict[str, object]] = []
     for target in export_targets():  # catalog order, stable output
         if target.id not in selected:
             continue
-        _, contents[target.filename] = _render_target(session, target.id, square, units)
+        _, contents[target.filename] = _render_target(session, target.id, square, units, world)
         files.append({"name": target.filename, "convention": target.label})
+    # The pre-export checks travel with every export (ADR-0057).
+    contents["checks.json"] = json.dumps(_checks_payload(manager, session, board), indent=2)
     # The folder holds exactly THIS export (the archive zips it whole): writing
     # into it file by file kept a previous selection's artefacts — a mm TOML
     # shipped next to a fresh m JSON.
@@ -1431,6 +1482,14 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
     manager.mark_exported()
     logger.info("exported: %s", ", ".join(contents))
     return {"files": files}
+
+
+@router.get("/export/checks")
+async def export_checks(request: Request) -> dict[str, object]:
+    """The pre-export checks of the current solve (ADR-0057); none blocks an export."""
+    manager = get_manager(request)
+    session = manager.current()
+    return _checks_payload(manager, session, _export_board(session))
 
 
 @router.get("/export/conventions")
@@ -1449,17 +1508,19 @@ class ExportPreviewRequest(BaseModel):
 @router.post("/export/preview")
 async def export_preview(request: Request, body: ExportPreviewRequest) -> dict[str, object]:
     """Return the exact bytes each selected target would write, without touching disk."""
-    session = get_manager(request).current()
+    manager = get_manager(request)
+    session = manager.current()
     board = _export_board(session)
     _reject_unknown_formats(body.formats)
     square = board_unit_mm(board)
     units = body.units if body.units is not None else session.export_units
     selected = set(body.formats)
+    _, world = _export_world(manager, session, board)
     files: list[dict[str, object]] = []
     for target in export_targets():
         if target.id not in selected:
             continue
-        language, content = _render_target(session, target.id, square, units)
+        language, content = _render_target(session, target.id, square, units, world)
         files.append({"name": target.filename, "language": language, "content": content})
     return {"files": files}
 
