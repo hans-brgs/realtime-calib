@@ -1,7 +1,16 @@
 import { Bounds, Grid, Html, Line, TrackballControls, useBounds } from '@react-three/drei';
 import { Canvas, useThree } from '@react-three/fiber';
 import { DoubleSide } from 'three';
-import { ActionIcon, Box, Button, Group, Slider, Text, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Box,
+  Button,
+  Group,
+  SegmentedControl,
+  Slider,
+  Text,
+  Tooltip,
+} from '@mantine/core';
 import {
   IconAdjustments,
   IconCrosshair,
@@ -231,10 +240,10 @@ function AxisLabel({
 // frame sits at its CENTER (cv2 convention) — anchor the triad on the centroid;
 // a ChArUco board frame originates at its first chessboard corner (c0).
 //
-// The triad is DASHED, pastel and unlabeled, apart from the solid X/Y/Z world axes.
-// It is NOT drawn on the group the world was framed on (`triad` false): there the
-// world axes are that board's frame, with a different axis order (x, normal, board y
-// once laid on the floor), and the two triads overlapped with crossed colours.
+// The triad shows in the "Board" axes mode only, the world axes in "World": one frame
+// at a time. Both at once overlapped, and on the group the world was framed on with
+// crossed colours (the world is that board's frame in another axis order: x, normal,
+// board y once laid on the floor). Lowercase letters for the board, X/Y/Z for the world.
 function BoardWithTriad({
   quad,
   m,
@@ -256,32 +265,19 @@ function BoardWithTriad({
         1 / corners.length,
       )
     : corners[0];
-  const len = norm(sub(corners[1], corners[0])) * 0.45;
-  const dash = { dashed: true, dashSize: len * 0.12, gapSize: len * 0.08 };
+  const len = norm(sub(corners[1], corners[0])) * 0.6;
   return (
     <>
       <QuadFace corners={corners} color={BOARD_COLOR} opacity={0.16} />
       <Line points={[...corners, corners[0]]} color={BOARD_COLOR} lineWidth={1.6} />
       {triad && (
         <>
-          <Line
-            points={[origin, add(origin, scale(x, len))]}
-            color="#fca5a5"
-            lineWidth={1.6}
-            {...dash}
-          />
-          <Line
-            points={[origin, add(origin, scale(y, len))]}
-            color="#86efac"
-            lineWidth={1.6}
-            {...dash}
-          />
-          <Line
-            points={[origin, add(origin, scale(z, len))]}
-            color="#93c5fd"
-            lineWidth={1.6}
-            {...dash}
-          />
+          <Line points={[origin, add(origin, scale(x, len))]} color="#ef4444" lineWidth={2.2} />
+          <Line points={[origin, add(origin, scale(y, len))]} color="#4ade80" lineWidth={2.2} />
+          <Line points={[origin, add(origin, scale(z, len))]} color="#60a5fa" lineWidth={2.2} />
+          <AxisLabel position={add(origin, scale(x, len * 1.3))} text="x" color="#ef4444" />
+          <AxisLabel position={add(origin, scale(y, len * 1.3))} text="y" color="#4ade80" />
+          <AxisLabel position={add(origin, scale(z, len * 1.3))} text="z" color="#60a5fa" />
         </>
       )}
     </>
@@ -353,6 +349,8 @@ export function ArrayReview({
   const [controlsOpen, setControlsOpen] = useState<boolean | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
   const [recenters, setRecenters] = useState(0);
+  // Which frame the scene draws: the world axes, or the scrubbed board's own triad.
+  const [axes, setAxes] = useState<'world' | 'board'>('world');
   const showControls = controlsOpen ?? !compact;
   // Roomier hit targets once the panel is a deliberate touch surface (ADR-0041).
   const controlSize = compact ? 'sm' : 'compact-xs';
@@ -467,7 +465,7 @@ export function ArrayReview({
               view does not follow the scrubber. */}
           <Bounds key={solveRevision} fit clip margin={1.6}>
             <HomeView trigger={recenters} position={initialCamera} />
-            <WorldAxes size={sceneScale * 0.22} />
+            {axes === 'world' && <WorldAxes size={sceneScale * 0.22} />}
             {poses.map((pose, i) => (
               <Frustum
                 key={pose.name}
@@ -504,7 +502,7 @@ export function ArrayReview({
               quad={quad}
               m={VIEW_BASIS}
               centered={markerBoard}
-              triad={current !== result.framed_group}
+              triad={axes === 'board'}
             />
           )}
           {/* Trackball, not Orbit: orbit clamps polar to [0, π] (blocks at the
@@ -512,28 +510,51 @@ export function ArrayReview({
               no inertia, the view stops where the drag stops (the inertia also
               re-applied the last delta whenever the pointer paused mid-drag: the
               "jumps"). Static mode applies a zoom step once instead of ~5x with
-              decay, hence the higher zoom speed. */}
-          <TrackballControls makeDefault noPan rotateSpeed={1.6} zoomSpeed={5} staticMoving />
+              decay, hence the higher zoom speed. Pan on: two fingers translate (and
+              pinch), the right mouse button too; Recenter brings the rig back. */}
+          <TrackballControls
+            makeDefault
+            rotateSpeed={1.6}
+            zoomSpeed={5}
+            panSpeed={0.8}
+            staticMoving
+          />
         </Canvas>
-        <Tooltip label="Recenter the view" position="left" withArrow>
-          <ActionIcon
-            size="lg"
-            variant="default"
-            aria-label="Recenter the view"
-            onClick={() => setRecenters((n) => n + 1)}
-            style={{
-              position: 'absolute',
-              top: 10,
-              right: 10,
-              zIndex: 2,
-              background: 'rgba(9,9,11,0.72)',
-              backdropFilter: 'blur(6px)',
-              border: '1px solid var(--rc-border)',
+        <Group
+          gap={8}
+          wrap="nowrap"
+          style={{ position: 'absolute', top: 10, right: 10, zIndex: 2 }}
+        >
+          {/* Which frame is drawn: the world axes or the scrubbed board's triad. */}
+          <SegmentedControl
+            size="xs"
+            aria-label="Axes shown"
+            value={axes}
+            onChange={(v) => setAxes(v as 'world' | 'board')}
+            data={[
+              { label: 'World', value: 'world' },
+              { label: 'Board', value: 'board' },
+            ]}
+            styles={{
+              root: { background: 'rgba(9,9,11,0.72)', backdropFilter: 'blur(6px)' },
             }}
-          >
-            <IconFocusCentered size={18} />
-          </ActionIcon>
-        </Tooltip>
+          />
+          <Tooltip label="Recenter the view" position="left" withArrow>
+            <ActionIcon
+              size="lg"
+              variant="default"
+              aria-label="Recenter the view"
+              onClick={() => setRecenters((n) => n + 1)}
+              style={{
+                background: 'rgba(9,9,11,0.72)',
+                backdropFilter: 'blur(6px)',
+                border: '1px solid var(--rc-border)',
+              }}
+            >
+              <IconFocusCentered size={18} />
+            </ActionIcon>
+          </Tooltip>
+        </Group>
         {showControls ? (
           <Box
             style={{
