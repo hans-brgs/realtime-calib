@@ -22,6 +22,7 @@ from numpy.typing import NDArray
 
 from calibration_service.calibration.extrinsic import BAInputs, ExtrinsicResult
 from calibration_service.export.opencv import WorldFrame
+from calibration_service.export.reference import Reference, align
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.session import CalibrationSession
 
@@ -37,6 +38,9 @@ EPIPOLAR_MIN_SHARED = 20
 # RMS deviation of the triangulated target from its rigid shape, as a share of its
 # longest side: the lot 4 solves sit at 0.13-0.15 %, the CONTOUR ones at 0.3-0.4 %.
 RIGIDITY_SHARE = (0.0025, 0.01)
+# The world follows the reference when the best fit onto it is within this rotation
+# (degrees) and translation (metres): what an applied re-alignment leaves.
+REFERENCE_FOLLOWS = (0.1, 0.01)
 
 
 @dataclass(frozen=True)
@@ -189,7 +193,29 @@ def rigidity_check(result: ExtrinsicResult | None, board: CalibrationBoard) -> C
 
 def frame_checks(world: WorldFrame) -> list[Check]:
     """The world is set on a level target, printed face up, the cameras above it."""
-    if world.frame != "target":
+    aligned = world.alignment or {}
+    if world.frame == "reference" and world.group is None:
+        return [
+            Check(
+                "frame",
+                "ok",
+                None,
+                [],
+                "internal",
+                f"re-aligned on the reference {aligned.get('reference')} "
+                f"({aligned.get('mode')}): its up comes from the reference, no target "
+                "verifies it",
+            ),
+            Check(
+                "cameras_above_floor",
+                "unavailable",
+                None,
+                [],
+                "internal",
+                "no floor: the world is not framed on a target",
+            ),
+        ]
+    if world.frame not in ("target", "reference"):
         detail = (
             "the world's origin is the anchor camera's (its axes too, unless rotated): "
             "frame it on the target on the floor"
@@ -208,7 +234,20 @@ def frame_checks(world: WorldFrame) -> list[Check]:
             ),
         ]
     tilt = world.tilt_deg
+    how = (
+        f"re-aligned on the reference {aligned.get('reference')} ({aligned.get('mode')}) "
+        f"over the target of group {world.group}"
+        if world.frame == "reference"
+        else f"framed on group {world.group}"
+    )
     if tilt is None or not world.level:
+        remedy = (
+            "the reference's floor differs from the target's: frame it again, then align "
+            "in floor mode"
+            if world.frame == "reference"
+            else "a rotation tilted the world, frame it again, unless a wall target was "
+            "turned level on purpose"
+        )
         tilted = "" if tilt is None else f" {min(tilt, 180.0 - tilt):.1f}° off horizontal"
         return [
             Check(
@@ -217,9 +256,7 @@ def frame_checks(world: WorldFrame) -> list[Check]:
                 tilt,
                 [],
                 "internal",
-                f"framed on group {world.group}, but the target is no longer level{tilted}: "
-                "a rotation tilted the world, frame it again, unless a wall target was "
-                "turned level on purpose",
+                f"{how}, but the target is no longer level{tilted}: {remedy}",
             ),
             Check(
                 "cameras_above_floor",
@@ -237,8 +274,7 @@ def frame_checks(world: WorldFrame) -> list[Check]:
             tilt,
             [],
             "internal",
-            f"framed on group {world.group} with its printed face down: the world is "
-            "upside down, frame it again",
+            f"{how} with its printed face down: the world is upside down, frame it again",
         )
     else:
         drift = world.target_offset_m or 0.0
@@ -254,8 +290,8 @@ def frame_checks(world: WorldFrame) -> list[Check]:
             tilt,
             [],
             "internal",
-            f"framed on group {world.group}, level, printed face up; proves the target's "
-            f"plane, not that it lay on the floor{moved}",
+            f"{how}, level, printed face up; proves the target's plane, not that it lay "
+            f"on the floor{moved}",
         )
     above = Check(
         "cameras_above_floor",
@@ -270,12 +306,69 @@ def frame_checks(world: WorldFrame) -> list[Check]:
     return [posed, above]
 
 
+def reference_check(
+    session: CalibrationSession,
+    result: ExtrinsicResult | None,
+    board: CalibrationBoard,
+    world: WorldFrame,
+    reference: Reference | None,
+    unreadable: str | None = None,
+) -> Check:
+    """Whether the world follows the deposited reference calibration (ADR-0061)."""
+    if unreadable is not None:
+        return Check("reference", "warn", None, [], "external", unreadable)
+    if reference is None:
+        return Check(
+            "reference", "unavailable", None, [], "external", "no reference calibration loaded"
+        )
+    if result is None:
+        return Check("reference", "unavailable", None, [], "external", "no extrinsic solve")
+    applied = result.alignment.get("mode") if result.alignment else None
+    mode = applied or ("floor" if world.up == "y" else "rigid")
+    fit = align(result, session, board, reference, world, mode).report
+    if fit.refused is not None:
+        return Check(
+            "reference",
+            "warn",
+            None,
+            [],
+            "external",
+            f"{reference.name}: {fit.refused}",
+        )
+    rotation = fit.rotation_deg or 0.0
+    moved = float(np.linalg.norm(fit.translation_m or [0.0, 0.0, 0.0]))
+    residual = f"residual {100.0 * (fit.residual_rms_m or 0.0):.1f} cm RMS"
+    if rotation <= REFERENCE_FOLLOWS[0] and moved <= REFERENCE_FOLLOWS[1]:
+        return Check(
+            "reference",
+            "ok",
+            fit.residual_rms_m,
+            [],
+            "external",
+            f"the world follows {reference.name} ({mode}, matched by {fit.matched_by}), "
+            f"{residual}: keeps the room's landmarks, measures nothing",
+            fit.residuals_m,
+        )
+    return Check(
+        "reference",
+        "warn",
+        fit.residual_rms_m,
+        [],
+        "external",
+        f"the world is {rotation:.1f}° and {moved:.2f} m off {reference.name} "
+        f"({mode}, {residual}): align it in the 3D review",
+        fit.residuals_m,
+    )
+
+
 def run_checks(
     session: CalibrationSession,
     result: ExtrinsicResult | None,
     ba: BAInputs | None,
     board: CalibrationBoard,
     world: WorldFrame,
+    reference: Reference | None = None,
+    reference_unreadable: str | None = None,
 ) -> list[Check]:
     """Every check; one that cannot run reads ``unavailable``, it never blocks an export."""
     checks: list[Check] = []
@@ -284,6 +377,12 @@ def run_checks(
         (("epipolar",), lambda: [epipolar_check(session, result, ba)]),
         (("target_rigidity",), lambda: [rigidity_check(result, board)]),
         (("frame", "cameras_above_floor"), lambda: frame_checks(world)),
+        (
+            ("reference",),
+            lambda: [
+                reference_check(session, result, board, world, reference, reference_unreadable)
+            ],
+        ),
     ]
     for ids, run in runs:
         try:

@@ -43,12 +43,17 @@ from calibration_service.calibration import (
     sweep_groups,
 )
 from calibration_service.export import (
+    Reference,
     WorldFrame,
+    align,
     aniposelib_document,
     caliscope_document,
     export_targets,
     opencv_document,
+    parse_reference,
     platform_variant,
+    reference_from_payload,
+    reference_payload,
     run_checks,
     world_frame,
 )
@@ -1139,13 +1144,15 @@ class OrientRequest(BaseModel):
     ``set_frame`` = the single framing gesture (ADR-0026): world origin on the
     board (marker center / ChArUco c0), axes aligned to it, and the board normal
     put on the export-up axis (-y canonical) so a floor-laid board lands level.
-    ``rotate`` reorients ±90° about an axis for any other placement.
+    ``rotate`` reorients ±90° about an axis for any other placement. ``align``
+    re-aligns the world on the deposited reference calibration (ADR-0061).
     """
 
-    op: Literal["set_frame", "rotate"]
+    op: Literal["set_frame", "rotate", "align"]
     group: int | None = None  # set_frame: group whose board becomes the frame
     axis: Literal["x", "y", "z"] | None = None  # rotate
     degrees: float | None = None  # rotate (the UI sends +/-90)
+    mode: Literal["floor", "rigid"] = "floor"  # align
 
 
 def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
@@ -1177,6 +1184,7 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
     """
     manager = get_manager(request)
     result = _load_extrinsic_result(manager)
+    alignment: dict[str, Any] | None = None
     if body.op == "set_frame":
         if body.group is None or not (0 <= body.group < len(result.board_quads)):
             raise HTTPException(status_code=422, detail="invalid group")
@@ -1192,6 +1200,29 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
         transform = quad_origin_transform(
             quad, at_center=not charuco, ground=True, normal_behind=charuco
         )
+    elif body.op == "align":
+        session = manager.current()
+        board = session.extrinsic_board
+        if board is None:
+            raise HTTPException(status_code=422, detail="no extrinsic board defined")
+        reference = _stored_reference(manager)
+        if reference is None:
+            raise HTTPException(status_code=404, detail="no reference calibration loaded")
+        anchor = min(session.cameras, key=lambda c: c.index).name
+        world = world_frame(result, board, anchor)
+        fit = align(result, session, board, reference, world, body.mode)
+        if fit.transform is None:
+            raise HTTPException(status_code=422, detail=fit.report.refused)
+        transform = fit.transform
+        report = fit.report
+        alignment = {
+            "reference": reference.name,
+            "mode": report.mode,
+            "matched_by": report.matched_by,
+            "rotation_deg": report.rotation_deg,
+            "translation_m": report.translation_m,
+            "residual_rms_m": report.residual_rms_m,
+        }
     else:
         if body.axis is None or body.degrees is None:
             raise HTTPException(status_code=422, detail="rotate needs axis + degrees")
@@ -1200,7 +1231,8 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
     # Remember which group carried the framing gesture (review-scrubber marker);
     # a rotate keeps the existing marker — the world reference did not move.
     framed = body.group if body.op == "set_frame" else result.framed_group
-    reoriented = replace(reoriented, framed_group=framed)
+    # A re-alignment holds until the world moves another way (ADR-0061).
+    reoriented = replace(reoriented, framed_group=framed, alignment=alignment)
     _store_extrinsic_result(manager, reoriented)
     payload: dict[str, object] = asdict(reoriented)
     return payload
@@ -1245,11 +1277,101 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     # Refine recomputes errors in native px; re-express them in output px
     # (ADR-0042) before persisting, like the compute exit.
     refined = _output_scaled_errors(refined, session)
-    # Minimize keeps the anchor pose, so the framing marker stays meaningful.
-    refined = replace(refined, framed_group=result.framed_group)
+    # Minimize keeps the anchor pose, so the framing marker and a re-alignment on a
+    # reference stay meaningful.
+    refined = replace(refined, framed_group=result.framed_group, alignment=result.alignment)
     _store_extrinsic_result(manager, refined)
     payload: dict[str, object] = asdict(refined)
     return payload
+
+
+_REFERENCE_FILE = "reference.json"
+
+
+class ReferenceRequest(BaseModel):
+    """A reference calibration to re-align the world on (ADR-0061)."""
+
+    name: str = Field(min_length=1, max_length=200)  # the uploaded file's name
+    document: dict[str, Any]
+
+
+def _stored_reference(manager: SessionManager) -> Reference | None:
+    """The deposited reference, None when there is none; 422 when its file is unreadable."""
+    path = manager.extrinsic_dir() / _REFERENCE_FILE
+    if not path.is_file():
+        return None
+    try:
+        return reference_from_payload(_read_json(path))
+    except HTTPException as exc:  # not JSON, or not an object
+        raise HTTPException(
+            status_code=422, detail="reference.json is unreadable — deposit it again"
+        ) from exc
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HTTPException(
+            status_code=422, detail=f"reference.json is unreadable ({exc}) — deposit it again"
+        ) from exc
+
+
+def _checked_reference(manager: SessionManager) -> tuple[Reference | None, str | None]:
+    """The reference for the checks, or why its file cannot be read."""
+    try:
+        return _stored_reference(manager), None
+    except HTTPException as exc:
+        logger.warning("export checks: %s", exc.detail)
+        return None, str(exc.detail)
+
+
+def _reference_state(manager: SessionManager, reference: Reference) -> dict[str, object]:
+    """The reference, the applied re-alignment, and both modes' fit on the current solve."""
+    session = manager.current()
+    board = session.extrinsic_board
+    result = _stored_result(manager)
+    preview: dict[str, object] = {}
+    if result is not None and board is not None:
+        anchor = min(session.cameras, key=lambda c: c.index).name
+        world = world_frame(result, board, anchor)
+        preview = {
+            mode: asdict(align(result, session, board, reference, world, mode).report)
+            for mode in ("floor", "rigid")
+        }
+    return {
+        "reference": reference_payload(reference),
+        "applied": result.alignment if result is not None else None,
+        "preview": preview,
+    }
+
+
+@router.put("/extrinsic/reference")
+async def put_extrinsic_reference(request: Request, body: ReferenceRequest) -> dict[str, object]:
+    """Deposit a reference calibration and preview both re-alignment modes (ADR-0061)."""
+    manager = get_manager(request)
+    try:
+        reference = parse_reference(body.document, body.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    atomic_write_text(directory / _REFERENCE_FILE, json.dumps(reference_payload(reference)))
+    return _reference_state(manager, reference)
+
+
+@router.get("/extrinsic/reference")
+async def get_extrinsic_reference(request: Request) -> dict[str, object]:
+    """The deposited reference and its fit on the current solve, recomputed."""
+    manager = get_manager(request)
+    reference = _stored_reference(manager)
+    if reference is None:
+        raise HTTPException(status_code=404, detail="no reference calibration loaded")
+    return _reference_state(manager, reference)
+
+
+@router.delete("/extrinsic/reference")
+async def delete_extrinsic_reference(request: Request) -> dict[str, object]:
+    """Forget the reference; an applied re-alignment keeps its world."""
+    path = get_manager(request).extrinsic_dir() / _REFERENCE_FILE
+    existed = path.is_file()
+    path.unlink(missing_ok=True)
+    return {"deleted": existed}
 
 
 @router.get("/extrinsic/groups")
@@ -1446,7 +1568,9 @@ def _checks_payload(
     manager: SessionManager, session: CalibrationSession, board: CalibrationBoard
 ) -> dict[str, object]:
     result, world = _export_world(manager, session, board)
-    checks = run_checks(session, result, _stored_ba_inputs(manager), board, world)
+    checks = run_checks(
+        session, result, _stored_ba_inputs(manager), board, world, *_checked_reference(manager)
+    )
     return {"checks": [asdict(check) for check in checks]}
 
 

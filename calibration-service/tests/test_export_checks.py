@@ -326,6 +326,7 @@ def test_a_check_that_cannot_run_does_not_block() -> None:
         "target_rigidity",
         "frame",
         "cameras_above_floor",
+        "reference",
     ]
     assert checks[1].status == "unavailable"
     assert checks[1].detail.startswith("could not run")

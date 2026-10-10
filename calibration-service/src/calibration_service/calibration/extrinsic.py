@@ -33,7 +33,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 from pathlib import Path
-from typing import NamedTuple
+from typing import Any, NamedTuple
 
 import cv2
 import numpy as np
@@ -180,6 +180,11 @@ class ExtrinsicResult:
     # the gate between the captures of their members. 0 with the gate off, on a
     # solve that had to fall back without it, and on older payloads.
     moving_groups: int = 0
+    # The reference calibration the world was re-aligned on (ADR-0061): its name, the
+    # mode, the matching key, rotation, translation and residual. None until that
+    # gesture; a rotate or a framing drops it, a Minimize keeps it (same world), a
+    # fresh solve has none.
+    alignment: dict[str, Any] | None = None
 
     def scaled_errors(self, factors: dict[str, float]) -> ExtrinsicResult:
         """Express the pixel-error fields at each camera's OUTPUT resolution.
