@@ -76,6 +76,11 @@ def _detector_params(
     params = cv2.aruco.DetectorParameters()
     params.minMarkerPerimeterRate = 0.01  # default 0.03 — small / far markers
     params.polygonalApproxAccuracyRate = 0.05  # default 0.03 — distorted images
+    # Two adaptive-threshold windows, 3 and 23 px, instead of three (default step 10):
+    # a third less detection time, live and in the computes; the calibrations move
+    # within the scatter of their own judges (ADR-0058). Caliscope v0.11.5 sets the
+    # same step on its ChArUco tracker.
+    params.adaptiveThreshWinSizeStep = 20
     if single_marker and refine:
         params.cornerRefinementMethod = cv2.aruco.CORNER_REFINE_CONTOUR
     return params

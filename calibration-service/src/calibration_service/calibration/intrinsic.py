@@ -523,11 +523,16 @@ def compute_intrinsic_from_video(
     image_size: tuple[int, int] | None = None
     index = 0
     try:
-        while True:
-            ok, frame = capture.read()
-            if not ok or (end is not None and index >= end):
+        # read() is grab() + retrieve(): every frame is grabbed to keep the index
+        # exact (never seek, see _detect_group_frames), but only the strided ones
+        # pay for retrieve()'s conversion to BGR.
+        while end is None or index < end:
+            if not capture.grab():
                 break
             if index >= start and (index - start) % read_stride == 0:
+                ok, frame = capture.retrieve()
+                if not ok:
+                    break
                 if image_size is None:
                     image_size = (frame.shape[1], frame.shape[0])
                 detections.append(detector.detect(cast("NDArray[np.uint8]", frame)))
