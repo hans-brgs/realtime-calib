@@ -35,6 +35,8 @@ On the recorded single-marker sessions, the target is now held rigid to about 0.
 
 The **Export** screen now opens on a checks panel: the worst camera's error, the epipolar consistency of every camera pair, the rigidity of the reconstructed target, whether the world is framed on a level target, and whether every camera sits above the floor. They never block an export; they tell you what to look at.
 
+![The Export screen of v0.2.0: the Caliscope TOML preview, the export targets, and the checks before export on a 4-camera rig: the internal checks pass, the reference and site-template checks stay unavailable until you load one](/img/export-checks.png)
+
 All of these are computed from the solve, so none can see an error the whole solve shares, above all a mis-measured target, which rescales the whole rig without changing any internal figure. That is what the new **site template** is for: a small JSON file describing your room (which camera goes to which port, where each one sits, and a few camera-to-camera distances measured with a tape). Load it once in Settings, and every export checks the cabling, the placement and the scale against it. [How to write one](/docs/guides/export#site-template).
 
 The results panels changed too: per-camera errors are now reported at the output resolution, the **board rigidity** is shown in millimetres next to the reprojection error, and the intrinsic results include a **projection uncertainty** map that shows where the lens model can be trusted, and where the board never went.

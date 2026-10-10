@@ -12,16 +12,18 @@ Check the calibration, then export it in the convention your target needs.
 
 ## Pre-export checks
 
-The Export screen opens on a checks panel, recomputed from the solve and also written as `checks.json` with every export. The checks are **read-only and never block** an export: they tell you what to look at before handing a calibration over. Each one reads ok, warn, fail, or unavailable (with its cause); tap its info icon for what it proves.
+![The Export screen: the camera_array.toml preview on the left, the export targets and the checks before export on the right](/img/export-checks.png)
+
+The Export screen shows a **Checks before export** panel under the targets, recomputed from the solve and also written as `checks.json` with every export. The checks are **read-only and never block** an export: they tell you what to look at before handing a calibration over. Each one reads ok, warn, fail, or unavailable (with its cause); tap its info icon for what it proves.
 
 | Check | What it looks at | Bands |
 | --- | --- | --- |
-| Camera error | The worst camera's extrinsic error, output px | ok ≤ 0.6 · warn ≤ 1.2 px |
-| Epipolar | Per camera pair, the median symmetric epipolar distance of the solve's observations, output px (needs 20 shared observations) | ok ≤ 0.5 · warn ≤ 1.0 px |
+| Per-camera error | The worst camera's extrinsic error, output px | ok ≤ 0.6 · warn ≤ 1.2 px |
+| Epipolar consistency | Per camera pair, the median symmetric epipolar distance of the solve's observations, output px (needs 20 shared observations) | ok ≤ 0.5 · warn ≤ 1.0 px |
 | Target rigidity | The reconstructed target's deviation, as a share of its longest side | ok ≤ 0.25 % · warn ≤ 1 % |
-| Frame | The printed face's angle to the up axis: warns if the world is not framed on a target or is tilted, fails if upside down, notes an origin that drifted after a Minimize | |
-| Cameras above floor | Cameras under the level framed target | fails if any |
-| Reference | Whether the world still follows the [reference calibration](/docs/guides/extrinsic-calibration#keeping-the-rooms-frame-across-recalibrations) you aligned on, and if not, how far off it is | |
+| World frame | The printed face's angle to the up axis: warns if the world is not framed on a target or is tilted, fails if upside down, notes an origin that drifted after a Minimize | |
+| Cameras above the floor | Cameras under the level framed target | fails if any |
+| Reference calibration | Whether the world still follows the [reference calibration](/docs/guides/extrinsic-calibration#keeping-the-rooms-frame-across-recalibrations) you aligned on, and if not, how far off it is | |
 
 These checks are **internal**: computed from the solve, they spot an inconsistency but cannot see an error the whole solve shares. The worst such error is **scale**: a mis-measured target rescales the whole rig uniformly, and every internal check still passes. A site template adds the external checks.
 
@@ -31,10 +33,10 @@ A site template describes the room as you know it independently of the solve: wh
 
 | Check | Fails when |
 | --- | --- |
-| Template binding | A template camera is missing or at another port, i.e. a swapped cable or a changed order (an extra camera warns) |
-| Template placement | A camera breaks its position, pitch or yaw bounds |
-| Template scale | The scale implied by your tape distances is more than 3σ away from 1 (warns from 2σ); a tape distance that disagrees with the others is named. The scale is reported, never applied |
-| Template resolution | A camera does not export at the template's resolution |
+| Cameras at their ports | A template camera is missing or at another port, i.e. a swapped cable or a changed order (an extra camera warns) |
+| Camera placement | A camera breaks its position, pitch or yaw bounds |
+| Scale (tape distances) | The scale implied by your tape distances is more than 3σ away from 1 (warns from 2σ); a tape distance that disagrees with the others is named. The scale is reported, never applied |
+| Export resolution | A camera does not export at the template's resolution |
 
 ```json
 {
