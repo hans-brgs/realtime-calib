@@ -23,9 +23,6 @@ from calibration_service.calibration.extrinsic import (
     GroupDetection,
     PairEstimate,
     Triangulation,
-    _Detected,
-    _select_quality_groups,
-    _transform,
     bundle_adjust,
     chain_from_anchor,
     compute_extrinsic_from_sweep,
@@ -33,6 +30,8 @@ from calibration_service.calibration.extrinsic import (
     stereo_pairwise,
     triangulate_groups,
 )
+from calibration_service.calibration.extrinsic.model import _transform
+from calibration_service.calibration.extrinsic.sweep import _Detected, _select_quality_groups
 from calibration_service.calibration.intrinsic import _cv_charuco_board
 from calibration_service.models.board import BoardType, CalibrationBoard
 
@@ -238,7 +237,7 @@ def test_sweep_orchestration_solves_from_sidecars(
         )
 
     monkeypatch.setattr(
-        "calibration_service.calibration.extrinsic._detect_group_frames", fake_detect
+        "calibration_service.calibration.extrinsic.pipeline._detect_group_frames", fake_detect
     )
     models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in cameras]
     result, ba_inputs = compute_extrinsic_from_sweep(
@@ -338,10 +337,7 @@ def _fixture_result() -> ExtrinsicResult:
 
 
 def test_reorient_preserves_relative_geometry() -> None:
-    from calibration_service.calibration.extrinsic import (
-        axis_rotation_transform,
-        reorient_result,
-    )
+    from calibration_service.calibration.extrinsic import axis_rotation_transform, reorient_result
 
     result = _fixture_result()
     turned = reorient_result(result, axis_rotation_transform("z", 90.0))
@@ -354,10 +350,7 @@ def test_reorient_preserves_relative_geometry() -> None:
 
 
 def test_set_origin_puts_the_board_at_the_origin() -> None:
-    from calibration_service.calibration.extrinsic import (
-        quad_origin_transform,
-        reorient_result,
-    )
+    from calibration_service.calibration.extrinsic import quad_origin_transform, reorient_result
 
     result = _fixture_result()
     quad = result.board_quads[0]
@@ -374,10 +367,7 @@ def test_set_origin_puts_the_board_at_the_origin() -> None:
 def test_set_origin_at_center_anchors_the_marker_centroid() -> None:
     # Single-ArUco targets: cv2's marker frame sits at the marker CENTER, not a
     # corner — 'Set origin' must land the world origin on the quad centroid.
-    from calibration_service.calibration.extrinsic import (
-        quad_origin_transform,
-        reorient_result,
-    )
+    from calibration_service.calibration.extrinsic import quad_origin_transform, reorient_result
 
     result = _fixture_result()
     quad = result.board_quads[0]
@@ -397,10 +387,7 @@ def test_set_ground_makes_the_board_normal_the_up_axis() -> None:
     # becomes the world's up. In OpenCV terms the board must land in the y=0
     # plane with normal -y, so every export basis (canonical -y -> platform up)
     # renders the floor flat with no manual reorientation.
-    from calibration_service.calibration.extrinsic import (
-        quad_origin_transform,
-        reorient_result,
-    )
+    from calibration_service.calibration.extrinsic import quad_origin_transform, reorient_result
 
     result = _fixture_result()
     quad = result.board_quads[0]
@@ -827,7 +814,8 @@ def test_rigidity_keeps_the_truss_edges_around_a_hole() -> None:
 def test_charuco_truss_recovers_the_world_scale() -> None:
     # ADR-0046: reprojection alone leaves the world scale free (a gauge mode), so
     # a scale error in the init survives the BA; the truss pins it to the board.
-    from calibration_service.calibration.extrinsic import _board_rigidity, rigidity_mm
+    from calibration_service.calibration.extrinsic import rigidity_mm
+    from calibration_service.calibration.extrinsic.bundle import _board_rigidity
 
     rng = np.random.default_rng(0)
     noisy = [
@@ -874,7 +862,7 @@ def test_robust_loss_scale_is_one_pixel_at_the_median_focal(
         calls.append(kwargs)
         return least_squares(fun, x0, **kwargs)
 
-    monkeypatch.setattr("calibration_service.calibration.extrinsic.least_squares", spy)
+    monkeypatch.setattr("calibration_service.calibration.extrinsic.bundle.least_squares", spy)
     tri = triangulate_groups(_groups(2), POSES)
     args = (tri.camera_order, POSES, tri.points3d, tri.obs_camera, tri.obs_point, tri.obs_norm)
     bundle_adjust(*args, "cam_0", focal_median=1350.0)
@@ -887,7 +875,7 @@ def test_robust_loss_scale_is_one_pixel_at_the_median_focal(
 
 def test_cameras_sort_naturally() -> None:
     # EXT-10: plain sorted() put cam_10 before cam_2 in every per-camera listing.
-    from calibration_service.calibration.extrinsic import _natural_key
+    from calibration_service.calibration.extrinsic.model import _natural_key
 
     names = ["cam_10", "cam_2", "cam_0", "cam_1"]
     assert sorted(names, key=_natural_key) == ["cam_0", "cam_1", "cam_2", "cam_10"]
@@ -896,7 +884,7 @@ def test_cameras_sort_naturally() -> None:
 def test_board_rigidity_applies_to_both_board_types() -> None:
     # The former ChArUco opt-out let the BA deform the board (3.7 -> 7.0 mm on a
     # real sweep) and drift the scale; both board types are now constrained.
-    from calibration_service.calibration.extrinsic import _board_rigidity
+    from calibration_service.calibration.extrinsic.bundle import _board_rigidity
 
     charuco = triangulate_groups(_groups(3), POSES)
     assert _board_rigidity(charuco.point_group, charuco.point_corner, BOARD, 800.0) is not None
@@ -923,10 +911,8 @@ def test_rigidity_constraints_reject_corner_ids_outside_the_board() -> None:
 def test_rigidity_constraints_hold_the_board_shape_under_noise() -> None:
     # The claim behind ADR-0044: with noisy observations the free BA deforms the
     # target to absorb residuals; the constrained BA does not.
-    from calibration_service.calibration.extrinsic import (
-        _board_rigidity,
-        rigidity_mm,
-    )
+    from calibration_service.calibration.extrinsic import rigidity_mm
+    from calibration_service.calibration.extrinsic.bundle import _board_rigidity
 
     tri, poses = _marker_triangulation()
     rng = np.random.default_rng(11)
@@ -956,7 +942,8 @@ def test_rigidity_constraints_hold_the_board_shape_under_noise() -> None:
 def test_solve_reports_rigidity_and_reprojection_stays_reprojection_only() -> None:
     # The reported RMSE must remain a pure reprojection number even though the
     # solver minimises reprojection + rigidity (ADR-0044 reporting contract).
-    from calibration_service.calibration.extrinsic import _board_rigidity, rigidity_mm
+    from calibration_service.calibration.extrinsic import rigidity_mm
+    from calibration_service.calibration.extrinsic.bundle import _board_rigidity
 
     tri, poses = _marker_triangulation()
     models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in POSES]
@@ -1001,7 +988,8 @@ def test_bundle_adjust_converges_on_a_real_marker_sweep() -> None:
     # observations, chained init. The former Huber pass crawled to the
     # 1000-evaluation ceiling on it and flagged a sound solve as truncated; the
     # soft_l1 pass at a 1 px scale converges in a few dozen (ADR-0046).
-    from calibration_service.calibration.extrinsic import _board_rigidity, rigidity_mm
+    from calibration_service.calibration.extrinsic import rigidity_mm
+    from calibration_service.calibration.extrinsic.bundle import _board_rigidity
 
     data = np.load(_FIXTURES / "ba_real_marker_sweep.npz")
     order = [str(name) for name in data["camera_order"]]
@@ -1078,17 +1066,17 @@ def test_the_compute_refines_marker_corners_and_counts_refusals_per_camera(
     def refuse(*_args: object, **_kwargs: object) -> BorderRefusal:
         return BorderRefusal.OUTER_EDGE_NOISY
 
-    monkeypatch.setattr("calibration_service.calibration.extrinsic.BoardDetector", spy)
+    monkeypatch.setattr("calibration_service.calibration.extrinsic.sweep.BoardDetector", spy)
     models = {n: CameraModel(name=n, matrix=K, distortions=DIST) for n in ("cam_0", "cam_1")}
     groups = [{"cam_0": 0, "cam_1": 0}, {"cam_0": 2, "cam_1": 2}]
 
-    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    detected = extrinsic.sweep._detect_group_frames(tmp_path, groups, models, marker)
     assert built == [{"border_refine": True}] * 2  # one detector per camera
     assert len(detected.groups) == 2 and detected.attempts == {"cam_0": 2, "cam_1": 2}
     assert detected.refusals == {}
 
     monkeypatch.setattr(detector_module, "refine_marker_corners", refuse)
-    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    detected = extrinsic.sweep._detect_group_frames(tmp_path, groups, models, marker)
     assert detected.groups == []  # every view refused: dropped, not kept with CONTOUR's
     assert detected.attempts == {"cam_0": 2, "cam_1": 2}
     assert detected.refusals == {
@@ -1137,7 +1125,7 @@ def test_the_detection_walk_measures_the_board_speed(tmp_path: Path) -> None:
         stamps[name] = [round(t, 6) for t in times]
         (tmp_path / f"{name}.timestamps").write_text("".join(f"{t:.6f}\n" for t in times))
     groups = [{"cam_0": 0, "cam_1": 0}, {"cam_0": 5, "cam_1": 5}, {"cam_0": 9, "cam_1": 11}]
-    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    detected = extrinsic.sweep._detect_group_frames(tmp_path, groups, models, marker)
     assert len(detected.groups) == 3
     for k, group in enumerate(groups):
         assert set(detected.motions[k]) == set(detected.groups[k]) == {"cam_0", "cam_1"}
@@ -1176,7 +1164,7 @@ def test_the_motion_gate_drops_a_group_that_moved_between_captures(
 ) -> None:
     groups = _sweep_on_disk(tmp_path, 6)
     monkeypatch.setattr(
-        "calibration_service.calibration.extrinsic._detect_group_frames",
+        "calibration_service.calibration.extrinsic.pipeline._detect_group_frames",
         lambda *_args: _detected_with_one_moving_group(groups),
     )
     models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in POSES]
@@ -1202,9 +1190,11 @@ def test_a_gate_that_leaves_no_solvable_array_falls_back_without_it(
 
     groups = _sweep_on_disk(tmp_path, 6)
     monkeypatch.setattr(
-        extrinsic, "_detect_group_frames", lambda *_args: _detected_with_one_moving_group(groups)
+        extrinsic.pipeline,
+        "_detect_group_frames",
+        lambda *_args: _detected_with_one_moving_group(groups),
     )
-    solve = extrinsic._solve_groups
+    solve = extrinsic.pipeline._solve_groups
     sizes: list[int] = []
 
     def flaky(
@@ -1215,7 +1205,7 @@ def test_a_gate_that_leaves_no_solvable_array_falls_back_without_it(
             raise ValueError("no camera pair shares >= 3 board views")
         return solve(detections, *args, **kwargs)  # type: ignore[arg-type]
 
-    monkeypatch.setattr(extrinsic, "_solve_groups", flaky)
+    monkeypatch.setattr(extrinsic.pipeline, "_solve_groups", flaky)
     models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in POSES]
     with caplog.at_level("WARNING"):
         result, _ = compute_extrinsic_from_sweep(
@@ -1237,7 +1227,7 @@ def test_a_gate_that_leaves_no_solvable_array_falls_back_without_it(
 def test_the_motion_gate_keeps_a_quarter_of_the_group_budget() -> None:
     # Five of six groups moved: with a budget of 8, the stillest moving one tops the
     # single still group up to the guaranteed quarter (2).
-    from calibration_service.calibration.extrinsic import _motion_gate
+    from calibration_service.calibration.extrinsic.sweep import _motion_gate
     from calibration_service.calibration.motion import MemberMotion
 
     groups = _groups(6)
