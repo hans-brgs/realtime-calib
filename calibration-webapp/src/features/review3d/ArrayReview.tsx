@@ -4,6 +4,7 @@ import { ActionIcon, Box, Button, Group, Slider, Text } from '@mantine/core';
 import {
   IconAdjustments,
   IconCrosshair,
+  IconMapPin,
   IconPlayerPauseFilled,
   IconPlayerPlayFilled,
   IconWand,
@@ -12,6 +13,7 @@ import {
 import { useEffect, useState } from 'react';
 
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
+import { ReferenceAlignModal } from '@/features/review3d/ReferenceAlignModal';
 import {
   type ExtrinsicResultPayload,
   minimizeExtrinsic,
@@ -255,6 +257,7 @@ export function ArrayReview({
   // they stay pinned open, where the space is free.
   const compact = useCompactLayout();
   const [controlsOpen, setControlsOpen] = useState(false);
+  const [referenceOpen, setReferenceOpen] = useState(false);
   const showControls = !compact || controlsOpen;
   // Roomier hit targets once the panel is a deliberate touch surface (ADR-0041).
   const controlSize = compact ? 'sm' : 'compact-xs';
@@ -326,6 +329,11 @@ export function ArrayReview({
         flexDirection: 'column',
       }}
     >
+      <ReferenceAlignModal
+        opened={referenceOpen}
+        onClose={() => setReferenceOpen(false)}
+        onResult={onResult}
+      />
       {/* overflow hidden: a label whose 3D anchor projects outside the view is an
           absolutely-positioned DOM node, not a canvas pixel — unclipped it paints
           over whatever surrounds the scene. Radius matches the canvas corner. */}
@@ -448,6 +456,18 @@ export function ArrayReview({
               onClick={() => void mutate(() => minimizeExtrinsic(), true)}
             >
               Minimize (re-BA)
+            </Button>
+            {/* Re-align on a previous calibration of the room (ADR-0061). */}
+            <Button
+              size={controlSize}
+              fullWidth
+              mt={6}
+              variant="default"
+              leftSection={<IconMapPin size={13} />}
+              disabled={busy}
+              onClick={() => setReferenceOpen(true)}
+            >
+              {result.alignment ? 'Reference ✓' : 'Align on reference'}
             </Button>
             {notice && (
               <Text fz="0.6rem" c="teal.4" mt={4}>

@@ -53,13 +53,14 @@ _SOLVER_UP = np.array([0.0, -1.0, 0.0])
 class WorldFrame:
     """Where the exported world comes from (ADR-0057)."""
 
-    frame: str  # "target" (framed on a group's board) | "anchor_camera" | "unknown"
+    frame: str  # "target" | "reference" (re-aligned, ADR-0061) | "anchor_camera" | "unknown"
     origin: str  # human-readable
     up: str | None  # "y" when asserted (see world_frame), else None
     group: int | None = None  # the framed group
     tilt_deg: float | None = None  # the framed target's printed face against the up axis
     below: tuple[str, ...] = ()  # cameras under the framed target, when it is level
     target_offset_m: float | None = None  # the framed target's origin point off the origin
+    alignment: dict[str, Any] | None = None  # the applied re-alignment (ADR-0061)
 
     @property
     def level(self) -> bool:
@@ -76,37 +77,55 @@ def world_frame(result: ExtrinsicResult | None, board: CalibrationBoard, anchor:
     up and every optical centre stands above it. The printed face is the corner order's
     normal for a single marker, its opposite for a ChArUco (``quad_origin_transform``).
     A Minimize refits the target, so its origin point can drift off the world's origin:
-    ``target_offset_m`` reports by how much.
+    ``target_offset_m`` reports by how much. A world re-aligned on a reference
+    (ADR-0061) takes its origin from it; the framed target still says whether it is level.
     """
     if result is None:
         return WorldFrame("unknown", "unknown: no readable extrinsic result", None)
     centres = camera_centres(result)
     if result.framed_group is None:
         centre = centres.get(anchor)
+        if result.alignment is not None:
+            name = result.alignment.get("reference")
+            return WorldFrame(
+                "reference", f"origin of the reference {name}", None, alignment=result.alignment
+            )
         if centre is None or float(np.linalg.norm(centre)) > _AT_ORIGIN:
             return WorldFrame("unknown", f"unknown: {anchor} is not at the origin", None)
         return WorldFrame("anchor_camera", f"optical centre of {anchor}", None)
     group = result.framed_group
     charuco = board.board_type is BoardType.CHARUCO
-    if charuco:
+    if result.alignment is not None:
+        frame = "reference"
+        origin = f"origin of the reference {result.alignment.get('reference')}"
+        if result.alignment.get("mode") == "floor":
+            origin += f", on the floor of the target of group {group}"
+    elif charuco:
+        frame = "target"
         origin = f"first chessboard corner of the ChArUco of group {group}, as framed"
     else:
+        frame = "target"
         origin = f"centre of the marker of group {group}, as framed"
     quad = result.board_quads[group] if group < len(result.board_quads) else None
     if quad is None:
-        return WorldFrame("target", origin, None, group)
+        return WorldFrame(frame, origin, None, group, alignment=result.alignment)
     corners = np.asarray(quad, np.float64)
     point = corners[0] if charuco else corners.mean(axis=0)
     normal = np.cross(corners[1] - corners[0], corners[3] - corners[0])
     face = (-1.0 if charuco else 1.0) * normal / np.linalg.norm(normal)
     tilt = float(np.degrees(np.arccos(np.clip(face @ _SOLVER_UP, -1.0, 1.0))))
-    offset = float(np.linalg.norm(point)) * board_unit_mm(board) / 1000.0
-    partial = WorldFrame("target", origin, None, group, tilt, (), offset)
+    # Off the origin by a refit: meaningless once the world is the reference's.
+    offset = (
+        None
+        if result.alignment is not None
+        else float(np.linalg.norm(point)) * board_unit_mm(board) / 1000.0
+    )
+    partial = WorldFrame(frame, origin, None, group, tilt, (), offset, result.alignment)
     if not partial.level:
         return partial
     below = tuple(sorted(n for n, c in centres.items() if float((c - point) @ _SOLVER_UP) <= 0))
     up = "y" if tilt <= _LEVEL_TOLERANCE_DEG and not below else None
-    return WorldFrame("target", origin, up, group, tilt, below, offset)
+    return WorldFrame(frame, origin, up, group, tilt, below, offset, result.alignment)
 
 
 def _service_version() -> str:
@@ -150,6 +169,8 @@ def opencv_document(
         frame["up"] = world.up
     if world.target_offset_m is not None:
         frame["target_offset_m"] = world.target_offset_m
+    if world.alignment is not None:
+        frame["alignment"] = world.alignment
     return {
         "format": FORMAT,
         "version": VERSION,

@@ -8,6 +8,7 @@ export const CHECK_LABELS: Record<string, string> = {
   target_rigidity: 'Target rigidity',
   frame: 'World frame',
   cameras_above_floor: 'Cameras above the floor',
+  reference: 'Reference calibration',
 };
 
 // The Export screen's section caption, shared with its checks panel.
@@ -38,6 +39,8 @@ export function formatCheckValue(check: ExportCheck): string {
       return `${(check.value * 100).toFixed(2)} % of its size`;
     case 'cameras_above_floor':
       return check.value > 0 ? `${check.value} below` : '';
+    case 'reference':
+      return `residual ${(check.value * 100).toFixed(1)} cm`;
     case 'frame': {
       // The framed target's printed face against the up axis: only a tilt is news.
       const tilt = Math.min(check.value, 180 - check.value);
