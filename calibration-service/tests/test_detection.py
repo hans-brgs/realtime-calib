@@ -216,6 +216,21 @@ def test_single_marker_path_uses_contour_refinement() -> None:
     )
 
 
+def test_detection_thresholds_at_two_window_sizes() -> None:
+    # ADR-0058: windows of 3 and 23 px (step 20), on both paths and their detectors.
+    for params in (_detector_params(), _detector_params(single_marker=True)):
+        assert (params.adaptiveThreshWinSizeMin, params.adaptiveThreshWinSizeMax) == (3, 23)
+        assert params.adaptiveThreshWinSizeStep == 20
+    marker_board = CalibrationBoard(
+        board_type=BoardType.ARUCO, dictionary="DICT_4X4_100", columns=1, rows=1, marker_id=8
+    )
+    marker = BoardDetector(marker_board)
+    charuco = BoardDetector(_charuco(dictionary="DICT_4X4_100"))
+    assert marker._aruco is not None and charuco._charuco is not None
+    assert marker._aruco.getDetectorParameters().adaptiveThreshWinSizeStep == 20
+    assert charuco._charuco.getDetectorParameters().adaptiveThreshWinSizeStep == 20
+
+
 def test_contour_refinement_cuts_corner_jitter_on_subpixel_offsets() -> None:
     # The measurable claim behind ADR-0043, on synthetic ground truth: edge-line
     # fitting places corners far more REPEATABLY than the polygon vertices of a
@@ -230,11 +245,11 @@ _FIXTURES = Path(__file__).parent / "fixtures"
 
 
 def _contour_assert_patch() -> NDArray[np.uint8]:
-    """A ~7 px false-positive marker (id 17) that makes OpenCV 4.13's CONTOUR
-    refinement assert (``nContours.size() >= 2``).
+    """A ~6 px false-positive marker (id 17) that makes OpenCV 4.13's CONTOUR
+    refinement assert (``nContours.size() >= 2``) at the production parameters.
 
-    Provenance: session calib-07-13-2026, cam_2, frame 601 (a frame without the
-    target), cropped with a 16 px margin around the false positive (38x39 px).
+    Provenance: the real-session crash, calib-07-13-2026, cam_0, frame 790, cropped
+    with a 16 px margin around the false positive (42x43 px).
     """
     patch = cv2.imread(str(_FIXTURES / "aruco_contour_assert.png"), cv2.IMREAD_GRAYSCALE)
     assert patch is not None
@@ -274,7 +289,7 @@ def test_contour_refinement_failure_without_target_is_no_detection(
     marker_board = CalibrationBoard(
         board_type=BoardType.ARUCO, dictionary="DICT_4X4_100", columns=1, rows=1, marker_id=8
     )
-    # The provenance frame itself (cam_2, frame 601) had no target: nothing to keep.
+    # The false positive alone, without the target: nothing to keep.
     canvas = np.full((200, 200), 255, np.uint8)
     patch = _contour_assert_patch()
     canvas[50 : 50 + patch.shape[0], 50 : 50 + patch.shape[1]] = patch
