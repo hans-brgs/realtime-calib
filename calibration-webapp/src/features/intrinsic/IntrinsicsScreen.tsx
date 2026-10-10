@@ -982,6 +982,7 @@ export function IntrinsicsScreen() {
       style={{ display: 'flex', flexDirection: 'column' }}
     >
       <ScreenHeader
+        panelToggle
         title="Intrinsics"
         subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
       />

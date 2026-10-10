@@ -2,6 +2,7 @@ import { Box, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
+import { useSidePanel } from '@/components/layout/useSidePanel';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -46,6 +47,7 @@ export function CaptureWizardLayout({
   compactHero = 'frame',
 }: CaptureWizardLayoutProps) {
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
   return (
     <>
       {top}
@@ -56,8 +58,10 @@ export function CaptureWizardLayout({
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
-          gap: 22,
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
+          // Folded: a second row under the view for the step's action (below).
+          gridTemplateRows: panelCollapsed ? 'minmax(0, 1fr) auto' : undefined,
+          gap: panelCollapsed ? 12 : 22,
         }}
       >
         <Box
@@ -114,7 +118,7 @@ export function CaptureWizardLayout({
             // Locked: the panel is its own scroll container. Flow: the PAGE scrolls,
             // so scrolling here too would trap the settings inside a short box.
             overflowY: compact ? 'visible' : 'auto',
-            display: 'flex',
+            display: panelCollapsed ? 'none' : 'flex',
             flexDirection: 'column',
           }}
         >
@@ -160,9 +164,25 @@ export function CaptureWizardLayout({
                 {message}
               </Text>
             )}
-            {action}
+            {!panelCollapsed && action}
           </Box>
         </Paper>
+
+        {/* Folded panel: the step's action (Start/Stop REC, Compute, Validate…) and its
+            error stay reachable under the view, at the panel's width — folding is for
+            a wider view while recording, not for losing the Stop button (ADR-0041 §5:
+            the action stays reachable). Rendered here instead of in the hidden panel,
+            never in both. */}
+        {panelCollapsed && (
+          <Box style={{ justifySelf: 'end', width: 'clamp(280px, 26%, 360px)' }}>
+            {message && (
+              <Text fz="0.72rem" c="var(--rc-error)" mb="xs">
+                {message}
+              </Text>
+            )}
+            {action}
+          </Box>
+        )}
       </Box>
     </>
   );
