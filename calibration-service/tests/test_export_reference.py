@@ -287,6 +287,8 @@ def test_unsupported_references_are_refused(document: Any, message: str) -> None
 def _client(tmp_path: Path) -> tuple[SessionManager, TestClient, ExtrinsicResult]:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
+    charuco = {"board_type": "charuco", "dictionary": "DICT_5X5_100"}
+    client.post("/board", json={"target": "intrinsic", "board": charuco})
     board = {"board_type": "aruco", "dictionary": "DICT_4X4_100"}
     assert client.post("/board", json={"target": "extrinsic", "board": board}).status_code == 200
     result = _result()

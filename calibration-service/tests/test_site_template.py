@@ -259,6 +259,8 @@ def test_the_routes_store_the_template_and_checks_carry_its_footprint(tmp_path: 
     digest = hashlib.sha256((tmp_path / "site_template.json").read_bytes()).hexdigest()
     assert stored.json()["sha256"] == digest
     assert client.get("/settings/site-template").json()["template"]["name"] == "dev room"
+    charuco = {"board_type": "charuco", "dictionary": "DICT_5X5_100"}
+    client.post("/board", json={"target": "intrinsic", "board": charuco})
     board = {"board_type": "aruco", "dictionary": "DICT_4X4_100"}
     client.post("/board", json={"target": "extrinsic", "board": board})
     session, result = _rig()
@@ -375,6 +377,8 @@ def test_more_inconsistent_templates_are_refused(change: dict[str, Any], message
 def test_an_unreadable_template_is_not_an_absent_one(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
+    charuco = {"board_type": "charuco", "dictionary": "DICT_5X5_100"}
+    client.post("/board", json={"target": "intrinsic", "board": charuco})
     board = {"board_type": "aruco", "dictionary": "DICT_4X4_100"}
     client.post("/board", json={"target": "extrinsic", "board": board})
     session, result = _rig()

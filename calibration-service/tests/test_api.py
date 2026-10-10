@@ -836,6 +836,7 @@ def test_orient_persists_the_framed_group_marker(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 8, "rows": 5}
+    client.post("/board", json={"target": "intrinsic", "board": board})
     client.post("/board", json={"target": "extrinsic", "board": board})
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
@@ -878,6 +879,8 @@ def test_set_frame_on_a_steep_marker_keeps_its_own_normal_up(tmp_path: Path) -> 
     # recorded marker sweeps). The corner order decides up, not the centroid.
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
+    charuco = {"board_type": "charuco", "dictionary": "DICT_5X5_100"}
+    client.post("/board", json={"target": "intrinsic", "board": charuco})
     board = {"board_type": "aruco", "dictionary": "DICT_4X4_100"}
     assert client.post("/board", json={"target": "extrinsic", "board": board}).status_code == 200
     directory = manager.extrinsic_dir()
