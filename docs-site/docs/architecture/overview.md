@@ -1,6 +1,6 @@
 ---
 sidebar_position: 1
-description: "How realtime-calib is built: a Python calibration service, a React web app, LiveKit WebRTC streaming and Caddy TLS, orchestrated with Docker Compose."
+description: "How realtime-calib is built: a Python calibration service, a React web app, LiveKit WebRTC streaming and a Caddy reverse proxy, orchestrated with Docker Compose."
 keywords: [multi-camera architecture, LiveKit, WebRTC camera streaming, Docker Compose]
 ---
 
@@ -45,7 +45,7 @@ graph LR
     end
 
     subgraph host [Calibration server — Docker Compose]
-        CADDY[Caddy<br/>TLS · single entry point :443]
+        CADDY[Caddy<br/>single entry point :80]
         CS[calibration-service<br/>Python · FastAPI · OpenCV]
         TS[livekit-token-server<br/>JWT issuance]
         LK[LiveKit SFU<br/>WebRTC]
@@ -53,9 +53,9 @@ graph LR
     end
 
     CAMS[USB cameras] -->|V4L2| CS
-    WA -->|"HTTPS /api (commands)"| CADDY
-    WA -->|"wss /livekit (signaling)"| CADDY
-    WA -->|"HTTPS /token"| CADDY
+    WA -->|"HTTP /api (commands)"| CADDY
+    WA -->|"ws /livekit (signaling)"| CADDY
+    WA -->|"HTTP /token"| CADDY
     CADDY -->|serves static app| WA
     CADDY --> CS
     CADDY --> TS
@@ -70,14 +70,10 @@ graph LR
 | `calibration-service` | Capture, board detection, overlay burn-in, LiveKit publishing, calibration solves (intrinsic / extrinsic / bundle adjustment), HTTP API, session state | Python 3.14, FastAPI + asyncio, OpenCV, SciPy, LiveKit SDK |
 | `calibration-webapp` | Operator wizard + 3D review, served as static files by Caddy | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei |
 | `livekit-token-server` | Issues subscribe-only LiveKit JWTs to the web app | Python (Flask) |
-| `caddy` | Reverse proxy, TLS termination, static serving — the **only host-exposed entry point** | Caddy v2 |
+| `caddy` | Reverse proxy and static serving, plain HTTP — the **only host-exposed entry point** | Caddy v2 |
 | `livekit` | WebRTC SFU carrying the camera streams and the telemetry data channel | upstream `livekit/livekit-server` |
 
-It is a **single stack**: Caddy (TLS) is the always-on entry point — tablet via
-`https://<HOST_IP>`, same-machine via `https://localhost`. Caddy routes `/api` to
-the calibration service, `/token` to the token server, `/livekit` to LiveKit
-signaling, and serves the web app for everything else. Only the WebRTC **media**
-flows outside Caddy, directly between browser and SFU.
+It is a **single stack**: Caddy is the always-on entry point, in plain HTTP on the local network — tablet via `http://<HOST_IP>`, same-machine via `http://localhost`. No certificate is involved: the web app only receives video and data, which browsers allow without a secure context. Caddy routes `/api` to the calibration service, `/token` to the token server, `/livekit` to LiveKit signaling, and serves the web app for everything else. Only the WebRTC **media** flows outside Caddy, directly between browser and SFU.
 
 ## Two channels: commands vs. real time
 

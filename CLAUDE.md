@@ -20,9 +20,9 @@ Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **table
 | `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.14, `uv`, asyncio + threads (ADR-0050), OpenCV, scipy, livekit |
 | `calibration-webapp/` | Wizard opérateur + vue 3D | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei, React Compiler, yarn |
 | `livekit-token-server/` | Émission de tokens JWT LiveKit | Python (Flask) |
-| `caddy/` | Reverse proxy + terminaison TLS + statique | Caddy v2 |
+| `caddy/` | Reverse proxy + statique (HTTP simple) | Caddy v2 |
 
-L'orchestration est dans `docker-compose.yml`, qui ajoute aussi `livekit` (SFU WebRTC, image upstream `livekit/livekit-server`). **Stack unique** : Caddy (TLS) est le point d'entrée **obligatoire et toujours présent** ; l'accès same-machine se fait via `https://localhost`, l'accès tablette via `https://<HOST_IP>` (un seul certificat mkcert couvre les deux). Cf. ADR-0014 (supersede ADR-0006).
+L'orchestration est dans `docker-compose.yml`, qui ajoute aussi `livekit` (SFU WebRTC, image upstream `livekit/livekit-server`). **Stack unique** : Caddy est le point d'entrée **obligatoire et toujours présent**, en HTTP simple, sans certificat ; l'accès same-machine se fait via `http://localhost`, l'accès tablette via `http://<HOST_IP>`. Cf. ADR-0063 (supersède ADR-0014) : la webapp ne fait que recevoir vidéo et données, ce qui n'exige pas de contexte sécurisé ; une fonction qui en exigerait un côté tablette (publier une caméra du navigateur, presse-papier, E2EE ou RPC LiveKit) ramènerait au TLS.
 
 ## 📃 Où est la documentation ?
 
@@ -43,8 +43,8 @@ Avant toute modification structurante (interface partagée, format de message in
 ## ⚡ Commandes essentielles
 
 ```bash
-# Démarrage complet — stack unique (Caddy + TLS, toujours présent)
-# Accès tablette : https://<HOST_IP>  ·  same-machine : https://localhost
+# Démarrage complet — stack unique (Caddy en HTTP, toujours présent)
+# Accès tablette : http://<HOST_IP>  ·  same-machine : http://localhost
 docker compose up --build
 
 # Redémarrage / logs d'un service
@@ -68,7 +68,7 @@ Pas de Makefile ni de justfile — les commandes `docker compose` sont la source
 
 - **Tous les secrets dans `.env`** (gitignored). Ne JAMAIS committer `.env`, `.env.*`, ni exposer une valeur sensible (clés LiveKit, etc.) dans le code.
 - Toute valeur qui ressemble à un secret vient d'une variable d'environnement, pas d'une constante en dur.
-- Certificats TLS dans `caddy/certs/` (gitignored).
+- Plus de certificat TLS depuis ADR-0063 (`caddy/certs/`, gitignoré, n'est plus monté).
 
 ## 🌐 Conventions cross-services
 

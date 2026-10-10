@@ -38,46 +38,24 @@ https://github.com/user-attachments/assets/757728c1-5a39-4f21-b288-5ca7d26c1a18
 | `calibration-service/` | Capture + board detection + burn-in + LiveKit publishing + computation + HTTP API + session state | Python, `uv`, asyncio + threads, OpenCV, scipy, livekit |
 | `calibration-webapp/` | Operator wizard + 3D view | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei |
 | `livekit-token-server/` | LiveKit JWT token issuance | Python (Flask) |
-| `caddy/` | Reverse proxy + TLS termination + static serving | Caddy v2 |
+| `caddy/` | Reverse proxy + static serving (plain HTTP) | Caddy v2 |
 
-Orchestration lives in `docker-compose.yml` (which also adds `livekit`, the
-upstream WebRTC SFU). **Single stack**: Caddy (TLS) is the mandatory, always-on
-entry point — tablet access via `https://<HOST_IP>`, same-machine via
-`https://localhost` (one mkcert certificate covers both). See ADR-0014.
+Orchestration lives in `docker-compose.yml` (which also adds `livekit`, the upstream WebRTC SFU). **Single stack**: Caddy is the mandatory, always-on entry point, in plain HTTP on the LAN — tablet access via `http://<HOST_IP>`, same-machine via `http://localhost`. No certificate to generate or trust: the webapp only receives video and data, which needs no secure context. See ADR-0063.
 
 ## Quick start
 
 ```bash
-# Prerequisites: Docker, mkcert (LAN TLS), uv
+# Prerequisites: Docker, uv
 cp .env.example .env          # fill in HOST_IP and the LiveKit keys
 
-# Single stack (Caddy + TLS, always on)
-# Tablet: https://<HOST_IP>  ·  same-machine: https://localhost
+# Single stack (Caddy, plain HTTP, always on)
+# Tablet: http://<HOST_IP>  ·  same-machine: http://localhost
 docker compose up --build
 ```
 
-Then open the webapp (`https://<HOST_IP>` on the tablet, or `https://localhost`).
+Then open the webapp (`http://<HOST_IP>` on the tablet, or `http://localhost`).
 
-### First access from a tablet or phone: "Your connection is not private"
-
-The stack serves HTTPS over your LAN with a locally-generated certificate
-(mkcert). The **host machine** trusts it, but **other devices** don't know that
-local certificate authority yet — so on first access from a tablet or phone the
-browser warns: **"Your connection is not private"**
-(`NET::ERR_CERT_AUTHORITY_INVALID`).
-
-This is expected and safe on your own network: the connection is still
-encrypted; the warning is about *who issued* the certificate, not a real
-interception. To continue:
-
-- **Chrome / Edge / Android:** tap **Advanced**, then **Proceed to `<HOST_IP>` (unsafe)**.
-- **Safari / iOS:** tap **Show Details**, then **visit this website**.
-
-To remove the warning for good, install the mkcert root CA on the device.
-
-<p align="center">
-  <img src="https://raw.githubusercontent.com/hans-brgs/realtime-calib/main/docs-site/static/img/cert-warning.gif" alt="Bypassing the browser TLS warning: Advanced, then Proceed" width="480">
-</p>
+The export preview's **copy** button needs a secure context: it works at `http://localhost`, not from another device (download the files instead).
 
 ## Documentation
 

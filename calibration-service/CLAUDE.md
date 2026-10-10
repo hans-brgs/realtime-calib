@@ -157,7 +157,7 @@ Configuré via variables d'environnement (`.env` racine, propagé par `docker-co
 - **Caméras** : énumération dynamique (pas de liste statique façon samvision) ; le backend et les contraintes de format/fps relèvent des réglages et de `TUNING` (ADR-0036), pas de variables d'environnement.
 - **Dossier de calibration** : `CALIB_SESSIONS_DIR` (racine des dossiers de session, source de vérité — ADR-0011).
 - **LiveKit** : `LIVEKIT_URL`, `LIVEKIT_API_KEY`, `LIVEKIT_API_SECRET`, `LIVEKIT_ROOM_NAME`.
-- **Déploiement** : stack unique, Caddy (TLS) point d'entrée obligatoire et toujours présent ; same-machine via `https://localhost` (ADR-0014, supersede ADR-0006).
+- **Déploiement** : stack unique, Caddy point d'entrée obligatoire et toujours présent, en HTTP simple ; same-machine via `http://localhost`, tablette via `http://<HOST_IP>` (ADR-0063, qui supersède ADR-0014).
 
 Point d'entrée : `app.py` — long-running, piloté par l'API HTTP (start/stop capture, compute, etc.).
 
