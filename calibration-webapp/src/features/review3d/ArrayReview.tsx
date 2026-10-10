@@ -1,5 +1,5 @@
-import { Bounds, Grid, Html, Line, TrackballControls } from '@react-three/drei';
-import { Canvas } from '@react-three/fiber';
+import { Bounds, Grid, Html, Line, TrackballControls, useBounds } from '@react-three/drei';
+import { Canvas, useThree } from '@react-three/fiber';
 import { DoubleSide } from 'three';
 import { ActionIcon, Box, Button, Group, Slider, Text, Tooltip } from '@mantine/core';
 import {
@@ -231,17 +231,20 @@ function AxisLabel({
 // frame sits at its CENTER (cv2 convention) — anchor the triad on the centroid;
 // a ChArUco board frame originates at its first chessboard corner (c0).
 //
-// The triad is DASHED, pastel and unlabeled: after "Set frame on board" it sits on the
-// world axes, which keep the solid colours and the X/Y/Z letters — the two used to be
-// identical and read as one tangle.
+// The triad is DASHED, pastel and unlabeled, apart from the solid X/Y/Z world axes.
+// It is NOT drawn on the group the world was framed on (`triad` false): there the
+// world axes are that board's frame, with a different axis order (x, normal, board y
+// once laid on the floor), and the two triads overlapped with crossed colours.
 function BoardWithTriad({
   quad,
   m,
   centered,
+  triad,
 }: {
   quad: number[][];
   m: number[][];
   centered: boolean;
+  triad: boolean;
 }) {
   const corners = quad.map((c) => mulMV(m, c as Vec3));
   const x = unit(sub(corners[1], corners[0]));
@@ -259,30 +262,50 @@ function BoardWithTriad({
     <>
       <QuadFace corners={corners} color={BOARD_COLOR} opacity={0.16} />
       <Line points={[...corners, corners[0]]} color={BOARD_COLOR} lineWidth={1.6} />
-      <Line
-        points={[origin, add(origin, scale(x, len))]}
-        color="#fca5a5"
-        lineWidth={1.6}
-        {...dash}
-      />
-      <Line
-        points={[origin, add(origin, scale(y, len))]}
-        color="#86efac"
-        lineWidth={1.6}
-        {...dash}
-      />
-      <Line
-        points={[origin, add(origin, scale(z, len))]}
-        color="#93c5fd"
-        lineWidth={1.6}
-        {...dash}
-      />
+      {triad && (
+        <>
+          <Line
+            points={[origin, add(origin, scale(x, len))]}
+            color="#fca5a5"
+            lineWidth={1.6}
+            {...dash}
+          />
+          <Line
+            points={[origin, add(origin, scale(y, len))]}
+            color="#86efac"
+            lineWidth={1.6}
+            {...dash}
+          />
+          <Line
+            points={[origin, add(origin, scale(z, len))]}
+            color="#93c5fd"
+            lineWidth={1.6}
+            {...dash}
+          />
+        </>
+      )}
     </>
   );
 }
 
-// The world frame: solid axes with X/Y/Z letters, over a floor grid on its XZ plane —
-// the y = 0 floor once the frame is set on a board laid on the ground (ADR-0026).
+// Back to the home view on demand: upright, from the default corner, fitted on the
+// rig. Bounds' own reset keeps the camera's current direction and roll, so after a
+// free tumble "recenter" stayed upside down.
+function HomeView({ trigger, position }: { trigger: number; position: Vec3 }) {
+  const bounds = useBounds();
+  const camera = useThree((state) => state.camera);
+  useEffect(() => {
+    if (trigger === 0) return;
+    camera.up.set(VIEW_UP[0], VIEW_UP[1], VIEW_UP[2]);
+    camera.position.set(position[0], position[1], position[2]);
+    bounds.refresh().clip().fit();
+    // Only on a new request, not when the poses re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [trigger]);
+  return null;
+}
+
+// The world frame: solid axes with X/Y/Z letters.
 function WorldAxes({ size }: { size: number }) {
   const o: Vec3 = [0, 0, 0];
   return (
@@ -439,10 +462,11 @@ export function ArrayReview({
           {/* The view is framed ONCE per solve, on the rig (cameras + world axes):
               no `observe`, which re-framed on every canvas resize (panel or rail
               fold, window) and threw the operator's rotation away. The key re-frames
-              after a reorientation or Minimize, and on "Recenter". The board and the
-              points of the scrubbed group stay out of the fit: the view does not
-              follow the scrubber. */}
-          <Bounds key={`${solveRevision}#${recenters}`} fit clip margin={1.6}>
+              after a reorientation or Minimize; Recenter goes back to the home view.
+              The board and the points of the scrubbed group stay out of the fit: the
+              view does not follow the scrubber. */}
+          <Bounds key={solveRevision} fit clip margin={1.6}>
+            <HomeView trigger={recenters} position={initialCamera} />
             <WorldAxes size={sceneScale * 0.22} />
             {poses.map((pose, i) => (
               <Frustum
@@ -454,23 +478,42 @@ export function ArrayReview({
               />
             ))}
           </Bounds>
-          <Grid
-            infiniteGrid
-            cellSize={gridCell}
-            sectionSize={gridCell * 5}
-            cellThickness={0.6}
-            sectionThickness={1}
-            cellColor="#24242b"
-            sectionColor="#34343d"
-            fadeDistance={sceneScale * 6}
-            fadeStrength={1.5}
-          />
+          {/* Floor grid on the world XZ plane, only once the world is framed on a
+              board (or aligned on a reference): before that the world is the anchor
+              camera's frame and y = 0 a tilted plane through that camera. Faded
+              around the origin (fadeFrom 0), not around the viewer. */}
+          {(result.framed_group != null || result.alignment) && (
+            <Grid
+              args={[2, 2]}
+              infiniteGrid
+              fadeFrom={0}
+              side={DoubleSide}
+              cellSize={gridCell}
+              sectionSize={gridCell * 5}
+              cellThickness={0.6}
+              sectionThickness={1}
+              cellColor="#24242b"
+              sectionColor="#34343d"
+              fadeDistance={sceneScale * 6}
+              fadeStrength={1.5}
+            />
+          )}
           {positions.length > 0 && <GroupPoints positions={positions} size={sceneScale * 0.015} />}
-          {quad && <BoardWithTriad quad={quad} m={VIEW_BASIS} centered={markerBoard} />}
+          {quad && (
+            <BoardWithTriad
+              quad={quad}
+              m={VIEW_BASIS}
+              centered={markerBoard}
+              triad={current !== result.framed_group}
+            />
+          )}
           {/* Trackball, not Orbit: orbit clamps polar to [0, π] (blocks at the
               poles), which fights a reoriented world — free 360° tumbling. Static:
-              no inertia, the view stops where the drag stops (it drifted on). */}
-          <TrackballControls makeDefault noPan rotateSpeed={1.6} staticMoving />
+              no inertia, the view stops where the drag stops (the inertia also
+              re-applied the last delta whenever the pointer paused mid-drag: the
+              "jumps"). Static mode applies a zoom step once instead of ~5x with
+              decay, hence the higher zoom speed. */}
+          <TrackballControls makeDefault noPan rotateSpeed={1.6} zoomSpeed={5} staticMoving />
         </Canvas>
         <Tooltip label="Recenter the view" position="left" withArrow>
           <ActionIcon

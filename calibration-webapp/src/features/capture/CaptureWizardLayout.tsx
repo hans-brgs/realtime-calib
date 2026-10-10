@@ -1,4 +1,4 @@
-import { Box, Group, Paper, Text } from '@mantine/core';
+import { Box, Group, Paper, ScrollArea, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
@@ -60,9 +60,20 @@ export function CaptureWizardLayout({
           <Box mb="md">{stepper}</Box>
         </>
       ) : (
-        <Group wrap="nowrap" gap="md" mb="md" align="center">
-          {top && <Box style={{ flex: 'none', maxWidth: '50%', overflowX: 'auto' }}>{top}</Box>}
-          <Box style={{ flex: 1, minWidth: 0 }}>{stepper}</Box>
+        // Wraps when the row is too narrow for both (many cameras, ~1000px): the
+        // stepper then takes its own line instead of ellipsizing its labels. The tabs
+        // scroll inside an overlay scrollbar, which takes no height.
+        <Group wrap="wrap" gap="md" mb="md" align="center">
+          {top && (
+            <ScrollArea
+              type="hover"
+              scrollbarSize={4}
+              style={{ flex: '0 1 auto', maxWidth: '100%' }}
+            >
+              {top}
+            </ScrollArea>
+          )}
+          <Box style={{ flex: '1 1 440px', minWidth: 0 }}>{stepper}</Box>
         </Group>
       )}
 
