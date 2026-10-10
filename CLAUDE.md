@@ -9,7 +9,7 @@
 
 Application **locale** de calibration multi-caméras **temps-réel** : intrinsèque (focale, distorsion) + extrinsèque (position/orientation 6-DoF) d'un ensemble de caméras USB, avec feedback live et export de fichiers **compatibles Caliscope**.
 
-Inspirée de [Caliscope](https://github.com/mprib/caliscope) (logique de calibration, réimplémentée — pas une dépendance) et de l'écosystème vision-services Inmersiv (architecture temps-réel : LiveKit, webapp React/R3F, multiprocessing façon samvision).
+Inspirée de [Caliscope](https://github.com/mprib/caliscope) (logique de calibration, réimplémentée — pas une dépendance) et de l'écosystème vision-services Inmersiv (architecture temps-réel : LiveKit, webapp React/R3F).
 
 Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **tablette**, mobile), et déroule un wizard : config caméras → board(s) → calibration intrinsèque caméra par caméra → calibration extrinsèque → revue 3D → export.
 
@@ -17,7 +17,7 @@ Un opérateur lance le projet (Docker / `uv`), ouvre la webapp (desktop, **table
 
 | Service | Rôle | Stack |
 | --- | --- | --- |
-| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.14, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
+| `calibration-service/` | Capture + détection board + burn-in + publication LiveKit + calcul (intrinsèque/extrinsèque/BA) + API HTTP + état session | Python 3.14, `uv`, asyncio + threads (ADR-0050), OpenCV, scipy, livekit |
 | `calibration-webapp/` | Wizard opérateur + vue 3D | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei, React Compiler, yarn |
 | `livekit-token-server/` | Émission de tokens JWT LiveKit | Python (Flask) |
 | `caddy/` | Reverse proxy + terminaison TLS + statique | Caddy v2 |
@@ -93,7 +93,7 @@ Pour les **entités** (structures partagées entre services, interfaces, modèle
 
 ### Plan-review-implement
 
-Pour toute tâche > 30 min **OU** tout changement touchant le temps-réel (multiprocessing, sync inter-caméras, sérialisation, publication LiveKit, bundle adjustment) :
+Pour toute tâche > 30 min **OU** tout changement touchant le temps-réel (threads de capture et concurrence, sync inter-caméras, sérialisation, publication LiveKit, bundle adjustment) :
 
 1. Proposer un **plan** étape par étape (pas de code).
 2. L'utilisateur challenge / corrige.
@@ -144,11 +144,11 @@ Caliscope (BSD-2-Clause) est la **référence conceptuelle** pour la logique de 
 - Le RMSE annoncé est euclidien, **post-filtre**, et exprimé à la résolution des vidéos fournies — d'où l'importance d'ADR-0042 pour toute comparaison.
 - Dépendances notables : `av` (PyAV) pour le décodage, `pandas` pour les observations.
 
-Communs aux deux époques : OpenCV mainline ≥ 4.7 (ArUco/ChArUco intégrés), API `CharucoDetector` (≥ 4.8) ; format de sortie TOML par caméra (`port`, `size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation` en **mètres**, `error`, `grid_count` = nombre de **vues**). Cf. ADR-0002 et spec `camera-array-config`.
+Communs aux deux époques : OpenCV mainline ≥ 4.7 (ArUco/ChArUco intégrés), API `CharucoDetector` (≥ 4.8) ; format de sortie TOML par caméra (`size`, `matrix`, `distortions`, `rotation` Rodrigues, `translation` en **mètres**, `error`, `grid_count` = nombre de **vues**). **La clé de caméra, elle, diffère** : ≤ 0.5.4 lit des tables `[cam_N]` avec un champ `port` et un `rotation_count` obligatoire (`Configurator.get_configured_camera_data`, reproduit dans `calibration-service/tests/test_export.py`) ; v0.11.5 écrit `[cameras.<id>]` avec `cam_id` et `rotation_count`, sans `port` (`cameras/camera_array.py:444-489`) — d'où les deux cibles d'export, Caliscope natif v0.11.5 et aniposelib (ADR-0047). Cf. ADR-0002 et spec `camera-array-config`.
 
 **Toujours grounder les claims sur la doc/le code Caliscope plutôt que sur des suppositions — et dire de quelle version on parle.**
 
 ## 🪜 Sub-CLAUDE.md
 
-- `calibration-service/CLAUDE.md` — Python, multiprocessing, temps-réel, OpenCV/scipy, calibration.
+- `calibration-service/CLAUDE.md` — Python, concurrence (asyncio et threads), temps-réel, OpenCV/scipy, calibration.
 - `calibration-webapp/CLAUDE.md` — React + Compiler, R3F/drei, Redux Toolkit, wizard FSM, responsive/tactile.

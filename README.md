@@ -29,15 +29,13 @@ https://github.com/user-attachments/assets/757728c1-5a39-4f21-b288-5ca7d26c1a18
 > If the video doesn't play inline on GitHub, watch it on the
 > [project site](https://realtime-calib.hans-brgs.dev).
 
-> Inspired by [Caliscope](https://github.com/mprib/caliscope) (calibration logic,
-> reimplemented — not a dependency) and the Inmersiv vision-services ecosystem
-> (real-time architecture: LiveKit, multiprocessing, React/R3F webapp).
+> Inspired by [Caliscope](https://github.com/mprib/caliscope) (calibration logic, reimplemented — not a dependency) and the Inmersiv vision-services ecosystem (real-time architecture: LiveKit, React/R3F webapp).
 
 ## Services
 
 | Service | Role | Stack |
 | --- | --- | --- |
-| `calibration-service/` | Capture + board detection + burn-in + LiveKit publishing + computation + HTTP API + session state | Python, `uv`, multiprocessing, asyncio, OpenCV, scipy, livekit |
+| `calibration-service/` | Capture + board detection + burn-in + LiveKit publishing + computation + HTTP API + session state | Python, `uv`, asyncio + threads, OpenCV, scipy, livekit |
 | `calibration-webapp/` | Operator wizard + 3D view | React, TypeScript, Vite, Mantine, Redux Toolkit, R3F/drei |
 | `livekit-token-server/` | LiveKit JWT token issuance | Python (Flask) |
 | `caddy/` | Reverse proxy + TLS termination + static serving | Caddy v2 |
