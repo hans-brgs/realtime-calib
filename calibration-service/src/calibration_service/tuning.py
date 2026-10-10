@@ -77,6 +77,15 @@ class PipelineTuning:
     max_groups_marker: int = 240
     max_groups_bounds: tuple[int, int] = (5, 960)
     max_spread_ms_bounds: tuple[float, float] = (1.0, 100.0)
+    # Board-motion gate (ADR-0056): a group whose worst member sits more than this
+    # many native pixels off the group instant (board image speed x capture offset)
+    # is not used. 0.25 px wins more on the held-out views, but 0.5 px is the better
+    # one against a synthetic ground truth (-36 % camera-centre error against -18 %
+    # with host stamps, 2.15 against 3.31 mm with kernel ones, where 0.25 px fails 2
+    # seeds in 20), and on calib-07-13-2026's tightest groups 0.25 px gains nothing.
+    # Tuned on 1080p sweeps only. API-only, like min_shared.
+    extrinsic_max_motion_px: float = 0.5
+    extrinsic_max_motion_px_bounds: tuple[float, float] = (0.1, 5.0)
     # Minimum shared board views per camera pair (API-only since ADR-0036; the
     # UI control was removed — possible reintegration later under an Advanced
     # section if the rescue scenario proves common).

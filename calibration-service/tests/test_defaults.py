@@ -180,15 +180,23 @@ def test_extrinsic_compute_resolves_board_type_defaults(
     assert captured["max_groups"] == TUNING.max_groups_charuco
     assert captured["min_shared"] == TUNING.min_shared
     assert captured["max_spread_s"] is None
+    assert captured["max_motion_px"] == TUNING.extrinsic_max_motion_px  # gate on (ADR-0056)
 
     # Explicit knobs are honoured verbatim (incl. the ms -> s conversion).
     captured.clear()
-    body = {"stride": 4, "max_groups": 120, "max_spread_ms": 12.0, "min_shared": 3}
+    body = {
+        "stride": 4,
+        "max_groups": 120,
+        "max_spread_ms": 12.0,
+        "min_shared": 3,
+        "max_motion_px": 1.5,
+    }
     assert client.post("/extrinsic/compute", json=body).status_code == 200
     assert captured["stride"] == 4
     assert captured["max_groups"] == 120
     assert captured["min_shared"] == 3
     assert captured["max_spread_s"] == pytest.approx(0.012)
+    assert captured["max_motion_px"] == 1.5
 
 
 def test_bounds_reject_out_of_range_values(tmp_path: Path) -> None:
@@ -223,6 +231,10 @@ def test_bounds_reject_out_of_range_values(tmp_path: Path) -> None:
     assert client.post("/extrinsic/compute", json={"max_groups": 5000}).status_code == 422
     assert client.post("/extrinsic/compute", json={"max_spread_ms": 0}).status_code == 422
     assert client.post("/extrinsic/compute", json={"min_shared": 0}).status_code == 422
+    refused = client.post("/extrinsic/compute", json={"max_motion_px": 0.0})
+    assert refused.status_code == 422
+    # The field's bound refused it, not the missing session every body would hit.
+    assert refused.json()["detail"][0]["loc"] == ["body", "max_motion_px"]
 
 
 def test_export_config_requires_explicit_units(tmp_path: Path) -> None:

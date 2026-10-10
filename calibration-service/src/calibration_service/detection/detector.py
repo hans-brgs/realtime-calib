@@ -10,6 +10,7 @@ downscaled preview frame (ADR-0038), the computes on the native recording.
 from __future__ import annotations
 
 import logging
+from collections import Counter
 from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
@@ -19,6 +20,11 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
+from calibration_service.detection.border_refine import (
+    BorderRefusal,
+    marker_bits,
+    refine_marker_corners,
+)
 from calibration_service.models.board import BoardType, CalibrationBoard
 
 if TYPE_CHECKING:
@@ -59,13 +65,13 @@ def _detector_params(
 
     Corner refinement splits by use (ADR-0043): OFF on the ChArUco path (the
     chessboard interpolation + ``cornerSubPix`` do the precision work, and OpenCV
-    warns ArUco refinement degrades it), CONTOUR on the single-marker path where
-    the raw ``detectMarkers`` corners ARE the calibration observations —
-    line-fitting the quad edges on the contour pixels and intersecting them cut
-    the measured corner jitter from 1.20 to 0.74 px RMS/axis on real sweep
-    footage (SUBPIX: no effect, its saddle-point model fits chessboard X-corners,
-    not marker L-corners). ``refine=False`` builds the unrefined single-marker
-    detector the CONTOUR fallback locates the target with.
+    warns ArUco refinement degrades it), CONTOUR on the single-marker path, where it
+    line-fits the quad edges on the contour pixels and intersects them: less corner
+    scatter than NONE, but every corner 1-2 px inward. That is final for the live
+    overlay; the computes only take it as the seed of the border refinement
+    (ADR-0052). SUBPIX had no effect (its saddle-point model fits chessboard
+    X-corners, not marker L-corners). ``refine=False`` builds the unrefined
+    single-marker detector the CONTOUR fallback locates the target with.
     """
     params = cv2.aruco.DetectorParameters()
     params.minMarkerPerimeterRate = 0.01  # default 0.03 — small / far markers
@@ -132,15 +138,19 @@ def _charuco_outline(
 
 
 def guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
-    """A rough pinhole K (focal ≈ frame width, ~52° HFOV) when none is known yet.
+    """A rough pinhole K when none is known yet: Caliscope v0.11.5's seed (ADR-0053).
 
-    ONE definition for both users (ADR-0036 — it used to exist twice): the live
-    tilt metric's pre-calibration PnP (approximate but monotonic, enough to guide
-    the operator) and the intrinsic solve's CALIB_USE_INTRINSIC_GUESS seed. The
-    tilt is recomputed exactly at compute time with the real intrinsics.
+    Focal = the longer image side (~53° HFOV on a landscape frame), principal point
+    at the image centre in pixel-centre coordinates. ONE definition for both users
+    (ADR-0036 — it used to exist twice): the live tilt metric's pre-calibration PnP
+    (approximate but monotonic, enough to guide the operator) and the intrinsic
+    solve's CALIB_USE_INTRINSIC_GUESS seed. The tilt is recomputed exactly at
+    compute time with the real intrinsics.
     """
-    f = float(width)
-    return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
+    f = float(max(width, height))
+    return np.array(
+        [[f, 0.0, (width - 1) / 2], [0.0, f, (height - 1) / 2], [0.0, 0.0, 1.0]], np.float64
+    )
 
 
 def _tilt_deg(
@@ -201,10 +211,21 @@ def _sharpness(gray: NDArray[np.uint8], corners: NDArray[np.float32]) -> float:
 
 
 class BoardDetector:
-    """Reusable detector for a fixed board (build the OpenCV objects once)."""
+    """Reusable detector for a fixed board (build the OpenCV objects once).
 
-    def __init__(self, board: CalibrationBoard) -> None:
+    ``border_refine`` (single ArUco marker only, ADR-0052): replace CONTOUR's corners,
+    1-2 px too far inward on real footage (0.96 to 1.85 px against ChArUco ground
+    truth), by the self-calibrated border refinement.
+    For the computes: the live overlay keeps CONTOUR, cheaper, whose bias a preview
+    never shows. A view the refinement refuses is dropped, never kept with CONTOUR's
+    biased corners; ``border_refusals`` counts them by reason.
+    """
+
+    def __init__(self, board: CalibrationBoard, *, border_refine: bool = False) -> None:
         self._board = board
+        self._border_bits: NDArray[np.bool_] | None = None
+        self.border_refusals: Counter[str] = Counter()
+        self.border_attempts = 0  # single-marker views the border refinement ran on
         dictionary = resolve(board.dictionary)
         if board.board_type is BoardType.CHARUCO:
             cv_board = cv2.aruco.CharucoBoard(
@@ -227,6 +248,8 @@ class BoardDetector:
             self._aruco_unrefined = cv2.aruco.ArucoDetector(
                 dictionary, _detector_params(single_marker=True, refine=False)
             )
+            if border_refine:
+                self._border_bits = marker_bits(dictionary, board.marker_id)
             # Single marker: canonical centered square (TL, TR, BR, BL) for IPPE_SQUARE,
             # matching the corner order cv2.aruco returns.
             self._object_points = np.array(
@@ -319,10 +342,34 @@ class BoardDetector:
             corners = self._refine_on_crop(gray)
         else:
             corners = self._target_corners(marker_corners, marker_ids)
+        if corners is not None and self._border_bits is not None:
+            corners = self._border_corners(gray, corners, self._border_bits)
         if corners is None:
             return None, None
         ids = np.full(corners.shape[0], self._board.marker_id, dtype=np.int32)
         return corners, ids
+
+    def _border_corners(
+        self, gray: NDArray[np.uint8], seed: NDArray[np.float32], bits: NDArray[np.bool_]
+    ) -> NDArray[np.float32] | None:
+        """Border-refined corners (ADR-0052), or None when the view is unreliable.
+
+        ``gray`` is the image the marker was detected in, already inverted for an
+        inverted target. An OpenCV or numpy error counts as a refusal of its own: one
+        view must not cost the compute. A few refused views are normal (0.6 to 5.4 % of a
+        hand-held sweep), so each is only a DEBUG line; the compute logs the summary.
+        """
+        self.border_attempts += 1
+        try:
+            outcome = refine_marker_corners(gray, seed, bits)
+        except (cv2.error, np.linalg.LinAlgError):
+            logger.debug("border refinement raised", exc_info=True)
+            outcome = BorderRefusal.NUMERICAL_FAILURE
+        if isinstance(outcome, BorderRefusal):
+            self.border_refusals[outcome.value] += 1
+            logger.debug("single-marker view dropped (%s)", outcome.value)
+            return None
+        return outcome.corners
 
     def _target_corners(
         self, marker_corners: Sequence[MatLike], marker_ids: MatLike | None

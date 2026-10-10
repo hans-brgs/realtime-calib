@@ -62,6 +62,7 @@ from calibration_service.recording import (
     preview_path,
 )
 from calibration_service.recording.ffmpeg import FfmpegError
+from calibration_service.resolution import to_native
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
 from calibration_service.settings import RuntimeSettings, SettingsStore
@@ -854,7 +855,11 @@ async def compute_intrinsic(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     session = manager.set_intrinsic_result(camera, result)
     # Persist the review metrics next to the recording so the Results view survives a
-    # reload/resume (ADR-0022); all fields are resolution-independent.
+    # reload/resume (ADR-0022). The uncertainty is in pixels, so at the output
+    # resolution like the reported error (ADR-0015); every other field is
+    # resolution-independent.
+    factor = next(c.resize_factor for c in session.cameras if c.name == camera)
+    shown = result.scaled(factor)
     metrics = {
         "coverage": [list(row) for row in result.coverage],
         "image_coverage": result.image_coverage,
@@ -864,6 +869,11 @@ async def compute_intrinsic(
         # replaced the absolute blur gate — a blurry sweep succeeds, visibly.
         "sharpness_min": result.sharpness_min,
         "sharpness_median": result.sharpness_median,
+        # Projection uncertainty (ADR-0055): where the solved model can be trusted.
+        "uncertainty": [list(row) for row in shown.uncertainty],
+        "uncertainty_covered_px": shown.uncertainty_covered_px,
+        "uncertainty_uncovered_px": shown.uncertainty_uncovered_px,
+        "uncertainty_unmodelled": shown.uncertainty_unmodelled,
     }
     atomic_write_text(manager.intrinsic_metrics_path(camera), json.dumps(metrics))
     return _session_out(session, manager)
@@ -890,7 +900,9 @@ async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
 
     ``{coverage: quad-accumulation count map (ADR-0039), image_coverage: union-area
     fraction, orientation_bins: /8, board_quads: per-keyframe 4x3 board outline in
-    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038)}``.
+    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038),
+    uncertainty: per-cell 1-sigma projection uncertainty in output px, with its RMS
+    over the covered and the uncovered cells (ADR-0055)}``.
     """
     manager = get_manager(request)
     _require_camera(manager.current(), camera)
@@ -980,17 +992,22 @@ class ExtrinsicComputeRequest(BaseModel):
         ge=TUNING.min_shared_bounds[0],
         le=TUNING.min_shared_bounds[1],
     )
+    # Board-motion gate (ADR-0056), native px; API-only like min_shared. Even at the
+    # upper bound it still drops a few groups (up to 6 % on the recorded sweeps): the
+    # API has no off switch, the offline eval tool does (--max-motion-px off).
+    max_motion_px: float | None = Field(
+        default=None,
+        ge=TUNING.extrinsic_max_motion_px_bounds[0],
+        le=TUNING.extrinsic_max_motion_px_bounds[1],
+    )
 
 
 def _native_camera_model(camera: CameraConfig) -> CameraModel:
     """Solver intrinsics at the RECORDING resolution (undo the ADR-0015 scaling)."""
-    factor = camera.resize_factor or 1.0
-    matrix = np.asarray(camera.matrix, np.float64).copy()
-    matrix[0] /= factor
-    matrix[1] /= factor
+    assert camera.matrix is not None  # callers refuse uncalibrated cameras first
     return CameraModel(
         name=camera.name,
-        matrix=matrix,
+        matrix=to_native(camera.matrix, (camera.width, camera.height), camera.resize_factor or 1.0),
         distortions=np.asarray(camera.distortions, np.float64),
     )
 
@@ -1069,6 +1086,9 @@ async def compute_extrinsic(
         else (TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker)
     )
     min_shared = params.min_shared if params.min_shared is not None else TUNING.min_shared
+    max_motion_px = (
+        params.max_motion_px if params.max_motion_px is not None else TUNING.extrinsic_max_motion_px
+    )
 
     loop = asyncio.get_running_loop()
     try:
@@ -1084,6 +1104,7 @@ async def compute_extrinsic(
                 max_groups=max_groups,
                 max_spread_s=max_spread_s,
                 min_shared=min_shared,
+                max_motion_px=max_motion_px,
             ),
         )
     except ValueError as exc:

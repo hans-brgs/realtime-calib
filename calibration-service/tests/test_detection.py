@@ -19,7 +19,7 @@ from calibration_service.board.render import (
     _MARGIN_RATIO,
     PX_PER_SQUARE,
 )
-from calibration_service.detection import BoardDetector
+from calibration_service.detection import BoardDetector, guessed_camera_matrix
 from calibration_service.detection.detector import _detector_params, _tilt_deg
 from calibration_service.models.board import BoardType, CalibrationBoard
 
@@ -77,6 +77,19 @@ def test_tilt_ippe_square_path() -> None:
     img = np.array([[300, 220], [340, 220], [340, 260], [300, 260]], np.float32)
     tilt = _tilt_deg(obj, img, 640, 480, square=True)
     assert tilt is not None and tilt < 10.0
+
+
+def test_guessed_camera_matrix_is_caliscopes_seed() -> None:
+    # Caliscope v0.11.5's seed (core/calibrate_intrinsics.py, ddda95b4; ADR-0053): the
+    # longer side as focal, the principal point at the pixel-centre image middle.
+    np.testing.assert_array_equal(
+        guessed_camera_matrix(1920, 1080),
+        [[1920.0, 0.0, 959.5], [0.0, 1920.0, 539.5], [0.0, 0.0, 1.0]],
+    )
+    np.testing.assert_array_equal(
+        guessed_camera_matrix(1080, 1920),
+        [[1920.0, 0.0, 539.5], [0.0, 1920.0, 959.5], [0.0, 0.0, 1.0]],
+    )
 
 
 def test_blank_frame_not_found() -> None:

@@ -27,11 +27,16 @@ from calibration_service.models.session import (
     SessionMode,
     WizardStep,
 )
+from calibration_service.resolution import from_legacy_output
 from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
 SESSION_FILE = "session.toml"
+# session.toml format. 2: a camera's stored matrix (output resolution) follows
+# the pixel-centre mapping of calibration_service.resolution (ADR-0051). Absent = 1, its
+# matrices were written as s * K_native and are migrated exactly at load.
+SCHEMA_VERSION = 2
 _INTRINSIC_DIR = "intrinsic"
 _EXTRINSIC_DIR = "extrinsic"
 
@@ -155,8 +160,33 @@ def _camera_from_dict(c: Mapping[str, Any]) -> CameraConfig:
     )
 
 
+def _migrate_legacy_matrix(camera: CameraConfig) -> None:
+    """Re-express a schema-1 output matrix (``s * K_native``) at pixel centres.
+
+    Exact and loss-free: the native matrix the poses were solved with is
+    recovered unchanged; only the output principal point moves, by -(1 - s)/2 px
+    at the nominal sizes (ADR-0051). The next save writes schema 2.
+    """
+    factor = camera.resize_factor or 1.0
+    if camera.matrix is None or factor == 1.0:
+        return
+    before = camera.matrix
+    camera.matrix = from_legacy_output(before, (camera.width, camera.height), factor)
+    # DEBUG: every read of a schema-1 file migrates it again until it is saved, and
+    # listing the sessions reads them all.
+    logger.debug(
+        "%s: output matrix migrated to pixel centres (cx %.3f -> %.3f, cy %.3f -> %.3f)",
+        camera.name,
+        before[0][2],
+        camera.matrix[0][2],
+        before[1][2],
+        camera.matrix[1][2],
+    )
+
+
 def _to_dict(session: CalibrationSession) -> dict[str, object]:
     return {
+        "schema_version": SCHEMA_VERSION,
         "session_id": session.session_id,
         "step": session.step.value,
         "mode": session.mode.value,
@@ -167,7 +197,15 @@ def _to_dict(session: CalibrationSession) -> dict[str, object]:
 
 
 def _from_dict(data: Mapping[str, Any]) -> CalibrationSession:
+    version = int(data.get("schema_version", 1))
+    if version > SCHEMA_VERSION:
+        raise ValueError(
+            f"session.toml schema {version} is newer than this service ({SCHEMA_VERSION})"
+        )
     cameras = [_camera_from_dict(c) for c in data.get("cameras", [])]
+    if version < 2:
+        for camera in cameras:
+            _migrate_legacy_matrix(camera)
     return CalibrationSession(
         session_id=str(data["session_id"]),
         step=WizardStep(data["step"]),

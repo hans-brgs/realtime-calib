@@ -1,7 +1,8 @@
 // Pure helpers for the shared capture configuration (spec camera-detection-config):
 // the resolution / fps offered to the operator is the INTERSECTION of what every
-// detected camera supports, and the resize factor `s` derives an even output size
-// (K_out = s·K applies on export, ADR-0015). No React here — unit-tested.
+// detected camera supports, and the resize factor `s` derives the output size the
+// export declares (its intrinsics mapped at pixel centres, ADR-0051). No React here —
+// unit-tested.
 
 import type { CameraConfigInput, ConfigRequest, DetectedCamera } from '@/transport/types';
 
@@ -18,10 +19,15 @@ export function parseResolution(value: string): { width: number; height: number 
   return { width, height };
 }
 
-// Round to the nearest even integer (VP8/H264 encoders require even dimensions).
-function roundEven(n: number): number {
-  const r = Math.round(n);
-  return r % 2 === 0 ? r : r + 1;
+// Python's round(), the service's output_size: to nearest, a tie to the even
+// neighbour. The size shown must be the one the export declares (1280x720 at 1/3 is
+// 427x240, not an even 428).
+function roundHalfEven(n: number): number {
+  const floor = Math.floor(n);
+  const diff = n - floor;
+  if (diff > 0.5) return floor + 1;
+  if (diff < 0.5) return floor;
+  return floor % 2 === 0 ? floor : floor + 1;
 }
 
 export function outputDimensions(
@@ -29,7 +35,7 @@ export function outputDimensions(
   height: number,
   factor: number,
 ): { width: number; height: number } {
-  return { width: roundEven(width * factor), height: roundEven(height * factor) };
+  return { width: roundHalfEven(width * factor), height: roundHalfEven(height * factor) };
 }
 
 // Resolutions supported by EVERY camera, largest first.

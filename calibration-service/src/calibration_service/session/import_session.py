@@ -17,6 +17,7 @@ off the event loop, exactly like the intrinsic/extrinsic compute paths.
 from __future__ import annotations
 
 import logging
+import math
 import re
 import shutil
 import tarfile
@@ -40,14 +41,14 @@ from calibration_service.recording.extrinsic_recorder import (
     parse_caliscope_timestamps,
 )
 from calibration_service.recording.ffmpeg import (
-    is_vfr,
-    reencode_cfr_args,
+    reencode_args,
     remux_copy_args,
     run_ffmpeg,
     transcode_timeout,
 )
 from calibration_service.recording.replay import (
     VideoProperties,
+    declared_fps,
     decoded_frame_count,
     video_properties,
 )
@@ -58,6 +59,7 @@ from calibration_service.synchronization.caliscope_alignment import (
     greedy_sync_mapping,
     inferred_grids,
 )
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -283,18 +285,6 @@ def _probe_or_none(path: Path) -> VideoProperties | None:
     return props if usable else None
 
 
-def _source_fps(source: Path) -> float:
-    try:
-        fps = video_properties(source).fps
-    except ValueError as exc:
-        raise ImportValidationError(f"cannot read video {source.name!r}") from exc
-    if fps <= 0:
-        raise ImportValidationError(
-            f"cannot determine the frame rate of {source.name!r}"
-        )
-    return fps
-
-
 def _duration_s(source: Path) -> float:
     """The media duration, for the transcode timeout; 0 when it cannot be read."""
     try:
@@ -307,19 +297,23 @@ def _duration_s(source: Path) -> float:
 def _normalise_video(source: Path, destination: Path) -> VideoProperties:
     """Bring one uploaded video into the canonical layout (ADR-0035).
 
-    Remux ``-c copy`` by default (container only, frames untouched); re-encode to
-    CFR MJPG only when the source is VFR or the remuxed file does not probe usable.
+    Remux ``-c copy`` (container only, frames untouched, a variable frame rate kept:
+    every compute decodes sequentially, never by time); re-encode to MJPG, frame for
+    frame, only when the remuxed file does not probe usable (ADR-0054).
     """
     destination.parent.mkdir(parents=True, exist_ok=True)
     timeout_s = transcode_timeout(_duration_s(source))
-    if not is_vfr(source):
-        run_ffmpeg(remux_copy_args(source, destination), timeout_s=timeout_s)
-        props = _probe_or_none(destination)
-        if props is not None:
-            return props
-        logger.warning("remuxed %s is unreadable; falling back to CFR re-encode", source.name)
-        destination.unlink(missing_ok=True)
-    run_ffmpeg(reencode_cfr_args(source, destination, _source_fps(source)), timeout_s=timeout_s)
+    run_ffmpeg(remux_copy_args(source, destination), timeout_s=timeout_s)
+    props = _probe_or_none(destination)
+    if props is not None:
+        return props
+    logger.warning("remuxed %s is unreadable; falling back to a re-encode", source.name)
+    destination.unlink(missing_ok=True)
+    # Any positive rate re-times by index; the source's own one keeps durations sane.
+    fps = declared_fps(source)
+    if not (math.isfinite(fps) and fps > 0.0):
+        fps = float(TUNING.default_fps)
+    run_ffmpeg(reencode_args(source, destination, fps), timeout_s=timeout_s)
     props = _probe_or_none(destination)
     if props is None:
         raise ImportValidationError(f"cannot read video {source.name!r} after normalisation")

@@ -33,6 +33,7 @@ import logging
 from dataclasses import dataclass, field, replace
 from itertools import combinations
 from pathlib import Path
+from typing import NamedTuple
 
 import cv2
 import numpy as np
@@ -41,6 +42,13 @@ from scipy.optimize import least_squares  # type: ignore[import-untyped]
 from scipy.sparse import lil_matrix  # type: ignore[import-untyped]
 
 from calibration_service.calibration.intrinsic import _cv_charuco_board
+from calibration_service.calibration.motion import (
+    MemberMotion,
+    group_motion_px,
+    lk_speed_px_s,
+    still_groups,
+    track_corners_lk,
+)
 from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
@@ -163,6 +171,15 @@ class ExtrinsicResult:
     # board (ADR-0044): the reprojection-INDEPENDENT quality judge the operator
     # reads next to the RMSE. 0.0 when no group has two triangulated corners.
     rigidity_mm: float = 0.0
+    # Single-marker views the border refinement dropped, per camera and by reason, out
+    # of the views it ran on per camera (ADR-0052, ADR-0036 observability). Empty for
+    # ChArUco, and on older payloads.
+    border_refusals: dict[str, dict[str, int]] = field(default_factory=dict)
+    border_attempts: dict[str, int] = field(default_factory=dict)
+    # Detected groups the motion gate dropped (ADR-0056): the board moved more than
+    # the gate between the captures of their members. 0 with the gate off, on a
+    # solve that had to fall back without it, and on older payloads.
+    moving_groups: int = 0
 
     def scaled_errors(self, factors: dict[str, float]) -> ExtrinsicResult:
         """Express the pixel-error fields at each camera's OUTPUT resolution.
@@ -1212,6 +1229,10 @@ def refine_result(
             for index, name in enumerate(result.cameras)
         },
         rigidity_mm=rigidity_mm(refined, point_group, point_corner, board),
+        # Minimize re-solves the same views: the refinement's counts still hold.
+        border_refusals=result.border_refusals,
+        border_attempts=result.border_attempts,
+        moving_groups=result.moving_groups,
         board_quads=_group_board_quads(
             point_group,
             point_corner,
@@ -1223,20 +1244,61 @@ def refine_result(
     )
 
 
+class _Detected(NamedTuple):
+    """The compute's detection walk: groups seen by >= 2 cameras, aligned lists."""
+
+    groups: list[dict[str, GroupDetection]]
+    motions: list[dict[str, MemberMotion]]  # per member: capture stamp + board speed
+    refusals: dict[str, dict[str, int]]  # per camera, by reason (ADR-0052)
+    attempts: dict[str, int]  # per camera, views the border refinement ran on
+
+
+@dataclass
+class _Pending:
+    """A detected member waiting for the next frame to finish its board speed."""
+
+    positions: list[int]
+    gray: NDArray[np.uint8]
+    corners: NDArray[np.float64]
+    in_previous: NDArray[np.float64] | None
+    frame: int
+
+
+def _gray(image: NDArray[np.uint8]) -> NDArray[np.uint8]:
+    return np.asarray(cv2.cvtColor(image, cv2.COLOR_BGR2GRAY), np.uint8)
+
+
+def _member_motion(
+    item: _Pending, in_next: NDArray[np.float64] | None, stamps: list[float]
+) -> MemberMotion:
+    """Capture stamp and LK board speed of a pending member, once its next frame is read."""
+    i = item.frame
+    if i >= len(stamps):  # a frame past its sidecar: no stamp, no speed
+        return MemberMotion(timestamp=float("nan"), speed_px_s=None)
+    dt_previous = stamps[i] - stamps[i - 1] if i > 0 and item.in_previous is not None else None
+    dt_next = stamps[i + 1] - stamps[i] if in_next is not None and i + 1 < len(stamps) else None
+    speed = lk_speed_px_s(item.corners, item.in_previous, in_next, dt_previous, dt_next)
+    return MemberMotion(timestamp=stamps[i], speed_px_s=speed)
+
+
 def _detect_group_frames(
     directory: Path,
     groups_frames: list[dict[str, int]],
     models: dict[str, CameraModel],
     board: CalibrationBoard,
-) -> list[dict[str, GroupDetection]]:
+) -> _Detected:
     """Detect the board on each selected (camera, frame-index) and normalize corners.
+
+    Also measures each detected member's board image speed (ADR-0056): its corners
+    are tracked by Lucas-Kanade into the previous frame and the next one, which the
+    sequential decode walks anyway; and counts, per camera, the single-marker views
+    the border refinement dropped by reason, out of the views it ran on.
 
     Single-ArUco targets: the detector reports every corner under the marker id
     (e.g. [8,8,8,8]); remap to per-CORNER ids 0..3 (cv2's TL,TR,BR,BL order is
     stable across views) so cross-camera correspondence + ``board_object_points``
     indexing work like the ChArUco path.
     """
-    detector = BoardDetector(board)
     single_marker = board.board_type is not BoardType.CHARUCO
     min_corners = _min_corners(board)
     needed: dict[str, list[tuple[int, int]]] = {}
@@ -1245,8 +1307,15 @@ def _detect_group_frames(
             needed.setdefault(name, []).append((frame_index, position))
 
     detections: list[dict[str, GroupDetection]] = [{} for _ in groups_frames]
+    motions: list[dict[str, MemberMotion]] = [{} for _ in groups_frames]
+    refusals: dict[str, dict[str, int]] = {}
+    attempts: dict[str, int] = {}
     for name, entries in needed.items():
         model = models[name]
+        stamps = read_timestamps(directory / f"{name}.timestamps")
+        # The compute's detector (unbiased single-marker corners, ADR-0052), one per
+        # camera: its refusal counters are that camera's.
+        detector = BoardDetector(board, border_refine=True)
         capture = cv2.VideoCapture(str(directory / f"{name}.mkv"))
         try:
             # SEQUENTIAL walk — never CAP_PROP_POS_FRAMES. Index seeking on a VFR
@@ -1254,51 +1323,120 @@ def _detect_group_frames(
             # maps the index to a time via the AVERAGE fps, drifting by whole
             # frames wherever the real cadence deviates (measured +1..+21 frames
             # on a real Caliscope import — the sole cause of a 10 px vs 3.7 px
-            # extrinsic RMSE). Sidecar line i MUST mean decoded frame i.
+            # extrinsic RMSE). Sidecar line i MUST mean decoded frame i. The walk
+            # reads one frame past the last wanted one, for its forward track.
             wanted = sorted(entries)
             cursor = 0
             current = -1
-            while cursor < len(wanted):
-                ok, image = capture.read()
-                if not ok or image is None:
+            previous: NDArray[np.uint8] | None = None
+            pending: _Pending | None = None
+            while cursor < len(wanted) or pending is not None:
+                ok, frame = capture.read()
+                if not ok or frame is None:
                     break
                 current += 1
-                if current < wanted[cursor][0]:
-                    continue
                 # cv2's stubs type read() loosely; decoded frames are uint8 BGR.
-                detection = detector.detect(image.astype(np.uint8, copy=False))
-                usable = (
-                    detection.found
-                    and detection.ids is not None
-                    and detection.corners is not None
-                    and detection.count >= min_corners
-                )
-                while cursor < len(wanted) and wanted[cursor][0] == current:
-                    position = wanted[cursor][1]
-                    cursor += 1
-                    if not usable:
-                        continue
-                    assert detection.ids is not None and detection.corners is not None
-                    if single_marker:
-                        ids = np.arange(detection.count, dtype=np.int32)  # corner index
-                        pixels = detection.corners.reshape(-1, 2).astype(np.float64)
-                    else:
-                        ids = detection.ids.reshape(-1).astype(np.int32)
-                        order = np.argsort(ids)  # sorted: searchsorted in stereo_pairwise
-                        ids = ids[order]
-                        pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
-                    normalized = cv2.undistortPoints(
-                        pixels.reshape(-1, 1, 2), model.matrix, model.distortions
-                    ).reshape(-1, 2)
-                    detections[position][name] = GroupDetection(
-                        ids=ids,
-                        corners_px=pixels,
-                        corners_norm=np.asarray(normalized, np.float64),
-                        sharpness=detection.sharpness,
+                image = frame.astype(np.uint8, copy=False)
+                is_wanted = cursor < len(wanted) and current == wanted[cursor][0]
+                gray = _gray(image) if pending is not None or is_wanted else None
+                if pending is not None and gray is not None:
+                    forward = track_corners_lk(pending.gray, gray, pending.corners)
+                    motion = _member_motion(pending, forward, stamps)
+                    for position in pending.positions:
+                        motions[position][name] = motion
+                    pending = None
+                if is_wanted and gray is not None:
+                    detection = detector.detect(gray)
+                    positions: list[int] = []
+                    while cursor < len(wanted) and wanted[cursor][0] == current:
+                        positions.append(wanted[cursor][1])
+                        cursor += 1
+                    usable = (
+                        detection.found
+                        and detection.ids is not None
+                        and detection.corners is not None
+                        and detection.count >= min_corners
                     )
+                    if usable:
+                        assert detection.ids is not None and detection.corners is not None
+                        if single_marker:
+                            ids = np.arange(detection.count, dtype=np.int32)  # corner index
+                            pixels = detection.corners.reshape(-1, 2).astype(np.float64)
+                        else:
+                            ids = detection.ids.reshape(-1).astype(np.int32)
+                            order = np.argsort(ids)  # sorted: searchsorted in stereo_pairwise
+                            ids = ids[order]
+                            pixels = detection.corners.reshape(-1, 2).astype(np.float64)[order]
+                        normalized = cv2.undistortPoints(
+                            pixels.reshape(-1, 1, 2), model.matrix, model.distortions
+                        ).reshape(-1, 2)
+                        for position in positions:
+                            detections[position][name] = GroupDetection(
+                                ids=ids,
+                                corners_px=pixels,
+                                corners_norm=np.asarray(normalized, np.float64),
+                                sharpness=detection.sharpness,
+                            )
+                        # LK follows the detector's own corner order (same points).
+                        raw = detection.corners.reshape(-1, 2).astype(np.float64)
+                        backward = (
+                            track_corners_lk(gray, _gray(previous), raw)
+                            if previous is not None
+                            else None
+                        )
+                        pending = _Pending(positions, gray, raw, backward, current)
+                previous = image
+            if pending is not None:  # the video ended: a one-sided speed
+                motion = _member_motion(pending, None, stamps)
+                for position in pending.positions:
+                    motions[position][name] = motion
         finally:
             capture.release()
-    return [group for group in detections if len(group) >= 2]
+        if detector.border_attempts:
+            attempts[name] = detector.border_attempts
+        if detector.border_refusals:
+            refusals[name] = dict(detector.border_refusals)
+    if refusals:
+        logger.info(
+            "border refinement dropped %d of %d views: %s",
+            sum(sum(counts.values()) for counts in refusals.values()),
+            sum(attempts.values()),
+            ", ".join(
+                f"{name} {sum(counts.values())}/{attempts.get(name, 0)} {counts}"
+                for name, counts in sorted(refusals.items())
+            ),
+        )
+    kept = [i for i, group in enumerate(detections) if len(group) >= 2]
+    return _Detected(
+        groups=[detections[i] for i in kept],
+        motions=[{n: m for n, m in motions[i].items() if n in detections[i]} for i in kept],
+        refusals=refusals,
+        attempts=attempts,
+    )
+
+
+def _motion_gate(
+    detected: _Detected, max_motion_px: float | None, max_groups: int
+) -> tuple[list[dict[str, GroupDetection]], int]:
+    """The detected groups the motion gate keeps (ADR-0056), and how many it dropped.
+
+    A quarter of the group budget is guaranteed: below it, the stillest dropped groups
+    top the pool up instead of starving the pairwise initialisation.
+    """
+    if max_motion_px is None:
+        return detected.groups, 0
+    motion = [group_motion_px(members) for members in detected.motions]
+    keep = still_groups(motion, max_motion_px=max_motion_px, min_groups=max(1, max_groups // 4))
+    pool = [group for group, kept in zip(detected.groups, keep, strict=True) if kept]
+    moving = len(keep) - len(pool)
+    if moving:
+        logger.info(
+            "motion gate: dropped %d of %d detected groups (board moved > %.2f px)",
+            moving,
+            len(keep),
+            max_motion_px,
+        )
+    return pool, moving
 
 
 def _select_quality_groups(
@@ -1439,6 +1577,7 @@ def compute_extrinsic_from_sweep(
     max_groups: int,
     min_shared: int,
     max_spread_s: float | None = None,
+    max_motion_px: float | None = None,
 ) -> tuple[ExtrinsicResult, BAInputs]:
     """Solve the camera array from a recorded synchronized sweep (ADR-0023/0033).
 
@@ -1450,6 +1589,10 @@ def compute_extrinsic_from_sweep(
     pairwise -> chaining -> triangulation -> BA. Also returns the BA observations
     so 'Minimize' can refine later without redetecting. Supports ChArUco boards
     and single-ArUco-marker targets (see board_object_points).
+
+    ``max_motion_px`` gates the detected groups on the board's motion between their
+    members' captures (ADR-0056; None = no gate). Should the gated pool not solve,
+    the array is solved again from every detected group, with a warning.
     """
     if len(models) < 2:
         raise ValueError("extrinsic calibration needs at least 2 cameras")
@@ -1468,9 +1611,52 @@ def compute_extrinsic_from_sweep(
     groups_frames = [
         {name: frame.payload for name, frame in group.frames.items()} for group in groups
     ]
-    detections = _detect_group_frames(directory, groups_frames, by_name, board)
-    if not detections:
+    detected = _detect_group_frames(directory, groups_frames, by_name, board)
+    if not detected.groups:
         raise ValueError("no synchronized board views across >= 2 cameras")
+    pool, moving = _motion_gate(detected, max_motion_px, max_groups)
+    try:
+        result, ba_inputs = _solve_groups(
+            pool, board, models, anchor=anchor, max_groups=max_groups, min_shared=min_shared
+        )
+    except ValueError:
+        if not moving:
+            raise
+        logger.warning(
+            "the motion gate left no solvable array (%d of %d groups dropped): "
+            "solving from every detected group",
+            moving,
+            len(detected.groups),
+        )
+        moving = 0
+        result, ba_inputs = _solve_groups(
+            detected.groups,
+            board,
+            models,
+            anchor=anchor,
+            max_groups=max_groups,
+            min_shared=min_shared,
+        )
+    result = replace(
+        result,
+        border_refusals=detected.refusals,
+        border_attempts=detected.attempts,
+        moving_groups=moving,
+    )
+    return result, ba_inputs
+
+
+def _solve_groups(
+    detections: list[dict[str, GroupDetection]],
+    board: CalibrationBoard,
+    models: list[CameraModel],
+    *,
+    anchor: str,
+    max_groups: int,
+    min_shared: int,
+) -> tuple[ExtrinsicResult, BAInputs]:
+    """Keep the sharpest groups and solve the array from them (ADR-0023/0033)."""
+    by_name = {model.name: model for model in models}
     selected = _select_quality_groups(detections, max(1, max_groups))
     logger.info(
         "extrinsic compute: kept %d/%d detected groups by sharpness (cap %d)",

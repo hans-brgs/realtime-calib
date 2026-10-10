@@ -419,8 +419,8 @@ function ResultSummary({ result }: { result: ExtrinsicResultPayload }) {
         <InfoPopover label="About the per-camera deviation">
           Each camera&apos;s own RMS reprojection error, in pixels at the export resolution. This is
           what tells you to re-shoot one camera rather than redo the whole array: under{' '}
-          {DEVIATION_GOOD_PX} px is nominal, past {DEVIATION_WATCH_PX} px the error is no longer
-          explained by corner detection alone.
+          {DEVIATION_GOOD_PX} px is nominal; past {DEVIATION_WATCH_PX} px this camera is beyond
+          every reference sweep we measured — check its sync, focus or intrinsics.
           <br />
           <br />
           The <b>anchor</b> is camera 0 — the world origin, held fixed through the bundle

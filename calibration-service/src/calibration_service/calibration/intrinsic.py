@@ -9,8 +9,10 @@ solver:
   cell, no absolute blur gate — ADR-0038). Coverage/diversity is maximised, not
   the frame count.
 - ``calibrate_intrinsic`` — run ``cv2.calibrateCameraExtended`` on the retained
-  views (classic 5-coefficient model, seeded guess — real Caliscope parity,
-  ADR-0032), exposing ``perViewErrors`` for outlier rejection.
+  views (classic 5-coefficient model — real Caliscope parity, ADR-0032; solved
+  from Caliscope v0.11.5's seed, OpenCV's own initialisation standing in when
+  that solve fails — ADR-0053), exposing
+  ``perViewErrors`` for outlier rejection.
 
 Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 ``board.matchImagePoints`` (ChArUco corners → object/image points) then
@@ -19,24 +21,33 @@ Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 
 from __future__ import annotations
 
+import logging
+from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Any, TypedDict, cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
+from calibration_service.calibration.uncertainty import (
+    ROBUST_COVERAGE,
+    intrinsic_covariances,
+    projection_uncertainty,
+)
 from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.resolution import output_size, to_output
 
 # Real Caliscope parity (ADR-0032, verified against caliscope source): plain
 # cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
-# [k1,k2,p1,p2,k3], free aspect ratio. Only the guess seed is kept (validated on
-# the home_calib dataset: per-camera coefficients become consistent, extrinsic
-# RMSE unchanged). The former RATIONAL_MODEL+FIX_ASPECT anchor was not grounded
-# in caliscope code and produced degenerate per-camera coefficients.
+# [k1,k2,p1,p2,k3], free aspect ratio. The former RATIONAL_MODEL+FIX_ASPECT anchor
+# was not grounded in caliscope code and produced degenerate per-camera
+# coefficients. The solve starts from Caliscope v0.11.5's guess seed; OpenCV's own
+# initialisation (the flag-free solve of Caliscope <= 0.5.4) only stands in when it
+# fails (ADR-0053).
 _CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
 # stride/cap defaults live in calibration_service.tuning (ADR-0036); the transport
 # layer resolves omitted request fields there and always passes explicit values.
@@ -48,6 +59,8 @@ _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # this is filtered independently of BoardDetector's lower live-detection floor
 # (detection/detector.py's _MIN_CORNERS=4, which only gates UI "board found").
 _MIN_CORNERS_FOR_CALIBRATION = 6
+logger = logging.getLogger(__name__)
+
 # Anti-"sliver" gate: a view whose corners are near-collinear is rank-deficient
 # (2nd singular value under this share of the 1st) and derails the solver's pose
 # init — see _is_well_spread. Prudent and eprouve; not a tuning knob.
@@ -68,7 +81,7 @@ class IntrinsicResult:
     # Review metrics (ADR-0022). All resolution-independent, so ``scaled()`` leaves them
     # unchanged. `coverage` = per-cell count of keyframes whose detected-corner hull
     # covers it (redundancy map, ADR-0039: 0 = never, 1 = fragile, 3+ = robust);
-    # `image_coverage` = union-of-quads area fraction (no arbitrary grid);
+    # `image_coverage` = union-of-quads area fraction (cell centres on a 384-column grid);
     # `orientation_bins` = occupied 45deg tilt-azimuth sectors (Caliscope, /8);
     # `board_quads` = each keyframe board's 4 outline corners in 3D camera coords.
     coverage: tuple[tuple[int, ...], ...] = ()
@@ -80,35 +93,87 @@ class IntrinsicResult:
     # get?" observable: a uniformly-blurry sweep now succeeds instead of failing.
     sharpness_min: float = 0.0
     sharpness_median: float = 0.0
+    # Projection uncertainty (ADR-0055): 1-sigma px (euclidean) per coverage cell, None
+    # outside the lens model (past its distortion fold), and its RMS over the modelled
+    # cells >= 3 keyframes cover and over those none does; `uncertainty_unmodelled` is
+    # the share of cells outside the model. Empty / None when the covariance is
+    # singular (degenerate views) or no cell is in that band.
+    uncertainty: tuple[tuple[float | None, ...], ...] = ()
+    uncertainty_covered_px: float | None = None
+    uncertainty_uncovered_px: float | None = None
+    uncertainty_unmodelled: float = 0.0
 
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
 
-        We calibrate at native resolution for accuracy then rescale K + image size
-        to the operator's output resolution. Scaling the pinhole model is exact:
-        fx, fy, cx, cy (and pixel errors) scale by ``factor``; the normalised
-        distortion coefficients are unchanged.
+        We calibrate at native resolution for accuracy then map K + image size
+        to the operator's output resolution, pixel centres included (ADR-0051,
+        ``calibration_service.resolution``); the normalised distortion coefficients are
+        unchanged. Pixel errors and uncertainties scale by the nominal ``factor``.
         """
         if factor == 1.0:
             return self
-        width, height = self.image_size
         return replace(
             self,
-            matrix=[
-                [v * factor for v in self.matrix[0]],
-                [v * factor for v in self.matrix[1]],
-                list(self.matrix[2]),
-            ],
+            matrix=to_output(self.matrix, self.image_size, factor),
             error=self.error * factor,
             per_view_errors=[e * factor for e in self.per_view_errors],
-            image_size=(round(width * factor), round(height * factor)),
+            image_size=output_size(self.image_size, factor),
+            uncertainty=tuple(
+                tuple(None if v is None else round(v * factor, 3) for v in row)
+                for row in self.uncertainty
+            ),
+            uncertainty_covered_px=_times(self.uncertainty_covered_px, factor),
+            uncertainty_uncovered_px=_times(self.uncertainty_uncovered_px, factor),
         )
 
 
+def _times(value: float | None, factor: float) -> float | None:
+    return None if value is None else value * factor
+
+
 # Accumulation-map width; rows derive from the image aspect for ~square cells.
-# A raster fine enough that its quantisation of the union area is negligible, small
-# enough to ship in the metrics/telemetry payload (~96x54 at 16:9).
+# Small enough to ship in the metrics/telemetry payload (~96x54 at 16:9).
 _COVERAGE_COLS = 96
+# The union-area metric is read on a finer raster: the cell-centre test is unbiased,
+# and at this width its scatter stays under 0.5 % even for a small quad.
+_UNION_COLS = 384
+
+
+def _hull_masks(
+    image_points: list[NDArray[np.float32]], image_size: tuple[int, int], cols: int
+) -> Iterator[NDArray[np.bool_]]:
+    """Per keyframe, the cells whose CENTRE lies in its board's convex hull.
+
+    A cell counts when its centre is inside, not when an edge touches it: the
+    former truncate-and-fill credited every boundary cell and overestimated a
+    quad's area by 8 to 28 % at 96 columns (audit INT-10); the centre test is
+    unbiased.
+    """
+    width, height = image_size
+    rows = max(1, round(cols * height / max(1, width)))
+    xs = (np.arange(cols) + 0.5) * width / cols
+    ys = (np.arange(rows) + 0.5) * height / rows
+    grid_x, grid_y = np.meshgrid(xs, ys)
+    for pts in image_points:
+        hull = cv2.convexHull(pts.reshape(-1, 2).astype(np.float32)).reshape(-1, 2)
+        hull = hull.astype(np.float64)
+        nxt = np.roll(hull, -1, axis=0)
+        orientation = np.sign(np.sum(hull[:, 0] * nxt[:, 1] - nxt[:, 0] * hull[:, 1]))
+        inside = np.zeros((rows, cols), bool)
+        # Only the cells around the hull's bounding box, a cell of margin each side:
+        # the same mask, 25x cheaper than testing the whole grid.
+        c0 = max(0, int(np.floor(hull[:, 0].min() * cols / width - 0.5)))
+        c1 = min(cols, int(np.ceil(hull[:, 0].max() * cols / width - 0.5)) + 1)
+        r0 = max(0, int(np.floor(hull[:, 1].min() * rows / height - 0.5)))
+        r1 = min(rows, int(np.ceil(hull[:, 1].max() * rows / height - 0.5)) + 1)
+        if orientation != 0 and c0 < c1 and r0 < r1:
+            box_x, box_y = grid_x[r0:r1, c0:c1], grid_y[r0:r1, c0:c1]
+            box = np.ones(box_x.shape, bool)
+            for (x0, y0), (x1, y1) in zip(hull, nxt, strict=True):
+                box &= orientation * ((x1 - x0) * (box_y - y0) - (y1 - y0) * (box_x - x0)) >= 0
+            inside[r0:r1, c0:c1] = box
+        yield inside
 
 
 def _coverage_map(
@@ -122,20 +187,13 @@ def _coverage_map(
     hull of its DETECTED corners (a partial detection credits only what it saw),
     rasterised onto a ``cols``-wide grid (rows from the image aspect) and summed.
     The intensity is a redundancy map — 0 = never covered (go fill it), 1 = seen
-    once (fragile), 3+ = well constrained — and ``_union_coverage`` reads the area
-    fraction off it, with no arbitrary grid size baked into the metric.
+    once (fragile), 3+ = well constrained.
     """
     width, height = image_size
     rows = max(1, round(cols * height / max(1, width)))
     acc = np.zeros((rows, cols), dtype=np.int32)
-    sx, sy = cols / max(1, width), rows / max(1, height)
-    for pts in image_points:
-        xy = pts.reshape(-1, 2).astype(np.float64)
-        scaled = np.column_stack((xy[:, 0] * sx, xy[:, 1] * sy)).astype(np.int32)
-        hull = cv2.convexHull(scaled)
-        mask = np.zeros((rows, cols), dtype=np.uint8)
-        cv2.fillConvexPoly(mask, hull, 1)
-        acc += mask.astype(np.int32)
+    for mask in _hull_masks(image_points, image_size, cols):
+        acc += mask
     return tuple(tuple(int(v) for v in grid_row) for grid_row in acc)
 
 
@@ -143,16 +201,18 @@ _ORIENTATION_SECTORS = 8  # Caliscope 45deg tilt-azimuth bins
 _FRONTAL_TILT_DEG = 8.0  # below this the tilt direction is meaningless -> not binned
 
 
-def _union_coverage(coverage_map: tuple[tuple[int, ...], ...]) -> float:
+def _union_coverage(
+    image_points: list[NDArray[np.float32]], image_size: tuple[int, int], cols: int = _UNION_COLS
+) -> float:
     """Image coverage = area fraction of the union of the keyframe quads (ADR-0039).
 
-    Grid-free by construction: any cell covered by at least one quad counts, so a
-    finer raster does not shift the value (unlike the former fixed-grid metric).
+    Read by the unbiased cell-centre test on a raster fine enough that its value
+    no longer depends on the grid (within 0.5 %, audit INT-10).
     """
-    if not coverage_map or not coverage_map[0]:
-        return 0.0
-    covered = sum(1 for row in coverage_map for value in row if value > 0)
-    return covered / float(len(coverage_map) * len(coverage_map[0]))
+    union: NDArray[np.bool_] | None = None
+    for mask in _hull_masks(image_points, image_size, cols):
+        union = mask if union is None else union | mask
+    return 0.0 if union is None else float(union.mean())
 
 
 def _orientation_bins(rvecs: list[NDArray[np.float64]]) -> int:
@@ -283,7 +343,9 @@ def select_keyframes(
         current = best.get(slot)
         if current is None or candidates[i].sharpness > candidates[current].sharpness:
             best[slot] = i
-    return [candidates[best[slot]] for slot in sorted(best)]
+    # In frame order, not in the order the sampling placed the anchors: that order
+    # follows the tilt, hence the seed, and the solve must not depend on it.
+    return [candidates[i] for i in sorted(best.values())]
 
 
 def _cv_charuco_board(board: CalibrationBoard) -> cv2.aruco.CharucoBoard:
@@ -329,22 +391,41 @@ def calibrate_intrinsic(
         raise ValueError(f"need >= {_MIN_VIEWS} usable views, got {len(object_points)}")
 
     width, height = image_size
-    guess = guessed_camera_matrix(width, height)
-    # distCoeffs=None is valid at runtime (OpenCV allocates it); the cv2 stub types
-    # it as required, hence the ignore.
-    try:
-        result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
-            object_points, image_points, (width, height), guess, None, flags=_CALIB_FLAGS
-        )
-    except cv2.error as exc:
+    # From Caliscope v0.11.5's seed (ADR-0053): it does not depend on the order of the
+    # views, where OpenCV's own initialisation, from their homographies, does (1.40 to
+    # 6.5 px on the same 50 views, by their order). That one only stands in when
+    # the seeded solve raises or returns a non-finite cost. distCoeffs=None (and
+    # cameraMatrix=None without the guess flag) is valid at runtime; the cv2 stub
+    # types both as required, hence the ignore. A solve is an 8-tuple of mixed types.
+    failures: list[str] = []
+    solve: Any = None
+    for seed, flags in ((guessed_camera_matrix(width, height), _CALIB_FLAGS), (None, 0)):
+        try:
+            solve = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
+                object_points, image_points, (width, height), seed, None, flags=flags
+            )
+        except cv2.error as exc:
+            failures.append(str(exc).strip())
+            solve = None
+        else:
+            if np.isfinite(solve[0]):
+                break
+            failures.append(f"non-finite cost {solve[0]}")
+            solve = None
+        source = "the seed" if seed is not None else "OpenCV's initialisation"
+        logger.warning("intrinsic solve from %s failed: %s", source, failures[-1])
+    if solve is None:
         # The solver's own assertions (degenerate views the gates above missed)
         # are a property of the sweep, not a service fault: report them like the
         # other unusable-input cases (ValueError -> 422) instead of a bare 500.
-        raise ValueError(f"OpenCV calibration failed on these views: {exc}") from exc
-    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
+        raise ValueError(f"OpenCV calibration failed on these views: {'; then '.join(failures)}")
+    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = solve
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
     coverage = _coverage_map(image_points, (width, height))
+    uncertainty = _uncertainty(
+        object_points, image_points, matrix, dist, rvec_list, tvec_list, coverage, image_size
+    )
     return IntrinsicResult(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
@@ -354,12 +435,63 @@ def calibrate_intrinsic(
         view_count=len(object_points),
         image_size=(width, height),
         coverage=coverage,
-        image_coverage=_union_coverage(coverage),
+        image_coverage=_union_coverage(image_points, (width, height)),
         orientation_bins=_orientation_bins(rvec_list),
         board_quads=_board_quads(rvec_list, tvec_list, cv_board),
         sharpness_min=float(min(used_sharpness)),
         sharpness_median=float(np.median(used_sharpness)),
+        **uncertainty,
     )
+
+
+class _UncertaintyFields(TypedDict, total=False):
+    uncertainty: tuple[tuple[float | None, ...], ...]
+    uncertainty_covered_px: float | None
+    uncertainty_uncovered_px: float | None
+    uncertainty_unmodelled: float
+
+
+def _uncertainty(
+    object_points: list[NDArray[np.float32]],
+    image_points: list[NDArray[np.float32]],
+    matrix: NDArray[np.float64],
+    dist: NDArray[np.float64],
+    rvecs: list[NDArray[np.float64]],
+    tvecs: list[NDArray[np.float64]],
+    coverage: tuple[tuple[int, ...], ...],
+    image_size: tuple[int, int],
+) -> _UncertaintyFields:
+    """The result's uncertainty fields (ADR-0055); empty when the covariance is singular.
+
+    A diagnostic: a degenerate covariance must not cost the solve it describes. A nearly
+    singular one is not caught: it reads as huge, finite figures.
+    """
+    distortions = np.asarray(dist, np.float64).ravel()
+    try:
+        covariances = intrinsic_covariances(
+            object_points, image_points, matrix, distortions, rvecs, tvecs
+        )
+        grid = projection_uncertainty(
+            covariances, matrix, distortions, np.asarray(coverage), image_size
+        )
+    except (np.linalg.LinAlgError, cv2.error) as exc:
+        logger.warning("projection uncertainty skipped: %s", exc)
+        return {}
+    counts = np.asarray(coverage)
+    modelled = np.isfinite(grid)
+
+    def rms(mask: NDArray[np.bool_]) -> float | None:
+        cells = mask & modelled
+        return float(np.sqrt(np.mean(np.square(grid[cells])))) if cells.any() else None
+
+    return {
+        "uncertainty": tuple(
+            tuple(round(float(v), 3) if np.isfinite(v) else None for v in row) for row in grid
+        ),
+        "uncertainty_covered_px": rms(counts >= ROBUST_COVERAGE),
+        "uncertainty_uncovered_px": rms(counts == 0),
+        "uncertainty_unmodelled": float(np.mean(~modelled)),
+    }
 
 
 def compute_intrinsic_from_video(
@@ -382,9 +514,10 @@ def compute_intrinsic_from_video(
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
-    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     start = max(0, frame_start)
-    end = frame_end if frame_end is not None else (total if total > 0 else None)
+    # Without a trim, to the last decodable frame: the container's frame count is an
+    # estimate, and on a variable-rate MKV it can announce half the frames (47 of 91).
+    end = frame_end
     read_stride = max(1, stride)
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None

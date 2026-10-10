@@ -630,6 +630,57 @@ def test_compute_persists_metrics_for_reload(
     assert len(metrics["board_quads"]) == 1 and len(metrics["board_quads"][0]) == 4
 
 
+def test_compute_persists_the_uncertainty_at_the_output_resolution(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ADR-0055: pixels, so reported at native x resize_factor like the error; the
+    # coverage grid it is read on is resolution-independent and stays as is.
+    from calibration_service.calibration.intrinsic import IntrinsicResult
+    from calibration_service.transport import api as api_module
+
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    camera = {
+        "index": 0,
+        "device_path": "/dev/v4l/by-path/x",
+        "device_node": "/dev/video0",
+        "width": 64,
+        "height": 48,
+        "resize_factor": 0.5,
+        "fps": 30,
+    }
+    configured = client.post("/cameras/config", json={"prefix": "cam", "cameras": [camera]})
+    assert configured.status_code == 200
+    with VideoRecorder(manager.intrinsic_video_path("cam_0"), 64, 48, fps=30) as rec:
+        for _ in range(3):
+            rec.write(np.zeros((48, 64, 3), dtype=np.uint8))
+    fixture = IntrinsicResult(
+        matrix=[[60.0, 0.0, 31.5], [0.0, 60.0, 23.5], [0.0, 0.0, 1.0]],
+        distortions=[0.0] * 5,
+        error=0.4,
+        per_view_errors=[],
+        grid_count=42,
+        view_count=6,
+        image_size=(64, 48),
+        coverage=((3, 0), (1, 3)),
+        uncertainty=((2.0, None), (4.0, 2.0)),
+        uncertainty_covered_px=2.0,
+        uncertainty_uncovered_px=8.0,
+        uncertainty_unmodelled=0.25,
+    )
+    monkeypatch.setattr(api_module, "compute_intrinsic_from_video", lambda *a, **k: fixture)
+
+    assert client.post("/intrinsic/cam_0/compute").status_code == 200
+    metrics = client.get("/intrinsic/cam_0/metrics").json()
+    assert metrics["coverage"] == [[3, 0], [1, 3]]
+    assert metrics["uncertainty"] == [[1.0, None], [2.0, 1.0]]  # outside the model: null
+    assert metrics["uncertainty_unmodelled"] == 0.25
+    assert metrics["uncertainty_covered_px"] == 1.0
+    assert metrics["uncertainty_uncovered_px"] == 4.0
+
+
 def test_intrinsic_metrics_endpoint_serves_persisted_payload(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
