@@ -263,6 +263,7 @@ class BoardDetector:
         # Recovery paths taken (each logged loud once, then quiet).
         self._refine_failures = 0  # CONTOUR fallbacks
         self._subpix_failures = 0  # ChArUco views dropped
+        self._board_failures = 0  # ChArUco views detectBoard raised on
 
     def detect(self, image: NDArray[np.uint8]) -> BoardDetection:
         gray = _to_gray(image)
@@ -277,7 +278,19 @@ class BoardDetector:
         corners: NDArray[np.float32] | None = None
         ids: NDArray[np.int32] | None = None
         if self._charuco is not None:
-            corners_raw, ids_raw, _, _ = self._charuco.detectBoard(gray)
+            try:
+                corners_raw, ids_raw, _, _ = self._charuco.detectBoard(gray)
+            except cv2.error:
+                # One frame's OpenCV assertion must not fail the whole compute with a
+                # 500: the view is dropped and said once, like cornerSubPix below.
+                self._board_failures += 1
+                log = logger.warning if self._board_failures == 1 else logger.debug
+                log(
+                    "detectBoard raised; ChArUco view dropped (%d so far)",
+                    self._board_failures,
+                    exc_info=True,
+                )
+                return BoardDetection.empty()
             if corners_raw is not None and corners_raw.shape[0] >= 1 and ids_raw is not None:
                 # Sub-pixel refine the interpolated chessboard corners (calibration-grade).
                 refined = np.ascontiguousarray(corners_raw, dtype=np.float32)
