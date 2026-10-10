@@ -29,6 +29,8 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { ExportChecks } from '@/features/export/ExportChecks';
+import { SECTION_LABEL } from '@/features/export/exportChecks';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { selectSession } from '@/features/session/sessionSlice';
 import {
@@ -47,14 +49,6 @@ import {
 // (units + targets) is persisted on the session and restored on reopen. Layout
 // mirrors the other screens (flex column, minmax(0,1fr) + fixed panel, internal
 // scroll — the page itself never scrolls): preview left, controls right.
-const SECTION_LABEL = {
-  fz: '0.66rem',
-  fw: 600,
-  c: 'dark.3',
-  tt: 'uppercase',
-  style: { letterSpacing: '0.07em' },
-} as const;
-
 export function ExportScreen() {
   const session = useAppSelector(selectSession);
   const defaults = useAppSelector(selectDefaults);
@@ -152,6 +146,10 @@ export function ExportScreen() {
     language: file.language,
   }));
   const destination = `${session?.session_dir ?? 'sessions/…'}/export/`;
+  // The checks follow the solve: a reorientation or a Minimize changes the poses.
+  const solveRevision = cameras
+    .map((c) => `${c.extrinsic_error ?? ''}:${(c.rotation ?? []).join(',')}`)
+    .join('|');
 
   return (
     <Box
@@ -299,6 +297,8 @@ export function ExportScreen() {
               })}
             </Stack>
           </Box>
+
+          <ExportChecks revision={solveRevision} />
 
           <Paper p="md" radius="lg" withBorder>
             <Text {...SECTION_LABEL} mb={4}>

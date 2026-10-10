@@ -16,9 +16,11 @@ from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.export import (
+    WorldFrame,
     aniposelib_document,
     caliscope_document,
     export_targets,
+    opencv_document,
     platform_variant,
 )
 from calibration_service.models.session import (
@@ -168,9 +170,19 @@ def test_aniposelib_toml_follows_the_export_units() -> None:
 
 def test_export_targets_catalog_lists_both_tomls_plus_platforms() -> None:
     # Backend = single source for the export catalog (ADR-0026): the Caliscope and
-    # aniposelib TOMLs (OpenCV axes) + the four platform JSONs, with display metadata.
+    # aniposelib TOMLs (OpenCV axes), the OpenCV contract (ADR-0057) + the four
+    # platform JSONs, with display metadata.
     targets = {t.id: t for t in export_targets()}
-    assert set(targets) == {"caliscope", "aniposelib", "threejs", "blender", "unity", "unreal"}
+    assert set(targets) == {
+        "caliscope",
+        "aniposelib",
+        "opencv",
+        "threejs",
+        "blender",
+        "unity",
+        "unreal",
+    }
+    assert targets["opencv"].filename == "camera_array_opencv.json"
     assert targets["caliscope"].filename == "camera_array.toml"
     assert targets["caliscope"].kind == "toml"
     assert targets["aniposelib"].filename == "camera_array_aniposelib.toml"
@@ -276,7 +288,8 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     archive = client.get("/export/archive")
     assert archive.status_code == 200
     with zipfile.ZipFile(io.BytesIO(archive.content)) as bundle:
-        assert sorted(bundle.namelist()) == sorted(names)
+        # The pre-export checks travel with every export (ADR-0057).
+        assert sorted(bundle.namelist()) == sorted([*names, "checks.json"])
 
     # An explicit units override is honoured verbatim (and persists as the new
     # session preference).
@@ -286,7 +299,7 @@ def test_export_routes_write_files_and_zip(tmp_path: Path) -> None:
     # The folder (and so the archive) holds THIS export only: the previous
     # selection's metre TOML must not ship next to the new millimetre JSON.
     with zipfile.ZipFile(io.BytesIO(client.get("/export/archive").content)) as bundle:
-        assert bundle.namelist() == ["camera_array_unity.json"]
+        assert sorted(bundle.namelist()) == ["camera_array_unity.json", "checks.json"]
 
     assert client.post("/export", json={"formats": ["nope"]}).status_code == 422
     assert manager.current().step.value == "export"  # wizard advanced
@@ -333,7 +346,7 @@ def test_export_conventions_catalog_route(tmp_path: Path) -> None:
     client = TestClient(create_app(SessionManager(tmp_path, "default")))
     catalog = client.get("/export/conventions").json()["targets"]
     ids = [t["id"] for t in catalog]
-    assert ids == ["caliscope", "aniposelib", "threejs", "blender", "unity", "unreal"]
+    assert ids == ["caliscope", "aniposelib", "opencv", "threejs", "blender", "unity", "unreal"]
 
 
 def test_export_refuses_a_camera_without_translation() -> None:
@@ -397,3 +410,115 @@ def test_caliscope_toml_stays_in_metres_whatever_the_units(tmp_path: Path) -> No
     aniposelib = rtoml.loads(content["camera_array_aniposelib.toml"])
     assert aniposelib["cam_1"]["translation"] == pytest.approx([80.0, 0.0, 0.0])  # mm
     assert json.loads(content["camera_array_threejs.json"])["world_units"] == "mm"
+
+
+def test_the_opencv_contract_is_the_threejs_view_in_metres() -> None:
+    # ADR-0057: R and t are the three.js variant's view block (the same basis M,
+    # world -> camera, Y-up right-handed), t always in metres and a 3x1 column;
+    # cameras sorted by port, the two errors apart, an import's path dropped.
+    session = _session()
+    session.cameras.reverse()
+    session.cameras[0].device_path = "import:cam_1.mp4"
+    world = WorldFrame("target", "centre of the marker of group 3", "y", 3)
+    document = opencv_document(session, 40.0, world, exported_at="2026-10-10T00:00:00+00:00")
+    threejs = platform_variant(session, "threejs", 40.0, units="m")
+    view = {c["name"]: c["view"] for c in threejs["cameras"]}
+    assert document["format"] == "realtime-calib/opencv-cameras"
+    assert document["version"] == 1
+    assert [c["port"] for c in document["cameras"]] == [0, 1]
+    for camera in document["cameras"]:
+        assert np.allclose(camera["R"], view[camera["name"]]["R"])
+        assert np.asarray(camera["t"]).shape == (3, 1)
+        assert np.allclose(np.asarray(camera["t"]).ravel(), view[camera["name"]]["t"])
+        assert camera["intrinsic_error_px"] == 0.2
+        assert camera["extrinsic_error_px"] == 0.3
+        assert camera["resolution"] == [640, 480]
+    assert document["cameras"][1]["t"] == [[0.08], [0.0], [0.0]]  # 2 squares of 40 mm
+    assert document["cameras"][0]["device_path"] == "/dev/v4l/by-path/cam0"
+    assert document["cameras"][1]["device_path"] is None  # import: a file, not a device
+    assert document["world"] == {
+        "frame": "target",
+        "origin": "centre of the marker of group 3",
+        "group": 3,
+        "up": "y",
+    }
+    unframed = WorldFrame("anchor_camera", "optical centre of cam_0", None)
+    world_block = opencv_document(session, 40.0, unframed, exported_at="x")["world"]
+    assert "up" not in world_block  # not asserted until the world is framed
+
+
+def test_the_opencv_target_ignores_the_export_units(tmp_path: Path) -> None:
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
+    manager.current().cameras.extend(_session().cameras)
+    exports = []
+    for units in ("mm", "m"):
+        response = client.post("/export", json={"formats": ["opencv"], "units": units})
+        assert response.status_code == 200
+        exports.append(json.loads((manager.export_dir() / "camera_array_opencv.json").read_text()))
+    assert exports[0]["cameras"] == exports[1]["cameras"]
+    checks = json.loads((manager.export_dir() / "checks.json").read_text())["checks"]
+    assert [c["id"] for c in checks] == [
+        "camera_error",
+        "epipolar",
+        "target_rigidity",
+        "frame",
+        "cameras_above_floor",
+    ]
+    assert checks[3]["status"] == "warn"  # no solve on disk: the world is unknown
+    served = client.get("/export/checks").json()["checks"]
+    assert [c["status"] for c in served] == [c["status"] for c in checks]
+
+
+def test_the_opencv_errors_never_fall_back_and_the_world_reports_its_drift() -> None:
+    session = _session()
+    session.cameras[1].extrinsic_error = None
+    world = WorldFrame(
+        "target", "centre of the marker of group 3, as framed", "y", 3, 0.1, (), 0.0023
+    )
+    document = opencv_document(session, 40.0, world, exported_at="x")
+    assert document["cameras"][1]["extrinsic_error_px"] is None  # not the intrinsic one
+    assert document["cameras"][1]["intrinsic_error_px"] == 0.2
+    assert document["world"]["target_offset_m"] == 0.0023
+
+
+def test_a_malformed_ba_inputs_does_not_block_the_export(tmp_path: Path) -> None:
+    # A truncated ba_inputs.json made POST /export and GET /export/checks fail with a 500.
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
+    manager.current().cameras.extend(_session().cameras)
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    result = {
+        "cameras": ["cam_0", "cam_1"],
+        "rotations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.0, float(np.pi / 2), 0.0]},
+        "translations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [2.0, 0.0, 0.0]},
+        "per_camera_error": {"cam_0": 0.3, "cam_1": 0.3},
+        "error": 0.3,
+        "pair_errors": {},
+        "group_count": 1,
+        "point_count": 1,
+    }
+    (directory / "result.json").write_text(json.dumps(result))
+    truncated = {
+        "obs_camera": [0, 1],
+        "obs_point": [0, 0],
+        "obs_norm": [[0.0, 0.0]],
+        "obs_px": [[0.0, 0.0], [0.0, 0.0]],
+        "point_corner": [0],
+    }
+    (directory / "ba_inputs.json").write_text(json.dumps(truncated))
+    response = client.post("/export", json={"formats": ["opencv"], "units": "m"})
+    assert response.status_code == 200
+    checks = {
+        c["id"]: c for c in json.loads((manager.export_dir() / "checks.json").read_text())["checks"]
+    }
+    assert checks["epipolar"]["status"] == "unavailable"
+    assert checks["epipolar"]["detail"].startswith("could not run")
+    assert client.get("/export/checks").status_code == 200

@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
+from calibration_service.calibration import ExtrinsicResult, camera_centres
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
 from calibration_service.models.session import WizardStep
 from calibration_service.recording import VideoRecorder, preview_path
@@ -839,7 +840,7 @@ def test_orient_persists_the_framed_group_marker(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
     board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 8, "rows": 5}
-    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board})
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
     fixture = {
@@ -864,10 +865,49 @@ def test_orient_persists_the_framed_group_marker(tmp_path: Path) -> None:
     framed = client.post("/extrinsic/orient", json={"op": "set_frame", "group": 0})
     assert framed.status_code == 200
     assert framed.json()["framed_group"] == 0
+    # A ChArUco quad's normal points away from the cameras: up is still their side.
+    centres = camera_centres(ExtrinsicResult(**framed.json()))
+    assert all(centre[1] < 0.0 for centre in centres.values())
+    # A ChArUco frame originates at its first chessboard corner.
+    assert np.allclose(framed.json()["board_quads"][0][0], 0.0, atol=1e-9)
 
     rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "y", "degrees": -90})
     assert rotated.json()["framed_group"] == 0  # rotate keeps the marker
     assert client.get("/extrinsic/result").json()["framed_group"] == 0  # survives reload
+
+
+def test_set_frame_on_a_steep_marker_keeps_its_own_normal_up(tmp_path: Path) -> None:
+    # Review of ADR-0057: on a wall marker every camera sees from the front, the
+    # cameras' centroid can sit behind its plane (27 to 92 groups of 240 on the
+    # recorded marker sweeps). The corner order decides up, not the centroid.
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "aruco", "dictionary": "DICT_4X4_100"}
+    assert client.post("/board", json={"target": "extrinsic", "board": board}).status_code == 200
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    # cam_0 faces the marker (its normal x cross y = -z points at it); cam_1 and cam_2
+    # pull the centroid behind the marker's plane (z = 5).
+    centres = {"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.0, 0.0, 20.0], "cam_2": [1.0, 0.0, 20.0]}
+    fixture = {
+        "cameras": list(centres),
+        "rotations": {n: [0.0, 0.0, 0.0] for n in centres},
+        "translations": {n: [-v for v in c] for n, c in centres.items()},
+        "per_camera_error": {n: 0.1 for n in centres},
+        "error": 0.1,
+        "pair_errors": {},
+        "group_count": 1,
+        "point_count": 4,
+        "board_quads": [[[0.0, 0.0, 5.0], [1.0, 0.0, 5.0], [1.0, -1.0, 5.0], [0.0, -1.0, 5.0]]],
+    }
+    (directory / "result.json").write_text(json.dumps(fixture))
+    framed = client.post("/extrinsic/orient", json={"op": "set_frame", "group": 0})
+    assert framed.status_code == 200
+    quad = np.asarray(framed.json()["board_quads"][0])
+    normal = np.cross(quad[1] - quad[0], quad[3] - quad[0])
+    assert np.allclose(normal / np.linalg.norm(normal), [0.0, -1.0, 0.0], atol=1e-9)
+    assert camera_centres(ExtrinsicResult(**framed.json()))["cam_0"][1] < 0.0
+    assert np.allclose(quad.mean(axis=0), 0.0, atol=1e-9)  # a marker's frame: its centre
 
 
 def test_extrinsic_groups_and_frame_server(tmp_path: Path) -> None:
