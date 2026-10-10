@@ -38,7 +38,12 @@ A warning appears if the bundle adjustment stopped at its iteration ceiling inst
 
 ## The 3D review
 
-The world frame starts on the **anchor** camera (index 0). From the world-frame controls you can:
+The view shows every camera as a frustum (its image plane tinted, a small triangle on its top edge), the target of the group selected with the slider, and its triangulated corners:
+
+- **Navigate**: drag to rotate freely (one finger on a tablet), scroll or pinch to zoom, right-drag or two fingers to pan. **Recenter** (top-right corner) returns to the default upright view. The view is framed once per solve: scrubbing the slider or folding a panel does not move it.
+- **World / Board** (top-right corner): draws either the world axes (X, Y, Z, over a floor grid once the world is framed on a target) or the axes of the target in the selected group (x, y, z).
+
+The world frame starts on the **anchor** camera (index 0). From the world-frame controls (top-left, foldable to a corner button) you can:
 
 - **Set frame on board**: pick a group where the target lies on the floor; the printed face of the target becomes the ground plane, and the origin goes to the marker's centre (single marker) or the board's first chessboard corner (ChArUco), so the cameras end up above the floor whatever the board type. The slider marks the framed group.
 - **Snap-rotate** the axes by ±90° about x, y or z.
@@ -59,7 +64,7 @@ Cameras are matched by their USB path (by index only when one side has none, and
 
 ## Under the hood
 
-- Frames are timestamped from the camera driver's own buffer timestamps when they are plausible (otherwise the host clock) and grouped into synchronized instants, with a window just under one frame period. No hardware sync is needed.
+- Frames are timestamped from the camera driver's own buffer timestamps when they are plausible (otherwise the host clock) and grouped into synchronized instants, with a window just under one frame period, measured from each camera's mean recorded frame period. No hardware sync is needed.
 - Single-marker corners are refined from the marker's own black border, which removes the inward bias of OpenCV's contour refinement; ChArUco corners use the chessboard corners.
 - Pairwise relative poses via **`cv2.stereoCalibrate`** on each pair's shared views; a **co-visibility graph** links the cameras and poses are **chained from the anchor**.
 - A **bundle adjustment** (`scipy.optimize.least_squares`) jointly refines every non-anchor pose and the 3D points, a linear pass then a robust `soft_l1` pass, with **rigidity constraints** holding the reconstructed target to its printed geometry. The anchor stays fixed.

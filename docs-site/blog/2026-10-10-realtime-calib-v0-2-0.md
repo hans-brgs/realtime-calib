@@ -17,6 +17,7 @@ keywords: [multi-camera calibration release, camera calibration accuracy, OpenCV
 - **Checkable.** A pre-export checks panel, a target-rigidity figure in millimetres, an intrinsic uncertainty map, and a **site template** that checks cabling, placement and scale against a tape measure.
 - **Easier to hand over.** A ready-to-load **OpenCV JSON** export, a `camera_array.toml` that recent Caliscope versions actually load, and **re-alignment on a previous calibration** so the room's frame does not move when you recalibrate.
 - **Simpler to install.** The stack now serves **plain HTTP** on your local network: no certificate to generate, no browser warning on the tablet.
+- **Roomier to use.** A side panel that folds away for a wider camera view, a compact header on the capture steps, and a steadier 3D review.
 
 ## A calibration audit
 
@@ -29,7 +30,7 @@ I went through the calibration code end to end, looking for anything that could 
 - **Changing the target after a solve silently rescaled the export**, and recomputing a camera's intrinsics kept poses solved with the old ones. Both now discard the solve, after a confirmation, while keeping the recording: the Extrinsic step offers **"Recompute from the recorded sweep"**.
 - **The real-time capture is sturdier**: a camera can no longer be released while a frame is being read (on the rig, that used to wedge the device until a restart), opening cameras no longer freezes the API, and only one long operation runs at a time.
 
-On the recorded single-marker sessions, the target is now held rigid to about 0.4 mm instead of about 1 mm.
+On the recorded single-marker sessions, the target is now held rigid to about 0.4 mm instead of about 1 mm. And the corrected scale holds against a tape measure: on a 4-camera rig calibrated with a single 297 mm marker, two camera-to-camera distances measured at 267.5 and 281.5 cm come out at 266.8 and 280.6 cm, where v0.1.0 gave about 2 % more.
 
 ## Checks before you hand a calibration over
 
@@ -61,6 +62,14 @@ docker compose up --build
 
 The one thing lost: the **copy** button of the export preview needs a secure context, so it only works at `http://localhost`. Download the files from a tablet instead. The stack is meant for a trusted local network, not for exposure to the internet.
 
+## A roomier wizard
+
+- **Fold the side panel.** On every step, the settings panel on the right folds away from a button at the end of the title row, and the camera tiles, the replay or the 3D view take the whole width. On the capture steps, the action buttons move under the view, so Stop stays at hand while you record.
+- **Less text, more view.** Each screen's explanation moved behind an **ⓘ** button next to its title, and the capture steps fit their camera tabs and phases on one line.
+- **A steadier 3D review.** The view no longer drifts after a drag or re-frames itself when the layout changes. Two fingers (or the right mouse button) pan, **Recenter** returns to an upright view, a floor grid appears once the world is framed, and a **World / Board** switch shows either the world axes or the target's own.
+- **Target Config says what is saved.** A status line above Save tells you whether the board is saved, edited since, or not saved yet, and the extrinsic board can only be saved after the intrinsic one.
+- **Opening a recent session** now always takes you to the step where it was left off, and an imported session's Camera Setup shows a frame from the middle of each recording, the same moment on every camera, instead of a black first frame.
+
 ## Smaller things
 
 - A camera that cannot be opened, or that drops out mid-capture, is now shown in error with its reason and reopened automatically.
@@ -70,7 +79,7 @@ The one thing lost: the **copy** button of the export preview needs a secure con
 
 ## Upgrading from v0.1.0
 
-- **Rebuild Caddy and switch to `http://`**: `docker compose up -d --build caddy`, then open `http://<HOST_IP>`. In `.env`, `CADDY_HTTPS_PORT` is no longer read; set `CADDY_HTTP_PORT` only if port 80 is taken. A browser that cached a redirect to `https` may need the address retyped.
+- **Rebuild the whole stack and switch to `http://`**: `git pull`, then `docker compose up -d --build` (every image changes), and open `http://<HOST_IP>`. In `.env`, `CADDY_HTTPS_PORT` is no longer read; set `CADDY_HTTP_PORT` only if port 80 is taken. A browser that cached a redirect to `https` may need the address retyped.
 - **`camera_array.toml` changed layout.** A script that read top-level `[cam_N]` tables should read `camera_array_aniposelib.toml` or `camera_array_opencv.json` instead. Files exported by v0.1.0 are read by recent Caliscope versions as an empty camera array: export them again.
 - **Recompute to compare.** Existing sessions open as they are, but a calibration computed with v0.1.0 is not comparable with a new one: single-marker distances shorten by 1.3 to 3 % (the correction), the reported errors drop, and an exported `K` moves by a fraction of a pixel at a reduced output resolution.
 - **No way back.** Sessions opened by v0.2.0 are migrated to a new file version that v0.1.0 does not understand: keep a copy of the session folder if you might need to go back.

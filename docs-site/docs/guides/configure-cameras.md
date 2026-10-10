@@ -20,7 +20,7 @@ Cameras are identified by their stable USB path (`/dev/v4l/by-path/…`), so a c
 
 ## Apply, then continue
 
-Your edits (parameters **and** order) form a draft that nothing reads until you click **Apply configuration**. Apply is enabled while the draft differs from the saved configuration; **Continue to Intrinsics** is enabled once there is nothing left to apply. This way you can check that a change took effect before moving on.
+The camera order and the capture format sit in one card, because **Apply configuration** writes both at once. Your edits (parameters **and** order) form a draft that nothing reads until you click **Apply configuration**. Apply is enabled while the draft differs from the saved configuration; **Continue to Intrinsics** is enabled once there is nothing left to apply. This way you can check that a change took effect before moving on.
 
 Applying a changed configuration rebuilds the cameras, and a rebuild discards the calibrations already computed: their recordings were made with the previous configuration, and are keyed by camera index. The web app asks for confirmation first.
 
@@ -57,6 +57,6 @@ The **Settings** window (from the rail) holds settings of the rig rather than of
 
 ## Imported sessions
 
-In a session [loaded from files](/docs/guides/start-or-load-session#load-from-files), Camera Setup is read-only: it shows the first frame of each recording, and the order comes from the file names.
+In a session [loaded from files](/docs/guides/start-or-load-session#load-from-files), Camera Setup is read-only: it shows a frame from the middle of each camera's extrinsic sweep (the same moment on every camera, to check the order), or of its intrinsic sweep when there is no extrinsic one. The order comes from the file names.
 
 → Reference: [Calibration output files](/docs/reference/output-calibration-files)

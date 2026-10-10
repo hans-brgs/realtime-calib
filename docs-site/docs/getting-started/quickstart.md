@@ -19,13 +19,15 @@ Open the web app: you land on the **Dashboard** ("Welcome to the calibration ben
 - **New realtime calibration**: start the full wizard from scratch, with live capture. Each sweep is recorded to the session folder so it can be replayed and recomputed later.
 - **Load from files**: upload an archive of pre-recorded camera videos (for example a Caliscope recording) and run the same wizard on them, without any camera attached.
 
-Once a session is created or opened, the wizard rail unlocks and follows the persisted step.
+Once a session is created or opened, the wizard rail unlocks and the wizard goes to the session's persisted step.
+
+Each screen explains itself behind the **ⓘ** button next to its title. On a wide screen, the settings panel on the right folds away from the button at the end of the title row, to give the camera view the whole width; on the capture steps, the action buttons then move under the view.
 
 → Details: [Start or load a session](/docs/guides/start-or-load-session)
 
 ## 2. Define a board: Target Config
 
-Go to **Target Config**. Set up the intrinsic board: a **ChArUco** board, which the intrinsic solve requires. The extrinsic step **inherits it by default**, or you can define a distinct extrinsic target, such as a single large **ArUco marker** for a big room. Download the PNG, print it, then **measure the printed square or marker with a caliper** and enter that size on the extrinsic board: it sets the metric scale of the whole rig. **Camera Setup stays locked until the intrinsic board is defined.**
+Go to **Target Config**. Set up the intrinsic board: a **ChArUco** board, which the intrinsic solve requires. The extrinsic step **inherits it by default**, or you can define a distinct extrinsic target, such as a single large **ArUco marker** for a big room. Download the PNG, print it, then **measure the printed square or marker with a caliper** and enter that size on the extrinsic board: it sets the metric scale of the whole rig. Save the intrinsic board first (the Extrinsic tab unlocks then), then the extrinsic one: **Camera Setup stays locked until both are saved.**
 
 → Details: [Define a calibration board](/docs/guides/calibration-board)
 

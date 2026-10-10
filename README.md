@@ -19,10 +19,7 @@
   <a href="https://github.com/hans-brgs/realtime-calib/stargazers"><img alt="GitHub stars" src="https://img.shields.io/github/stars/hans-brgs/realtime-calib?style=social"></a>
 </p>
 
-An operator starts the project, opens the webapp (desktop or **tablet** in
-landscape today — phone &amp; portrait coming soon) and follows a wizard: camera
-config → board(s) → per-camera intrinsic calibration → extrinsic calibration →
-3D review → export.
+An operator starts the project, opens the webapp on a desktop, a **tablet** or a phone (landscape or portrait) and follows a wizard: board(s) → camera setup → per-camera intrinsic calibration → extrinsic calibration → 3D review → checks and export.
 
 https://github.com/user-attachments/assets/757728c1-5a39-4f21-b288-5ca7d26c1a18
 
@@ -40,12 +37,13 @@ https://github.com/user-attachments/assets/757728c1-5a39-4f21-b288-5ca7d26c1a18
 | `livekit-token-server/` | LiveKit JWT token issuance | Python (Flask) |
 | `caddy/` | Reverse proxy + static serving (plain HTTP) | Caddy v2 |
 
-Orchestration lives in `docker-compose.yml` (which also adds `livekit`, the upstream WebRTC SFU). **Single stack**: Caddy is the mandatory, always-on entry point, in plain HTTP on the LAN — tablet access via `http://<HOST_IP>`, same-machine via `http://localhost`. No certificate to generate or trust: the webapp only receives video and data, which needs no secure context. See ADR-0063.
+Orchestration lives in `docker-compose.yml` (which also adds `livekit`, the upstream WebRTC SFU). **Single stack**: Caddy is the mandatory, always-on entry point, in plain HTTP on the LAN — tablet access via `http://<HOST_IP>`, same-machine via `http://localhost`. No certificate to generate or trust: the webapp only receives video and data, which needs no secure context.
 
 ## Quick start
 
 ```bash
-# Prerequisites: Docker, uv
+# Prerequisites: Docker (uv and Node only for local development)
+git clone https://github.com/hans-brgs/realtime-calib && cd realtime-calib
 cp .env.example .env          # fill in HOST_IP and the LiveKit keys
 
 # Single stack (Caddy, plain HTTP, always on)
@@ -59,10 +57,9 @@ The export preview's **copy** button needs a secure context: it works at `http:/
 
 ## Documentation
 
-Documentation (ADRs, entity and feature specs, roadmap) lives in the separate
-`realtime-calib-doc/` repository (Obsidian vault). Development follows a
-**spec-first / plan-review-implement / systematic-ADR** workflow described in the
-`CLAUDE.md` files (root and per service).
+The user documentation (installation, step-by-step guides, output file reference, methodology) is on the [project site](https://realtime-calib.hans-brgs.dev/docs/intro), and [RUNBOOK.md](RUNBOOK.md) covers running and troubleshooting the stack.
+
+The design documentation (ADRs, entity and feature specs, roadmap) lives in a separate repository. Development follows a **spec-first / plan-review-implement / systematic-ADR** workflow described in the `CLAUDE.md` files (root and per service).
 
 ## Transparency & acknowledgements
 

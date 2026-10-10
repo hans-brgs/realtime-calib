@@ -33,7 +33,7 @@ my-session.zip
 - One wrapper folder inside the archive is fine, and the singular folder names (`intrinsic/`, `extrinsic/`) of a Caliscope project are accepted too.
 - **Synchronization of the extrinsic videos.** A `timestamps.csv` in Caliscope's format (`cam_id,frame_time`) with real capture times is used for pairing. Without one, or with Caliscope's synthetic `inferred_timestamps.csv` (which is detected and ignored), the videos are aligned the way Caliscope aligns bare videos.
 - The videos are copied frame for frame into the session (remuxed, re-encoded only when OpenCV cannot read the original container), so frame *i* stays frame *i*, variable-frame-rate phone videos included.
-- In an imported session, Camera Setup is **read-only** and shows each recording's first frame instead of a live preview. Board definition, Prepare, compute, 3D review and export work as in a live session.
+- In an imported session, Camera Setup is **read-only** and shows a frame from the middle of each recording instead of a live preview. Board definition, Prepare, compute, 3D review and export work as in a live session.
 - A failed import leaves no partial session behind, and the error names the file at fault.
 
 ## Resuming and switching sessions

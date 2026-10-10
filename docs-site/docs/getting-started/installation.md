@@ -68,7 +68,7 @@ Every calibration is a **session folder** under `./sessions/` on the host (mount
 Earlier versions served the web app over HTTPS with a locally generated certificate. To upgrade:
 
 - In `.env`, `CADDY_HTTPS_PORT` is no longer read. Set `CADDY_HTTP_PORT` only if port 80 is taken.
-- Rebuild Caddy, since the web app bakes its URLs in at build time: `docker compose up -d --build caddy`.
+- Pull the new version and rebuild the whole stack: `git pull`, then `docker compose up -d --build`. Every image changes, and the web app bakes its URLs in at build time.
 - Open `http://<HOST_IP>`. A browser that cached a redirect to `https` may need the address retyped with `http://`.
 
 Sessions recorded with an earlier version open as they are: their files are migrated when loaded. Solves computed by an earlier version are not comparable with new ones, because the calibration pipeline has changed since; recompute them to compare.

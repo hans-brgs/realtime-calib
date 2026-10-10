@@ -8,16 +8,18 @@ keywords: [ChArUco board, ArUco board, calibration board, calibration target, Ch
 
 # Define a calibration board
 
-**Target Config** is the first wizard step: configure the board(s) realtime-calib will detect, download them to print, then enter the measured size of the extrinsic target. Camera Setup stays locked until the intrinsic board is defined.
+**Target Config** is the first wizard step: configure the board(s) realtime-calib will detect, download them to print, then enter the measured size of the extrinsic target. Each board is saved with its own **Save** button, and Camera Setup unlocks once both are saved.
 
 ## Two roles: intrinsic and extrinsic
 
-The screen has two tabs, one per role:
+The screen has two tabs, **Intrinsic** and **Extrinsic**, one per role:
 
 - The **intrinsic board** must be a **ChArUco** board: the intrinsic solve needs its many identified chessboard corners.
 - The **extrinsic board** links the cameras into one world. By default it **inherits** the intrinsic board's geometry. Tick **"Use a different board for extrinsic"** to define a distinct target: either another ChArUco board or a **single ArUco marker**, which stays detectable from across a large room where the squares of a printable ChArUco board would be too small.
 
 When the extrinsic board inherits, it follows the intrinsic board: editing the intrinsic grid updates it, and keeps the size you measured.
+
+Save the intrinsic board first: the **Extrinsic** tab stays locked until it is saved. Above the **Save** button, a status line tells you where the current tab stands: saved, edited since the last save, or not saved yet. The next steps always use the saved boards, never unsaved edits, and **Save** is disabled while nothing has changed.
 
 ## Geometry (renders the printable PNG)
 
