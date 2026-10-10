@@ -33,7 +33,7 @@ export function uncertaintyBand(px: number): UncertaintyBand {
   );
 }
 
-// "0.6 / 4.2 px" (covered / elsewhere), a dash for a side the solve could not read.
+// "0.6 / 4.2 px" (covered / never covered), a dash for a side the solve could not read.
 export function formatUncertainty(covered?: number | null, uncovered?: number | null): string {
   if (covered == null && uncovered == null) return '—';
   const show = (value?: number | null) => (value == null ? '—' : capUncertainty(value));

@@ -256,7 +256,7 @@ export const retryExtrinsicPreview = (): Promise<ExtrinsicPreviewStatus> =>
 // Review metrics persisted at compute (ADR-0022/0038/0039, Results): the coverage
 // map is a quad-accumulation COUNT per cell (how many retained keyframes' board
 // hulls covered it — 0 never, 1 fragile, 3+ robust); image_coverage is the
-// union-of-quads area fraction (grid-free); orientation_bins the occupied
+// union-of-quads area fraction (384-column grid); orientation_bins the occupied
 // tilt-azimuth sectors (/8); board_quads each keyframe board's 4 outline corners
 // in 3D camera coords. sharpness_min/median describe the retained keyframes — the
 // observability that replaced the absolute blur gate (absent on metrics persisted
