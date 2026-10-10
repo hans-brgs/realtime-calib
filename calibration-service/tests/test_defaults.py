@@ -49,8 +49,6 @@ def _intrinsic_result() -> IntrinsicResult:
         matrix=[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]],
         distortions=[0.0] * 8,
         error=0.12,
-        per_view_errors=[0.1] * 6,
-        grid_count=42,
         view_count=6,
         image_size=(64, 48),
         coverage=((0.0, 1.0),),

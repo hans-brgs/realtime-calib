@@ -1,4 +1,4 @@
-"""Intrinsic calibration from ChArUco detections (ADR-0009, [[intrinsic-calibration-flow]]).
+"""Intrinsic calibration from ChArUco detections (ADR-0059, [[intrinsic-calibration-flow]]).
 
 Two stages, kept separate so keyframe selection is testable without the OpenCV
 solver:
@@ -11,8 +11,8 @@ solver:
 - ``calibrate_intrinsic`` — run ``cv2.calibrateCameraExtended`` on the retained
   views (classic 5-coefficient model — real Caliscope parity, ADR-0032; solved
   from Caliscope v0.11.5's seed, OpenCV's own initialisation standing in when
-  that solve fails — ADR-0053), exposing
-  ``perViewErrors`` for outlier rejection.
+  that solve fails — ADR-0053), once: no view is dropped afterwards to lower the
+  RMSE (ADR-0059).
 
 Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 ``board.matchImagePoints`` (ChArUco corners → object/image points) then
@@ -74,8 +74,6 @@ class IntrinsicResult:
     matrix: list[list[float]]  # 3x3 K
     distortions: list[float]  # classic 5 coefficients [k1, k2, p1, p2, k3] (ADR-0032)
     error: float  # RMS reprojection error (px)
-    per_view_errors: list[float]  # per-keyframe reprojection error
-    grid_count: int  # total corners used across keyframes
     view_count: int  # keyframes used
     image_size: tuple[int, int]  # (width, height)
     # Review metrics (ADR-0022). All resolution-independent, so ``scaled()`` leaves them
@@ -117,7 +115,6 @@ class IntrinsicResult:
             self,
             matrix=to_output(self.matrix, self.image_size, factor),
             error=self.error * factor,
-            per_view_errors=[e * factor for e in self.per_view_errors],
             image_size=output_size(self.image_size, factor),
             uncertainty=tuple(
                 tuple(None if v is None else round(v * factor, 3) for v in row)
@@ -300,7 +297,7 @@ def select_keyframes(
     kept. Diversity decides how many keyframes and where; sharpness decides which
     one to take at each spot. So a uniformly-blurry sweep still calibrates (no
     absolute blur gate), while coverage is never traded away for the crispest few
-    (they cluster on the frontal/centre hold — anti-pattern ADR-0009).
+    (they cluster on the frontal/centre hold — the anti-pattern ADR-0059 keeps).
     """
     width, height = image_size
     candidates = [
@@ -371,7 +368,6 @@ def calibrate_intrinsic(
     object_points: list[NDArray[np.float32]] = []
     image_points: list[NDArray[np.float32]] = []
     used_sharpness: list[float] = []
-    grid_count = 0
     for det in detections:
         if det.corners is None or det.ids is None or det.count < _MIN_CORNERS_FOR_CALIBRATION:
             continue
@@ -385,7 +381,6 @@ def calibrate_intrinsic(
         object_points.append(obj)
         image_points.append(img)
         used_sharpness.append(det.sharpness)
-        grid_count += int(obj.shape[0])
 
     if len(object_points) < _MIN_VIEWS:
         raise ValueError(f"need >= {_MIN_VIEWS} usable views, got {len(object_points)}")
@@ -419,7 +414,7 @@ def calibrate_intrinsic(
         # are a property of the sweep, not a service fault: report them like the
         # other unusable-input cases (ValueError -> 422) instead of a bare 500.
         raise ValueError(f"OpenCV calibration failed on these views: {'; then '.join(failures)}")
-    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = solve
+    rms, matrix, dist, rvecs, tvecs, *_ = solve
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
     coverage = _coverage_map(image_points, (width, height))
@@ -430,8 +425,6 @@ def calibrate_intrinsic(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
         error=float(rms),
-        per_view_errors=np.asarray(per_view, float).ravel().tolist(),
-        grid_count=grid_count,
         view_count=len(object_points),
         image_size=(width, height),
         coverage=coverage,

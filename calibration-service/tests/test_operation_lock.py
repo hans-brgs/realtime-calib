@@ -22,8 +22,6 @@ RESULT = IntrinsicResult(
     matrix=[[101.0, 0.0, 32.0], [0.0, 101.0, 24.0], [0.0, 0.0, 1.0]],
     distortions=[0.0] * 5,
     error=0.2,
-    per_view_errors=[0.2] * 6,
-    grid_count=42,
     view_count=6,
     image_size=(64, 48),
 )
