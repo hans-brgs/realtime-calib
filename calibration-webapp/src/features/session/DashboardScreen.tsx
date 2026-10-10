@@ -10,6 +10,7 @@ import {
   UnstyledButton,
 } from '@mantine/core';
 import { useDisclosure } from '@mantine/hooks';
+import { notifications } from '@mantine/notifications';
 import { IconChevronRight, IconFolder, IconVideo, type IconProps } from '@tabler/icons-react';
 import { type ComponentType, type CSSProperties, useEffect, useState } from 'react';
 
@@ -186,6 +187,14 @@ export function DashboardScreen() {
     setOpenError(null);
     dispatch(openSessionThunk(session.session_id))
       .unwrap()
+      .then(() =>
+        notifications.show({
+          title: 'Session opened',
+          message: `${session.session_id} — back where it was left off.`,
+          color: 'violet',
+          autoClose: 3000,
+        }),
+      )
       .catch((err: unknown) => {
         setOpenError(errorMessage(err, 'could not open the session'));
         void dispatch(fetchRecentSessions());
