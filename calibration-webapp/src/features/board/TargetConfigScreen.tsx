@@ -12,7 +12,14 @@ import {
   Switch,
   Text,
 } from '@mantine/core';
-import { IconAlertTriangle, IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconDownload,
+  IconInfoCircle,
+  IconRuler,
+} from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -24,6 +31,7 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { type DraftStatus, extrinsicStatus, intrinsicStatus } from '@/features/board/boardDraft';
 import { measurementOf, withMeasurement } from '@/features/board/measurement';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
@@ -43,6 +51,34 @@ function normalizeBoard(board: Board): Board {
     return board;
   }
   return { ...board, marker_size_mm: board.marker_ratio * board.square_size_mm };
+}
+
+// What the service stores, next to the Save button: the next steps read the stored
+// boards, never this form.
+function draftMessage(target: BoardTarget, status: DraftStatus): string {
+  switch (status) {
+    case 'saved':
+      return target === 'intrinsic' ? 'Intrinsic board saved' : 'Extrinsic board saved';
+    case 'edited':
+      return 'Unsaved changes: the next steps use the saved board until you save';
+    case 'unsaved':
+      return target === 'intrinsic'
+        ? 'Not saved yet: save it to unlock the extrinsic board'
+        : 'Not saved yet: save it to unlock Camera Setup';
+  }
+}
+
+function DraftStatusLine({ message, ok }: { message: string; ok: boolean }) {
+  const color = ok ? 'var(--rc-success)' : 'var(--rc-warning)';
+  const Icon = ok ? IconCircleCheck : IconAlertCircle;
+  return (
+    <Group gap={6} wrap="nowrap" align="flex-start" mt="lg">
+      <Icon size={15} color={color} style={{ flex: 'none', marginTop: 1 }} />
+      <Text fz="0.76rem" c={color} style={{ lineHeight: 1.4 }}>
+        {message}
+      </Text>
+    </Group>
+  );
 }
 
 // Marker capacity from a predefined dictionary name (mirrors the backend): the
@@ -142,7 +178,11 @@ function TargetConfigForm({
 
   const [dictionaries, setDictionaries] = useState<string[]>([intrinsicSeed.dictionary]);
   const [active, setActive] = useState<BoardTarget>(
-    session?.step === 'extrinsic_board_choice' ? 'extrinsic' : 'intrinsic',
+    // Never on the locked tab: a legacy session can sit at the extrinsic choice with
+    // its intrinsic board dropped at load (an ArUco or invalid block).
+    session?.step === 'extrinsic_board_choice' && session.intrinsic_board
+      ? 'extrinsic'
+      : 'intrinsic',
   );
   const [intrinsic, setIntrinsic] = useState<Board>(intrinsicSeed);
   const [extrinsic, setExtrinsic] = useState<Board>(extrinsicSeed);
@@ -184,6 +224,20 @@ function TargetConfigForm({
   // board object itself, so the measurement taken here ends up on THAT board.
   const missingMeasurement =
     active === 'extrinsic' && !(typeof measurement === 'number' && measurement > 0);
+  // Saved, edited or never saved, against what the service stores: the next steps
+  // read the stored boards, never this form.
+  const intrinsicSaved = session?.intrinsic_board != null;
+  const intrinsicDraft = intrinsicStatus(normalizeBoard(intrinsic), session);
+  const status =
+    active === 'intrinsic'
+      ? intrinsicDraft
+      : extrinsicStatus(extrinsic, extrinsicDifferent, measurement, session);
+  // An inherited board is the STORED intrinsic one: intrinsic edits left unsaved are
+  // not in it, though the preview above already draws them.
+  const inheritsUnsaved = editingInherited && intrinsicDraft === 'edited';
+  const statusMessage = inheritsUnsaved
+    ? 'The intrinsic tab has unsaved changes: this board inherits them once they are saved'
+    : draftMessage(active, status);
   const measurementError = missingMeasurement
     ? 'Required — this measurement sets the extrinsic scale.'
     : undefined;
@@ -417,11 +471,22 @@ function TargetConfigForm({
             size="md"
             value={active}
             onChange={(v) => setActive(v as BoardTarget)}
+            // The extrinsic board is defined after the intrinsic one (the service
+            // refuses it before): locked until the intrinsic board is saved.
             data={[
-              { label: 'Intrinsic board', value: 'intrinsic' },
-              { label: 'Extrinsic board', value: 'extrinsic' },
+              { label: 'Intrinsic', value: 'intrinsic' },
+              { label: 'Extrinsic', value: 'extrinsic', disabled: !intrinsicSaved },
             ]}
-            styles={{ label: { fontWeight: 600 } }}
+            // Sized for the 280px floor of the right column: short labels, and a label
+            // ellipsizes rather than overflowing the root, whose overflow:hidden would
+            // crop the indicator. That overflow:hidden also zeroes the flex item's
+            // automatic min-height, so the control must not shrink when the column
+            // overflows (a separate ChArUco board).
+            styles={{
+              root: { flexShrink: 0 },
+              control: { minWidth: 0 },
+              label: { fontWeight: 600 },
+            }}
             mb="md"
           />
 
@@ -614,9 +679,17 @@ function TargetConfigForm({
           {/* Always present — the extrinsic choice (a board, or inherit) must be
               confirmed to complete Target Config, so it can't be skipped. */}
           <StickyActionBar>
-            {/* Blocked client-side rather than letting the backend's gt=0
-                rejection come back as a raw 422. */}
-            <Button fullWidth mt="lg" onClick={save} loading={saving} disabled={missingMeasurement}>
+            <DraftStatusLine message={statusMessage} ok={status === 'saved' && !inheritsUnsaved} />
+            {/* A missing measurement is blocked client-side rather than letting the
+                backend's gt=0 rejection come back as a raw 422; nothing to save once
+                the stored board matches the form. */}
+            <Button
+              fullWidth
+              mt={8}
+              onClick={save}
+              loading={saving}
+              disabled={missingMeasurement || status === 'saved'}
+            >
               Save {active} board
             </Button>
             {saveError && (

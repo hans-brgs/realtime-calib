@@ -361,6 +361,24 @@ def test_inherit_without_intrinsic_board_is_rejected(tmp_path: Path) -> None:
     assert resp.status_code == 422
 
 
+def test_separate_extrinsic_board_without_intrinsic_board_is_rejected(tmp_path: Path) -> None:
+    # Rig test 2026-10-10: a separate marker saved first moved the step to Camera
+    # Setup with no intrinsic board, and the intrinsic preview then detected nothing.
+    client = _client(tmp_path)
+    marker = {
+        "board_type": "aruco",
+        "dictionary": "DICT_4X4_100",
+        "marker_id": 8,
+        "marker_size_mm": 297.0,
+    }
+    resp = client.post("/board", json={"target": "extrinsic", "board": marker})
+    assert resp.status_code == 422
+    assert "intrinsic board" in resp.json()["detail"]
+    session = client.get("/session").json()
+    assert session["step"] == "intrinsic_board"
+    assert session["extrinsic_board"] is None
+
+
 def test_session_without_extrinsic_board_is_flagged(tmp_path: Path) -> None:
     # Sessions written before ADR-0045 inherited by fallback; that fallback is
     # gone, so one claiming Target Config is done without an extrinsic block is

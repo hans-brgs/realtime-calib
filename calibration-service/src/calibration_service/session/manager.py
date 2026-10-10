@@ -381,12 +381,16 @@ class SessionManager:
             if board is None:
                 raise ValueError("intrinsic board is required")
         elif target == "extrinsic":
+            intrinsic = self.current().intrinsic_board
+            # The extrinsic board comes after the intrinsic one, inherited or not: its
+            # save moves the step to Camera Setup, which would unlock Intrinsics with
+            # no board to detect.
+            if board is not None and intrinsic is None:
+                raise ValueError("define the intrinsic board before the extrinsic one")
             if inherited:
-                intrinsic = self.current().intrinsic_board
                 if board is None:
                     raise ValueError("inheriting requires the measured board size")
-                if intrinsic is None:
-                    raise ValueError("define the intrinsic board before inheriting it")
+                assert intrinsic is not None  # refused above when a board is sent
                 if board.board_type is not intrinsic.board_type:
                     # The measurement is read from the key its TYPE carries the
                     # scale in; a mismatch would silently pick up a default size.
