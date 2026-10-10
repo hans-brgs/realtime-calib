@@ -94,6 +94,6 @@ v0.2.0 is still a **0.x** release, and I would still most like to hear from peop
 :::note Transparency & acknowledgements
 
 - Inspired by [Caliscope](https://github.com/mprib/caliscope), created by Mac Prible, whose v0.11.5 sources were the reference for several of the fixes in this release.
-- I use Claude Code (Opus 4.8) to assist me in writing the code.
+- I use Claude Code (Opus 5.5) to assist me in writing the code.
 
 :::

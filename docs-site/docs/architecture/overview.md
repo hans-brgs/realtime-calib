@@ -12,7 +12,7 @@ realtime-calib is a small set of services orchestrated with Docker Compose, buil
 
 I'm a **PhD in human-movement science and a computer-vision developer**: my work is building applied technology for **health and sport**. I'll delimit my expertise up front, the way a researcher scopes their field before presenting a result — because it matters here. I'm comfortable with engineering, product design and *applying* computer vision, but I do **not** have deep training in the projective geometry and epipolar mathematics that underpin camera calibration.
 
-So for the calibration theory I stand on **Caliscope** and **OpenCV**, and I used **Claude Code (mostly Opus 4.8)** to write the code and to explain the harder concepts as I went.
+So for the calibration theory I stand on **Caliscope** and **OpenCV**, and I used **Claude Code (Opus 4.8, then Opus 5.5)** to write the code and to explain the harder concepts as I went.
 
 I first used Caliscope in my own work. It calibrates well, but a few frictions kept getting in the way — recording every camera in OBS first, no headless path, and export conventions that didn't match my projects. As VR and robotics keep growing the need for multi-camera rigs, it seemed worth turning a friction-free version into something others could use too.
 
