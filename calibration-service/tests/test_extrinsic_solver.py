@@ -415,6 +415,38 @@ def test_set_ground_makes_the_board_normal_the_up_axis() -> None:
     assert np.allclose(new_quad[0], [0.0, 0.0, 0.0], atol=1e-9)  # c0 = origin (charuco)
 
 
+@pytest.mark.parametrize("target", ["charuco", "marker"])
+def test_set_ground_puts_the_cameras_above_the_floor(target: str) -> None:
+    # ADR-0057: up is the printed face. A ChArUco's corner order (y down) puts its
+    # normal behind that face, a single marker's (y up) in front: framed either way,
+    # every optical centre is above the floor (canonical y < 0), the board in y = 0.
+    from calibration_service.calibration.extrinsic import (
+        camera_centres,
+        quad_origin_transform,
+        reorient_result,
+    )
+
+    result = _fixture_result()
+    quad = result.board_quads[0]
+    assert quad is not None
+    charuco = target == "charuco"
+    if not charuco:  # mirror the corner order: the normal faces the cameras
+        quad = [quad[3], quad[2], quad[1], quad[0]]
+    transform = quad_origin_transform(
+        quad, at_center=not charuco, ground=True, normal_behind=charuco
+    )
+    moved = reorient_result(result, transform)
+    assert all(centre[1] < 0.0 for centre in camera_centres(moved).values())
+    placed = np.asarray(moved.board_quads[0])
+    assert np.allclose(placed[:, 1], 0.0, atol=1e-9)
+    assert np.isclose(np.linalg.det(transform[:3, :3]), 1.0)
+    if charuco:  # the half-turn keeps c0 at the origin
+        assert np.allclose(placed[0], 0.0, atol=1e-9)
+    else:  # nothing changes for a single marker
+        assert np.array_equal(transform, quad_origin_transform(quad, at_center=True, ground=True))
+        assert np.allclose(placed.mean(axis=0), 0.0, atol=1e-9)
+
+
 def test_refine_preserves_a_reoriented_anchor() -> None:
     # Compute on synthetic data, reorient the world, then Minimize: the BA must
     # hold the anchor at its REORIENTED pose (not snap back to identity).

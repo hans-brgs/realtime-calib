@@ -1182,9 +1182,11 @@ async def orient_extrinsic(request: Request, body: OrientRequest) -> dict[str, o
         # Single-ArUco targets: the marker frame sits at its CENTER (cv2
         # convention); a ChArUco board frame originates at its first corner.
         board = manager.current().extrinsic_board
-        marker = board is not None and board.board_type is not BoardType.CHARUCO
+        charuco = board is not None and board.board_type is BoardType.CHARUCO
+        # Up is the printed face the cameras see (ADR-0057): a ChArUco's normal
+        # points behind it.
         transform = quad_origin_transform(
-            quad, at_center=marker, ground=True
+            quad, at_center=not charuco, ground=True, normal_behind=charuco
         )
     else:
         if body.axis is None or body.degrees is None:

@@ -1048,7 +1048,11 @@ def axis_rotation_transform(axis: str, degrees: float) -> NDArray[np.float64]:
 
 
 def quad_origin_transform(
-    quad: list[list[float]], *, at_center: bool = False, ground: bool = False
+    quad: list[list[float]],
+    *,
+    at_center: bool = False,
+    ground: bool = False,
+    normal_behind: bool = False,
 ) -> NDArray[np.float64]:
     """World-frame change G placing the origin + axes on a board quad ('Set origin').
 
@@ -1062,7 +1066,13 @@ def quad_origin_transform(
     OpenCV-oriented ground frame — x along the board's x edge, y = -normal
     (down), z along the board's y edge (proper rotation) — which every export
     basis (they all map canonical -y to the platform's up) turns into a flat
-    floor with no manual reorientation.
+    floor with no manual reorientation. ``normal_behind`` says the quad's normal
+    (x cross y of its corner order) points behind the printed face: a ChArUco's
+    chessboard corners run y down, so its normal points away from the cameras and
+    put them under the floor (ADR-0057); the board frame then turns half a turn
+    about its x axis. A single marker's corners run y up: its normal faces the
+    cameras. The corner order decides, not the cameras' positions: their centroid
+    sits behind a steeply tilted target that every camera sees from the front.
     The basis is re-orthonormalised (the Kabsch quad is rigid, but guard anyway).
     """
     corners = np.asarray(quad, np.float64)
@@ -1072,11 +1082,22 @@ def quad_origin_transform(
     y = y_raw - x * float(x @ y_raw)
     y = y / np.linalg.norm(y)
     z = np.cross(x, y)
-    basis = np.column_stack([x, -z, y] if ground else [x, y, z])  # board->world
     anchor = corners.mean(axis=0) if at_center else corners[0]
+    if ground and normal_behind:
+        y, z = -y, -z
+    basis = np.column_stack([x, -z, y] if ground else [x, y, z])  # board->world
     g_rotation = basis.T
     g_translation = -basis.T @ anchor
     return _transform(g_rotation, g_translation)
+
+
+def camera_centres(result: ExtrinsicResult) -> dict[str, NDArray[np.float64]]:
+    """Each camera's optical centre in the result's world (``-R^T t``, target units)."""
+    centres: dict[str, NDArray[np.float64]] = {}
+    for name in result.cameras:
+        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
+        centres[name] = -rotation.T @ np.asarray(result.translations[name], np.float64)
+    return centres
 
 
 def reorient_result(result: ExtrinsicResult, transform: NDArray[np.float64]) -> ExtrinsicResult:
