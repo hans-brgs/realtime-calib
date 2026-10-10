@@ -193,18 +193,21 @@ export function CaptureWizardLayout({
         </Paper>
 
         {/* Folded panel: the step's action (Start/Stop REC, Compute, Validate…) and its
-            error stay reachable under the view, at the panel's width — folding is for
+            error stay reachable under the view, in one row — folding is for
             a wider view while recording, not for losing the Stop button (ADR-0041 §5:
             the action stays reachable). Rendered here instead of in the hidden panel,
             never in both. */}
         {panelCollapsed && (
-          <Box style={{ justifySelf: 'end', width: 'clamp(280px, 26%, 360px)' }}>
+          <Box>
             {message && (
-              <Text fz="0.72rem" c="var(--rc-error)" mb="xs">
+              <Text fz="0.72rem" c="var(--rc-error)" mb="xs" ta="right">
                 {message}
               </Text>
             )}
-            {action}
+            {/* One row, right-aligned: the screens build the action as a column of
+                full-width buttons for the panel; stacked under the view they cost
+                ~130px of its height (rig test 2026-10-10). */}
+            <Box className="rc-folded-actions">{action}</Box>
           </Box>
         )}
       </Box>

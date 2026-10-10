@@ -86,6 +86,21 @@ body {
   box-shadow: none;
 }
 
+/* The capture steps' action under the view when the side panel is folded
+   (CaptureWizardLayout): the panel's column of full-width buttons laid out as one
+   right-aligned row. !important: Mantine's mt/mb style props are inline styles. */
+.rc-folded-actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.rc-folded-actions > .mantine-Button-root {
+  width: auto;
+  min-width: 180px;
+  margin: 0 !important;
+}
+
 /* Cool, slim scrollbars to match the dark surfaces. */
 ::-webkit-scrollbar {
   width: 10px;
