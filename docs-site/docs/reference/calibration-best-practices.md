@@ -10,23 +10,11 @@ How to capture data that yields an accurate calibration.
 
 ## How solid is this advice?
 
-I tried to find a **research article or meta-analysis dedicated to which capture and
-board parameters maximise camera-calibration accuracy** — one that would test them
-and publish validated ranges. I did not find a study specifically on that question.
+I tried to find a **research article or meta-analysis dedicated to which capture and board parameters maximise camera-calibration accuracy** — one that would test them and publish validated ranges. I did not find a study specifically on that question.
 
-Some peer-reviewed work does give **partial direction**: Zhang (2000) shows that
-board **orientation** matters (near-frontal is degenerate, ~45° is best *in
-simulation*), and Muñoz-Salinas et al. (2018) show that **camera-to-marker distance
-/ apparent size** matters (accuracy degrades and the pose becomes ambiguous as the
-marker shrinks in the image). But neither — nor any source I found — gives **ranges
-of values that maximise calibration**.
+Some peer-reviewed work does give **partial direction**: Zhang (2000) shows that board **orientation** matters (near-frontal is degenerate, ~45° is best *in simulation*), and Muñoz-Salinas et al. (2018) show that **camera-to-marker distance / apparent size** matters (accuracy degrades and the pose becomes ambiguous as the marker shrinks in the image). But neither — nor any source I found — gives **ranges of values that maximise calibration**.
 
-That operational specificity — how many images, what board size, which dictionary,
-how much tilt — exists only on **practitioner and vendor sites (OpenCV, MATLAB,
-calib.io, OKLAB) that state the numbers without citing or justifying a primary
-source.** So read them as **empirical rules-of-thumb, not evidence-based
-constants**: recommendations that genuinely trace to primary literature are cited;
-the rest are marked with an asterisk (\*) — see the note at the end.
+That operational specificity — how many images, what board size, which dictionary, how much tilt — exists only on **practitioner and vendor sites (OpenCV, MATLAB, calib.io, OKLAB) that state the numbers without citing or justifying a primary source.** So read them as **empirical rules-of-thumb, not evidence-based constants**: recommendations that genuinely trace to primary literature are cited; the rest are marked with an asterisk (\*) — see the note at the end.
 
 ## At a glance
 
@@ -48,132 +36,55 @@ the rest are marked with an asterisk (\*) — see the note at the end.
 
 ## Choosing a board
 
-- **Use a ChArUco board for calibration.** OpenCV explicitly recommends it: the
-  ArUco markers identify each corner (no rotation ambiguity, tolerant of occlusion
-  and partial views), while the interpolated **chessboard corners** give subpixel
-  accuracy. [OpenCV ChArUco docs; Garrido-Jurado et al. 2014; Romero-Ramirez et al. 2018]
-- **Pick the smallest ArUco dictionary that supplies the markers you need.** A
-  smaller dictionary allows a larger minimum inter-marker (Hamming) distance and
-  stronger error correction — `floor((d−1)/2)` correctable bits for minimum
-  distance *d* — which lowers false detections. [Garrido-Jurado et al. 2014]
-- **Match geometry to the job.\*** Bigger squares for longer working distances;
-  more squares (denser grid) for wide-angle/fisheye lenses that need edge data;
-  keep the marker at ~60–75 % of the square. realtime-calib defaults to a **7 × 8**
-  grid at **0.75** ratio. [OKLAB\*]
-- **Print sharp, mount flat and rigid, then measure the real scale.** Warped or
-  taped-on paper introduces systematic error — use a rigid, flat substrate. Print
-  at true size and **verify the square edge with calipers**; that measurement, not
-  the nominal size, sets the metric scale. [OKLAB\*]
+- **Use a ChArUco board for calibration.** OpenCV explicitly recommends it: the ArUco markers identify each corner (no rotation ambiguity, tolerant of occlusion and partial views), while the interpolated **chessboard corners** give subpixel accuracy. [OpenCV ChArUco docs; Garrido-Jurado et al. 2014; Romero-Ramirez et al. 2018]
+- **Pick the smallest ArUco dictionary that supplies the markers you need.** A smaller dictionary allows a larger minimum inter-marker (Hamming) distance and stronger error correction — `floor((d−1)/2)` correctable bits for minimum distance *d* — which lowers false detections. [Garrido-Jurado et al. 2014]
+- **Match geometry to the job.\*** Bigger squares for longer working distances; more squares (denser grid) for wide-angle/fisheye lenses that need edge data; keep the marker at ~60–75 % of the square. realtime-calib defaults to a **7 × 9** grid at **0.75** ratio, with the `DICT_4X4_100` dictionary. [OKLAB\*]
+- **Print sharp, mount flat and rigid, then measure the real scale.** Warped or taped-on paper introduces systematic error — use a rigid, flat substrate. Print at true size and **verify the square edge with calipers**; that measurement, not the nominal size, sets the metric scale. [OKLAB\*]
 
 ## Capture strategy (this matters most)
 
-- **Show the board at several orientations.** Planar calibration needs **≥ 2
-  non-parallel orientations**, and **≥ 3 views** for a unique solution of all five
-  intrinsics (two views only work if skew is fixed to zero). [Zhang 2000]
-- **Use enough, varied views — about 15–25\*.** Accuracy improves with more views,
-  the biggest gain from **2 → 3**, then diminishing returns. What matters is
-  *diversity*, not count: 20 varied views beat 50 similar ones. [Zhang 2000 for the
-  2→3 gain; OKLAB\*, MATLAB\*]
-- **Tilt the board — roughly 45°, up to ~60°.** Near-frontal boards (~5°) are a
-  **degenerate configuration**. [Zhang 2000; OKLAB\*]
-- **Cover the whole frame, corners and edges included.** Distortion is strongest at
-  the periphery, so across your views the board must reach every corner. [OKLAB\*,
-  MATLAB\*]
-- **Fix the camera and the settings.** Mount it rigidly; use **manual, fixed
-  exposure and focus** (auto settings drift between shots); light evenly and avoid
-  glare. [OKLAB\*]
-- **Avoid motion blur.** Blurred corners lose subpixel accuracy — keep the board
-  (or camera) still at each capture. [OKLAB\*]
-- **(Advanced) Guided / next-best-pose capture** — choosing each pose to minimise
-  the parameter-covariance trace reaches higher accuracy with fewer images than
-  random capture. [Tan et al. 2025; Peng & Sturm 2019; Rojtberg & Kuijper 2018]
+- **Show the board at several orientations.** Planar calibration needs **≥ 2 non-parallel orientations**, and **≥ 3 views** for a unique solution of all five intrinsics (two views only work if skew is fixed to zero). [Zhang 2000]
+- **Use enough, varied views — about 15–25\*.** Accuracy improves with more views, the biggest gain from **2 → 3**, then diminishing returns. What matters is *diversity*, not count: 20 varied views beat 50 similar ones. [Zhang 2000 for the 2→3 gain; OKLAB\*, MATLAB\*] With a continuous sweep, realtime-calib keeps up to 50 keyframes by default (spread over tilt and image position): on identical cameras, 25 still left the focal length dependent on which frames were picked.
+- **Tilt the board — roughly 45°, up to ~60°.** Near-frontal boards (~5°) are a **degenerate configuration**. [Zhang 2000; OKLAB\*]
+- **Cover the whole frame, corners and edges included.** Distortion is strongest at the periphery, so across your views the board must reach every corner. [OKLAB\*, MATLAB\*]
+- **Fix the camera and the settings.** Mount it rigidly; use **manual, fixed exposure and focus** (auto settings drift between shots); light evenly and avoid glare. [OKLAB\*]
+- **Avoid motion blur.** Blurred corners lose subpixel accuracy — keep the board (or camera) still at each capture. [OKLAB\*]
+- **(Advanced) Guided / next-best-pose capture** — choosing each pose to minimise the parameter-covariance trace reaches higher accuracy with fewer images than random capture. [Tan et al. 2025; Peng & Sturm 2019; Rojtberg & Kuijper 2018]
 
 :::note About the Zhang numbers
-The **≥ 3 views**, the **2 → 3 gain**, the **~45° optimum** and the **~5° degenerate**
-threshold come from Zhang's 2000 experiment — a **synthetic Monte-Carlo simulation**
-(3 images, Gaussian corner noise σ = 0.5 px) on a **plain checkerboard, not a
-ChArUco board** — which explicitly does **not** model the foreshortening that
-degrades real corner detection at large tilt. Treat them as well-founded directions,
-not exact ChArUco constants.
+The **≥ 3 views**, the **2 → 3 gain**, the **~45° optimum** and the **~5° degenerate** threshold come from Zhang's 2000 experiment — a **synthetic Monte-Carlo simulation** (3 images, Gaussian corner noise σ = 0.5 px) on a **plain checkerboard, not a ChArUco board** — which explicitly does **not** model the foreshortening that degrades real corner detection at large tilt. Treat them as well-founded directions, not exact ChArUco constants.
 :::
 
 ## Working distance & apparent size
 
-Keep the board **large in the image** — working distance is relative to board size.
-As a marker's *apparent* size (pixels) shrinks, corner error grows and a
-**planar-pose ambiguity** appears: four coplanar points admit two poses related by a
-reflection about the camera's line of sight — worst for small or distant planes,
-planes far relative to the focal length, and wide-angle lenses at close range.
-Solvers return both candidates with their reprojection errors, but when the two are
-close the choice is unsafe. A **ChArUco board's many corners, solved jointly,
-mitigate this**; markers should stay above **~8–12 px\***, and repeatability drops
-with distance (most in depth). [Muñoz-Salinas et al. 2018; Collins & Bartoli 2014
-(IPPE); Aliani et al. 2026; OKLAB\*]
+Keep the board **large in the image** — working distance is relative to board size. As a marker's *apparent* size (pixels) shrinks, corner error grows and a **planar-pose ambiguity** appears: four coplanar points admit two poses related by a reflection about the camera's line of sight — worst for small or distant planes, planes far relative to the focal length, and wide-angle lenses at close range. Solvers return both candidates with their reprojection errors, but when the two are close the choice is unsafe. A **ChArUco board's many corners, solved jointly, mitigate this**; markers should stay above **~8–12 px\***, and repeatability drops with distance (most in depth). [Muñoz-Salinas et al. 2018; Collins & Bartoli 2014 (IPPE); Aliani et al. 2026; OKLAB\*]
 
 ## Distortion model
 
-realtime-calib estimates the **classic 5-coefficient Brown–Conrady model**
-(`k1, k2, p1, p2, k3`) — what OpenCV computes when `calibrateCamera` is called
-without any model flag, and exactly what Caliscope does. Unusually for this
-page, this choice *is* well grounded in primary literature:
+realtime-calib estimates the **classic 5-coefficient Brown–Conrady model** (`k1, k2, p1, p2, k3`) — what OpenCV computes when `calibrateCamera` is called without any model flag, and exactly what Caliscope does. Unusually for this page, this choice *is* well grounded in primary literature:
 
-- **Radial distortion dominates — and its first term dominates the rest.**
-  Zhang calibrates with `k1, k2` only, noting that "any more elaborated modeling
-  not only would not help … but also would cause numerical instability" — a
-  conclusion he takes from Tsai (who, for industrial lenses, recommends a
-  *single* radial term) and Wei & Ma. [Zhang 2000; Tsai 1987; Wei & Ma 1994]
-- **Higher-order terms are a risk, not free accuracy.** Empirically, the r⁶
-  term (`k3`) does not improve accuracy and can corrupt the lower-order
-  estimates when views are few or noisy; the radial coefficients are highly
-  correlated, and superfluous parameters weaken the solution
-  (over-parameterisation). Unconstrained polynomial fits can even turn
-  non-monotonic — an outcome OpenCV's own documentation calls "a calibration
-  failure". [Sun & Cooperstock 2006; Remondino & Fraser 2006; Heller et al.
-  2014; OpenCV calib3d docs]
-- **Tangential terms (`p1, p2`) are cheap insurance.** Decentering distortion
-  runs an order of magnitude below radial, but modelling it measurably helps —
-  most on wide-angle lenses — and "increases the likelihood of accurate
-  calibration" for a camera whose distortion is unknown. [Weng et al. 1992;
-  Sun & Cooperstock 2006; Remondino & Fraser 2006]
-- **The rational 8-coefficient model (`CALIB_RATIONAL_MODEL`) targets strong
-  wide-angle distortion.** Rational/division models were introduced for
-  extreme (wide-angle, catadioptric) optics; at low distortion the model
-  families perform about the same, so the extra denominator terms buy nothing
-  for a typical webcam — while OpenCV bug reports document rational solves
-  whose denominator misbehaves inside the image. [Claus & Fitzgibbon 2005;
-  Ricolfe-Viala & Sánchez-Salmerón 2010]
+- **Radial distortion dominates — and its first term dominates the rest.** Zhang calibrates with `k1, k2` only, noting that "any more elaborated modeling not only would not help … but also would cause numerical instability" — a conclusion he takes from Tsai (who, for industrial lenses, recommends a *single* radial term) and Wei & Ma. [Zhang 2000; Tsai 1987; Wei & Ma 1994]
+- **Higher-order terms are a risk, not free accuracy.** Empirically, the r⁶ term (`k3`) does not improve accuracy and can corrupt the lower-order estimates when views are few or noisy; the radial coefficients are highly correlated, and superfluous parameters weaken the solution (over-parameterisation). Unconstrained polynomial fits can even turn non-monotonic — an outcome OpenCV's own documentation calls "a calibration failure". [Sun & Cooperstock 2006; Remondino & Fraser 2006; Heller et al. 2014; OpenCV calib3d docs]
+- **Tangential terms (`p1, p2`) are cheap insurance.** Decentering distortion runs an order of magnitude below radial, but modelling it measurably helps — most on wide-angle lenses — and "increases the likelihood of accurate calibration" for a camera whose distortion is unknown. [Weng et al. 1992; Sun & Cooperstock 2006; Remondino & Fraser 2006]
+- **The rational 8-coefficient model (`CALIB_RATIONAL_MODEL`) targets strong wide-angle distortion.** Rational/division models were introduced for extreme (wide-angle, catadioptric) optics; at low distortion the model families perform about the same, so the extra denominator terms buy nothing for a typical webcam — while OpenCV bug reports document rational solves whose denominator misbehaves inside the image. [Claus & Fitzgibbon 2005; Ricolfe-Viala & Sánchez-Salmerón 2010]
 
-We found **no peer-reviewed head-to-head** of OpenCV's 5- vs 8-coefficient
-variants specifically — but our own data agrees with the model-family
-literature: on a real 4-camera dataset, refitting the same captures with the
-rational model left the reprojection RMSE unchanged (0.30–0.32 px) while
-producing wildly inconsistent coefficients across identical cameras (`k1` from
-−0.33 to −4.0); the classic 5 recovers a consistent `k1 ≈ −0.375` everywhere.
+We found **no peer-reviewed head-to-head** of OpenCV's 5- vs 8-coefficient variants specifically — but our own data agrees with the model-family literature: on a real 4-camera dataset, refitting the same captures with the rational model left the reprojection RMSE unchanged (0.30–0.32 px) while producing wildly inconsistent coefficients across identical cameras (`k1` from −0.33 to −4.0); the classic 5 recovers a consistent `k1 ≈ −0.375` everywhere.
 
-One counterpoint if you need the last drop of accuracy: *all* low-order
-parametric models are approximations, and generic per-pixel camera models
-measurably beat them on depth and pose bias [Schöps et al. 2020] — a different
-tool class, outside realtime-calib's scope.
+One counterpoint if you need the last drop of accuracy: *all* low-order parametric models are approximations, and generic per-pixel camera models measurably beat them on depth and pose bias [Schöps et al. 2020] — a different tool class, outside realtime-calib's scope.
 
 ## Evaluating results
 
-- **Read the reprojection error, but don't game it.** As a rough guide, **< 0.3 px
-  is good, 0.3–1.0 px acceptable, > 1.0 px worth investigating\*** (flatness, motion
-  blur, bad corners). But a *lower* per-view error from a Zhang-style decoupled fit
-  is **misleading** — each board pose gets its own free extrinsics, paid for with
-  extrinsic-parameter uncertainty. Coverage and a shared-parameter solution beat a
-  small RMSE. [OKLAB\* for the thresholds; Petković et al. 2024 for the pitfall]
-- **Validate on something known.** Undistort a test image — straight lines should be
-  straight — and measure a known dimension against ground truth. [OKLAB\*]
+- **Read the reprojection error, but don't game it.** As a rough guide, **< 0.3 px is good, 0.3–1.0 px acceptable, > 1.0 px worth investigating\*** (flatness, motion blur, bad corners). But a *lower* per-view error from a Zhang-style decoupled fit is **misleading** — each board pose gets its own free extrinsics, paid for with extrinsic-parameter uncertainty. Coverage and a shared-parameter solution beat a small RMSE. [OKLAB\* for the thresholds; Petković et al. 2024 for the pitfall]
+- **Validate on something known.** Undistort a test image — straight lines should be straight — and measure a known dimension against ground truth. [OKLAB\*]
 
 ## Multi-camera extrinsics
 
-- **Finish with a global bundle adjustment, one pose fixed as the anchor.** Extrinsic
-  parameters number `6(N+K−1)` for *N* cameras and *K* board positions once one frame
-  is fixed to remove gauge freedom; the final step jointly minimises reprojection
-  error across all cameras. [Petković et al. 2024]
-- **Give each camera pair enough shared views**, and let ChArUco's unique corner IDs
-  keep every camera referencing the same points. [Heng et al. 2013; OpenCV ChArUco docs]
+- **Finish with a global bundle adjustment, one pose fixed as the anchor.** Extrinsic parameters number `6(N+K−1)` for *N* cameras and *K* board positions once one frame is fixed to remove gauge freedom; the final step jointly minimises reprojection error across all cameras. [Petković et al. 2024]
+- **Give each camera pair enough shared views**, and let ChArUco's unique corner IDs keep every camera referencing the same points. [Heng et al. 2013; OpenCV ChArUco docs]
+- **For a large volume, a single ArUco marker can link the cameras** where a printable ChArUco board's squares would be too small to detect from across the room. Print it large, keep its white margin, mount it flat, and measure its side with calipers: that measurement sets the scale of the whole rig.
+- **Move the target steadily, not fast.** Without hardware sync, the cameras do not expose at the same instant; a target moving fast is seen at different places by the cameras of one group. realtime-calib sets such groups aside, but a slow sweep keeps more of them.
+- **Check the scale against something you measured.** Every quality figure computed from the solve itself passes with a mis-measured target, because the whole rig scales together. A few camera-to-camera distances measured with a tape, in a site template, are the external check.
+- **Read the target rigidity next to the reprojection error.** A solve can lower its reprojection error by bending the reconstructed target; the rigidity in millimetres, measured against the printed geometry, cannot be gamed that way.
 
 realtime-calib implements this pipeline — see [Methodology](/docs/research/methodology).
 
@@ -183,83 +94,43 @@ realtime-calib implements this pipeline — see [Methodology](/docs/research/met
 - ☐ Camera mounted rigidly; **manual fixed exposure and focus**.
 - ☐ Even lighting (~300–1000 lux\*), no glare or reflections.
 - ☐ Board fills **30–70 %** of the frame\*; markers ≥ **~8–12 px\***.
-- ☐ **~15–25 varied views\***: some filling the frame, varied depths, strong tilts,
-  all four corners covered, a few partial views.
+- ☐ **~15–25 varied views\***: some filling the frame, varied depths, strong tilts, all four corners covered, a few partial views.
 - ☐ No motion blur — hold still at each capture.
 - ☐ Reprojection error sub-pixel; investigate if **> 1 px\***.
-- ☐ Multi-camera: enough shared views per pair; finish with bundle adjustment.
+- ☐ Multi-camera: enough shared views per pair, a steady sweep; read the per-camera error and the target rigidity, not only the overall RMSE.
+- ☐ Scale checked against at least one tape-measured distance.
 
 ## Sources
 
 **Primary literature**
 
-- Zhang, Z. (2000). *A Flexible New Technique for Camera Calibration.* IEEE TPAMI 22(11) —
-  [full text](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr98-71.pdf).
-- Brown, D.C. (1971). *Close-Range Camera Calibration.* Photogrammetric Engineering
-  37(8):855–866 — origin of the Brown–Conrady distortion model (no open copy found).
-- Tsai, R.Y. (1987). *A Versatile Camera Calibration Technique for High-Accuracy 3D Machine
-  Vision Metrology Using Off-the-Shelf TV Cameras and Lenses.* IEEE J. Robotics and
-  Automation 3(4):323–344 — doi:[10.1109/JRA.1987.1087109](https://doi.org/10.1109/JRA.1987.1087109).
-- Weng, J., Cohen, P., Herniou, M. (1992). *Camera Calibration with Distortion Models and
-  Accuracy Evaluation.* IEEE TPAMI 14(10):965–980 —
-  doi:[10.1109/34.159901](https://doi.org/10.1109/34.159901).
-- Wei, G.-Q., Ma, S.D. (1994). *Implicit and explicit camera calibration: Theory and
-  experiments.* IEEE TPAMI 16(5):469–480.
-- Claus, D., Fitzgibbon, A.W. (2005). *A Rational Function Lens Distortion Model for General
-  Cameras.* CVPR 2005 —
-  [full text](https://www.robots.ox.ac.uk/~vgg/publications/2005/Claus05a/claus05a.pdf).
-- Sun, W., Cooperstock, J.R. (2006). *An empirical evaluation of factors influencing camera
-  calibration accuracy using three publicly available techniques.* Machine Vision and
-  Applications 17(1):51–67 —
-  doi:[10.1007/s00138-006-0014-6](https://doi.org/10.1007/s00138-006-0014-6) · open WACV 2005
-  companion: [full text](https://srl.mcgill.ca/publications/papers/2005-WACV-Sun.pdf).
-- Remondino, F., Fraser, C. (2006). *Digital camera calibration methods: considerations and
-  comparisons.* ISPRS Archives XXXVI-5:266–272 —
-  [full text](https://www.isprs.org/proceedings/xxxvi/part5/paper/remo_616.pdf).
-- Ricolfe-Viala, C., Sánchez-Salmerón, A.-J. (2010). *Lens distortion models evaluation.*
-  Applied Optics 49(30):5914–5928 —
-  doi:[10.1364/AO.49.005914](https://doi.org/10.1364/AO.49.005914).
-- Heller, J., Henrion, D., Pajdla, T. (2014). *Stable radial distortion calibration by
-  polynomial matrix inequalities programming.* ACCV 2014 —
-  [arXiv:1409.5753](https://arxiv.org/abs/1409.5753).
-- Schöps, T., Larsson, V., Pollefeys, M., Sattler, T. (2020). *Why Having 10,000 Parameters in
-  Your Camera Model Is Better Than Twelve.* CVPR 2020 —
-  [open access](https://openaccess.thecvf.com/content_CVPR_2020/papers/Schops_Why_Having_10000_Parameters_in_Your_Camera_Model_Is_Better_CVPR_2020_paper.pdf).
-- Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F.J., Marín-Jiménez, M.J. (2014).
-  *Automatic generation and detection of highly reliable fiducial markers under occlusion.*
-  Pattern Recognition 47(6):2280–2292 —
-  doi:[10.1016/j.patcog.2014.01.005](https://doi.org/10.1016/j.patcog.2014.01.005).
-- Romero-Ramirez, F.J., Muñoz-Salinas, R., Medina-Carnicer, R. (2018). *Speeded up detection
-  of squared fiducial markers.* Image and Vision Computing 76:38–47 —
-  doi:[10.1016/j.imavis.2018.05.004](https://doi.org/10.1016/j.imavis.2018.05.004).
-- Muñoz-Salinas, R., Marín-Jiménez, M.J., Yeguas-Bolívar, E., Medina-Carnicer, R. (2018).
-  *Mapping and localization from planar markers.* Pattern Recognition 73:158–171 —
-  doi:[10.1016/j.patcog.2017.08.010](https://doi.org/10.1016/j.patcog.2017.08.010).
-- Collins, T., Bartoli, A. (2014). *Infinitesimal Plane-Based Pose Estimation (IPPE).*
-  IJCV 109:252–286 — [project](https://github.com/tobycollins/IPPE).
-- Petković, T. et al. (2024). *Multi-camera/projector calibration analysis.* arXiv:2410.18511 —
-  [link](https://arxiv.org/abs/2410.18511).
-- Heng, L., Li, B., Pollefeys, M. (2013). *CamOdoCal.* IEEE/RSJ IROS 2013 —
-  [link](https://people.inf.ethz.ch/pomarc/pubs/HengIROS13.pdf).
-- Aliani, C., Lorenzetto Bologna, C., Francia, P., Bocchi, L. (2026). *Optimising
-  Camera–ChArUco Geometry for Motion Compensation in Standing Equine CT.* Sensors 26(4):1310 —
-  doi:[10.3390/s26041310](https://doi.org/10.3390/s26041310).
-- Tan et al. (2025). *Next-best-pose extrinsic calibration.* arXiv:2511.18317 —
-  [link](https://arxiv.org/abs/2511.18317).
+- Zhang, Z. (2000). *A Flexible New Technique for Camera Calibration.* IEEE TPAMI 22(11) — [full text](https://www.microsoft.com/en-us/research/wp-content/uploads/2016/02/tr98-71.pdf).
+- Brown, D.C. (1971). *Close-Range Camera Calibration.* Photogrammetric Engineering 37(8):855–866 — origin of the Brown–Conrady distortion model (no open copy found).
+- Tsai, R.Y. (1987). *A Versatile Camera Calibration Technique for High-Accuracy 3D Machine Vision Metrology Using Off-the-Shelf TV Cameras and Lenses.* IEEE J. Robotics and Automation 3(4):323–344 — doi:[10.1109/JRA.1987.1087109](https://doi.org/10.1109/JRA.1987.1087109).
+- Weng, J., Cohen, P., Herniou, M. (1992). *Camera Calibration with Distortion Models and Accuracy Evaluation.* IEEE TPAMI 14(10):965–980 — doi:[10.1109/34.159901](https://doi.org/10.1109/34.159901).
+- Wei, G.-Q., Ma, S.D. (1994). *Implicit and explicit camera calibration: Theory and experiments.* IEEE TPAMI 16(5):469–480.
+- Claus, D., Fitzgibbon, A.W. (2005). *A Rational Function Lens Distortion Model for General Cameras.* CVPR 2005 — [full text](https://www.robots.ox.ac.uk/~vgg/publications/2005/Claus05a/claus05a.pdf).
+- Sun, W., Cooperstock, J.R. (2006). *An empirical evaluation of factors influencing camera calibration accuracy using three publicly available techniques.* Machine Vision and Applications 17(1):51–67 — doi:[10.1007/s00138-006-0014-6](https://doi.org/10.1007/s00138-006-0014-6) · open WACV 2005 companion: [full text](https://srl.mcgill.ca/publications/papers/2005-WACV-Sun.pdf).
+- Remondino, F., Fraser, C. (2006). *Digital camera calibration methods: considerations and comparisons.* ISPRS Archives XXXVI-5:266–272 — [full text](https://www.isprs.org/proceedings/xxxvi/part5/paper/remo_616.pdf).
+- Ricolfe-Viala, C., Sánchez-Salmerón, A.-J. (2010). *Lens distortion models evaluation.* Applied Optics 49(30):5914–5928 — doi:[10.1364/AO.49.005914](https://doi.org/10.1364/AO.49.005914).
+- Heller, J., Henrion, D., Pajdla, T. (2014). *Stable radial distortion calibration by polynomial matrix inequalities programming.* ACCV 2014 — [arXiv:1409.5753](https://arxiv.org/abs/1409.5753).
+- Schöps, T., Larsson, V., Pollefeys, M., Sattler, T. (2020). *Why Having 10,000 Parameters in Your Camera Model Is Better Than Twelve.* CVPR 2020 — [open access](https://openaccess.thecvf.com/content_CVPR_2020/papers/Schops_Why_Having_10000_Parameters_in_Your_Camera_Model_Is_Better_CVPR_2020_paper.pdf).
+- Garrido-Jurado, S., Muñoz-Salinas, R., Madrid-Cuevas, F.J., Marín-Jiménez, M.J. (2014). *Automatic generation and detection of highly reliable fiducial markers under occlusion.* Pattern Recognition 47(6):2280–2292 — doi:[10.1016/j.patcog.2014.01.005](https://doi.org/10.1016/j.patcog.2014.01.005).
+- Romero-Ramirez, F.J., Muñoz-Salinas, R., Medina-Carnicer, R. (2018). *Speeded up detection of squared fiducial markers.* Image and Vision Computing 76:38–47 — doi:[10.1016/j.imavis.2018.05.004](https://doi.org/10.1016/j.imavis.2018.05.004).
+- Muñoz-Salinas, R., Marín-Jiménez, M.J., Yeguas-Bolívar, E., Medina-Carnicer, R. (2018). *Mapping and localization from planar markers.* Pattern Recognition 73:158–171 — doi:[10.1016/j.patcog.2017.08.010](https://doi.org/10.1016/j.patcog.2017.08.010).
+- Collins, T., Bartoli, A. (2014). *Infinitesimal Plane-Based Pose Estimation (IPPE).* IJCV 109:252–286 — [project](https://github.com/tobycollins/IPPE).
+- Petković, T. et al. (2024). *Multi-camera/projector calibration analysis.* arXiv:2410.18511 — [link](https://arxiv.org/abs/2410.18511).
+- Heng, L., Li, B., Pollefeys, M. (2013). *CamOdoCal.* IEEE/RSJ IROS 2013 — [link](https://people.inf.ethz.ch/pomarc/pubs/HengIROS13.pdf).
+- Aliani, C., Lorenzetto Bologna, C., Francia, P., Bocchi, L. (2026). *Optimising Camera–ChArUco Geometry for Motion Compensation in Standing Equine CT.* Sensors 26(4):1310 — doi:[10.3390/s26041310](https://doi.org/10.3390/s26041310).
+- Tan et al. (2025). *Next-best-pose extrinsic calibration.* arXiv:2511.18317 — [link](https://arxiv.org/abs/2511.18317).
 
 **Practitioner / vendor references** (empirical, no primary sources cited — asterisked values)
 
-- OpenCV — [ChArUco calibration](https://docs.opencv.org/4.x/da/d13/tutorial_aruco_calibration.html)
-  · [ChArUco detection](https://docs.opencv.org/4.x/df/d4a/tutorial_charuco_detection.html)
-  · [calib3d module](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html) (distortion
-  model, flags, monotonicity warning).
+- OpenCV — [ChArUco calibration](https://docs.opencv.org/4.x/da/d13/tutorial_aruco_calibration.html) · [ChArUco detection](https://docs.opencv.org/4.x/df/d4a/tutorial_charuco_detection.html) · [calib3d module](https://docs.opencv.org/4.x/d9/d0c/group__calib3d.html) (distortion model, flags, monotonicity warning).
 - calib.io — [Calibration Best Practices](https://calib.io/blogs/knowledge-base/calibration-best-practices).
 - MATLAB — [Prepare camera and capture images](https://www.mathworks.com/help/vision/ug/prepare-camera-and-capture-images-for-camera-calibration.html).
 - OKLAB — [ChArUco Calibration Boards: Complete Guide](https://www.oklab.com/blog/charuco-calibration-boards-complete-guide-to-professional-camera-calibration).
 
 :::note On asterisked (\*) values
-Asterisked values come from practitioner or vendor sites (OpenCV, MATLAB, calib.io,
-OKLAB) that state them **without citing a primary peer-reviewed source**. We could
-not trace them to primary literature, so treat them as **empirical rules-of-thumb**,
-not evidence-based constants.
+Asterisked values come from practitioner or vendor sites (OpenCV, MATLAB, calib.io, OKLAB) that state them **without citing a primary peer-reviewed source**. We could not trace them to primary literature, so treat them as **empirical rules-of-thumb**, not evidence-based constants.
 :::
