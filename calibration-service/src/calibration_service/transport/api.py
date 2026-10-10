@@ -75,6 +75,13 @@ from calibration_service.resolution import to_native
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
 from calibration_service.settings import RuntimeSettings, SettingsStore
+from calibration_service.site_template import (
+    SiteTemplate,
+    UnreadableTemplateError,
+    delete_site_template,
+    load_site_template,
+    save_site_template,
+)
 from calibration_service.transport.camera_publish_service import CameraPublishService
 from calibration_service.tuning import TUNING
 
@@ -135,6 +142,31 @@ async def put_settings(request: Request, body: SettingsPayload) -> SettingsPaylo
         RuntimeSettings(record_quality=body.record_quality, preview_fps=body.preview_fps)
     )
     return body
+
+
+@router.get("/settings/site-template")
+async def get_site_template(request: Request) -> dict[str, object]:
+    """The site template (ADR-0062) and the SHA-256 of its file."""
+    try:
+        stored = load_site_template(get_manager(request).sessions_dir)
+    except UnreadableTemplateError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if stored is None:
+        raise HTTPException(status_code=404, detail="no site template")
+    template, digest = stored
+    return {"template": template.model_dump(), "sha256": digest}
+
+
+@router.put("/settings/site-template")
+async def put_site_template(request: Request, body: SiteTemplate) -> dict[str, object]:
+    """Replace the site template; the model refuses an inconsistent one (422)."""
+    digest = save_site_template(get_manager(request).sessions_dir, body)
+    return {"template": body.model_dump(), "sha256": digest}
+
+
+@router.delete("/settings/site-template")
+async def delete_site_template_route(request: Request) -> dict[str, object]:
+    return {"deleted": delete_site_template(get_manager(request).sessions_dir)}
 
 
 # --- Schemas -----------------------------------------------------------------
@@ -1568,10 +1600,36 @@ def _checks_payload(
     manager: SessionManager, session: CalibrationSession, board: CalibrationBoard
 ) -> dict[str, object]:
     result, world = _export_world(manager, session, board)
+    template: SiteTemplate | None = None
+    digest: str | None = None
+    template_unreadable: str | None = None
+    try:
+        stored = load_site_template(manager.sessions_dir)
+    except UnreadableTemplateError as exc:
+        logger.warning("export checks: %s", exc)
+        template_unreadable = str(exc)
+    else:
+        if stored is not None:
+            template, digest = stored
+    reference, reference_unreadable = _checked_reference(manager)
     checks = run_checks(
-        session, result, _stored_ba_inputs(manager), board, world, *_checked_reference(manager)
+        session,
+        result,
+        _stored_ba_inputs(manager),
+        board,
+        world,
+        reference,
+        reference_unreadable,
+        template,
+        template_unreadable,
     )
-    return {"checks": [asdict(check) for check in checks]}
+    # The template the export was checked against (ADR-0062), or why it could not be.
+    footprint: dict[str, object] | None = None
+    if template is not None:
+        footprint = {"name": template.name, "sha256": digest}
+    elif template_unreadable is not None:
+        footprint = {"error": template_unreadable}
+    return {"checks": [asdict(check) for check in checks], "site_template": footprint}
 
 
 @router.post("/export")

@@ -499,6 +499,56 @@ export const deleteReference = async (): Promise<void> => {
   }
 };
 
+// The site template (ADR-0062): a site setting, deposited as a JSON file; the service
+// validates it and serves the SHA-256 of what it stored.
+export interface SiteTemplateState {
+  template: {
+    name: string;
+    resolution: [number, number] | null;
+    cameras: { device_path: string; port: number }[];
+    distances_m: unknown[];
+  };
+  sha256: string;
+}
+
+// null = no template (404).
+export const fetchSiteTemplate = async (): Promise<SiteTemplateState | null> => {
+  const response = await fetch(`${API_URL}/settings/site-template`);
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw await errorFrom(response, `GET /settings/site-template failed: ${response.status}`);
+  }
+  return (await response.json()) as SiteTemplateState;
+};
+
+export const putSiteTemplate = async (document: unknown): Promise<SiteTemplateState> => {
+  const response = await fetch(`${API_URL}/settings/site-template`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(document),
+  });
+  if (response.status === 422) {
+    // The model's refusal (FastAPI validation): its first reason, where it applies.
+    const body = (await response.json().catch(() => null)) as {
+      detail?: { loc?: unknown[]; msg?: string }[];
+    } | null;
+    const first = Array.isArray(body?.detail) ? body.detail[0] : undefined;
+    const where = first?.loc?.slice(1).join('.') ?? '';
+    throw new Error(first?.msg ? `${where ? `${where}: ` : ''}${first.msg}` : 'invalid template');
+  }
+  if (!response.ok) {
+    throw await errorFrom(response, `PUT /settings/site-template failed: ${response.status}`);
+  }
+  return (await response.json()) as SiteTemplateState;
+};
+
+export const deleteSiteTemplate = async (): Promise<void> => {
+  const response = await fetch(`${API_URL}/settings/site-template`, { method: 'DELETE' });
+  if (!response.ok) {
+    throw await errorFrom(response, `DELETE /settings/site-template failed: ${response.status}`);
+  }
+};
+
 // One pre-export check (GET /export/checks, ADR-0057): judged backend-side.
 export interface ExportCheck {
   id: string;

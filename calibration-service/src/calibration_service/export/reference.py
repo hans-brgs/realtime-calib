@@ -135,7 +135,7 @@ def parse_reference(document: Any, name: str) -> Reference:
     return Reference(name, kind, cameras)
 
 
-def _export_centres(
+def export_centres(
     result: ExtrinsicResult, board: CalibrationBoard
 ) -> dict[str, NDArray[np.float64]]:
     """This solve's optical centres in the export world, metres."""
@@ -206,7 +206,7 @@ def align(
     def refused(reason: str, **known: Any) -> Alignment:
         return Alignment(AlignmentReport(mode, reason, **known), None)
 
-    ours = _export_centres(result, board)
+    ours = export_centres(result, board)
     try:
         matched_by, pairs = _match(reference, session, set(ours))
     except ValueError as exc:

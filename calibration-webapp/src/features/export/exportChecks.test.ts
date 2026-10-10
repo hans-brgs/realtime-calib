@@ -15,6 +15,10 @@ describe('formatCheckValue', () => {
     expect(formatCheckValue(check('target_rigidity', 0.0038))).toBe('0.38 % of its size');
     expect(formatCheckValue(check('frame', 5.04))).toBe('5.0° off level');
     expect(formatCheckValue(check('reference', 0.0581))).toBe('residual 5.8 cm');
+    expect(formatCheckValue(check('template_scale', 0.0134))).toBe('+1.34 %');
+    expect(formatCheckValue(check('template_scale', -0.004))).toBe('-0.40 %');
+    expect(formatCheckValue(check('template_placement', 2))).toBe('2 off');
+    expect(formatCheckValue(check('template_binding', 0))).toBe('');
   });
 
   it('says nothing for a check without a value, or no camera below the floor', () => {
