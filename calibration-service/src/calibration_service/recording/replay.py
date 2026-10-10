@@ -43,7 +43,7 @@ def decoded_frame_count(path: Path) -> int:
     count = 0
     try:
         while True:
-            ok = capture.grab()  # decode-free advance: ~3x faster than read()
+            ok = capture.grab()  # decodes, but skips read()'s conversion to BGR
             if not ok:
                 return count
             count += 1

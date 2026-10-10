@@ -322,6 +322,41 @@ def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None
         compute_intrinsic_from_video(path, board, cap=25, stride=1, frame_start=10)
 
 
+def test_compute_detects_exactly_the_strided_frames_of_the_trim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # INT-7: grabbing the skipped frames keeps the index exact. Frame i is a flat image
+    # of grey 10 + 20i, so the detector sees which frames it got: the strided indices
+    # of the trim, each with its own content, frame_end excluded (frame 11 would be the
+    # next stride).
+    from calibration_service.calibration import intrinsic as intrinsic_module
+
+    path = tmp_path / "capture.mkv"
+    with VideoRecorder(path, 64, 48, fps=30) as rec:
+        for i in range(12):
+            rec.write(np.full((48, 64, 3), 10 + 20 * i, np.uint8))
+    seen: list[int] = []
+
+    class SpyDetector:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def detect(self, frame: NDArray[np.uint8]) -> BoardDetection:
+            seen.append(round((float(frame.mean()) - 10) / 20))
+            return BoardDetection.empty()
+
+    monkeypatch.setattr(intrinsic_module, "BoardDetector", SpyDetector)
+    monkeypatch.setattr(intrinsic_module, "select_keyframes", lambda d, s, cap: d)
+    sizes: list[tuple[int, int]] = []
+    monkeypatch.setattr(intrinsic_module, "calibrate_intrinsic", lambda k, b, s: sizes.append(s))
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    compute_intrinsic_from_video(path, board, cap=25, stride=3, frame_start=2, frame_end=11)
+    assert seen == [2, 5, 8]
+    assert sizes == [(64, 48)]
+
+
 def _projected_views() -> tuple[CalibrationBoard, list[BoardDetection]]:
     """15 noise-free views of a 7x8 ChArUco through a 600 px pinhole at 640x480."""
     board = CalibrationBoard(
