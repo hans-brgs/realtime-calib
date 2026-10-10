@@ -855,7 +855,11 @@ async def compute_intrinsic(
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     session = manager.set_intrinsic_result(camera, result)
     # Persist the review metrics next to the recording so the Results view survives a
-    # reload/resume (ADR-0022); all fields are resolution-independent.
+    # reload/resume (ADR-0022). The uncertainty is in pixels, so at the output
+    # resolution like the reported error (ADR-0015); every other field is
+    # resolution-independent.
+    factor = next(c.resize_factor for c in session.cameras if c.name == camera)
+    shown = result.scaled(factor)
     metrics = {
         "coverage": [list(row) for row in result.coverage],
         "image_coverage": result.image_coverage,
@@ -865,6 +869,11 @@ async def compute_intrinsic(
         # replaced the absolute blur gate — a blurry sweep succeeds, visibly.
         "sharpness_min": result.sharpness_min,
         "sharpness_median": result.sharpness_median,
+        # Projection uncertainty (ADR-0055): where the solved model can be trusted.
+        "uncertainty": [list(row) for row in shown.uncertainty],
+        "uncertainty_covered_px": shown.uncertainty_covered_px,
+        "uncertainty_uncovered_px": shown.uncertainty_uncovered_px,
+        "uncertainty_unmodelled": shown.uncertainty_unmodelled,
     }
     atomic_write_text(manager.intrinsic_metrics_path(camera), json.dumps(metrics))
     return _session_out(session, manager)
@@ -891,7 +900,9 @@ async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
 
     ``{coverage: quad-accumulation count map (ADR-0039), image_coverage: union-area
     fraction, orientation_bins: /8, board_quads: per-keyframe 4x3 board outline in
-    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038)}``.
+    camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038),
+    uncertainty: per-cell 1-sigma projection uncertainty in output px, with its RMS
+    over the covered and the uncovered cells (ADR-0055)}``.
     """
     manager = get_manager(request)
     _require_camera(manager.current(), camera)

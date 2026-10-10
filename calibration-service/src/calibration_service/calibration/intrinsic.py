@@ -25,13 +25,18 @@ import logging
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import Any, cast
+from typing import Any, TypedDict, cast
 
 import cv2
 import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
+from calibration_service.calibration.uncertainty import (
+    ROBUST_COVERAGE,
+    intrinsic_covariances,
+    projection_uncertainty,
+)
 from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.resolution import output_size, to_output
@@ -88,6 +93,15 @@ class IntrinsicResult:
     # get?" observable: a uniformly-blurry sweep now succeeds instead of failing.
     sharpness_min: float = 0.0
     sharpness_median: float = 0.0
+    # Projection uncertainty (ADR-0055): 1-sigma px (euclidean) per coverage cell, None
+    # outside the lens model (past its distortion fold), and its RMS over the modelled
+    # cells >= 3 keyframes cover and over those none does; `uncertainty_unmodelled` is
+    # the share of cells outside the model. Empty / None when the covariance is
+    # singular (degenerate views) or no cell is in that band.
+    uncertainty: tuple[tuple[float | None, ...], ...] = ()
+    uncertainty_covered_px: float | None = None
+    uncertainty_uncovered_px: float | None = None
+    uncertainty_unmodelled: float = 0.0
 
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
@@ -95,7 +109,7 @@ class IntrinsicResult:
         We calibrate at native resolution for accuracy then map K + image size
         to the operator's output resolution, pixel centres included (ADR-0051,
         ``calibration_service.resolution``); the normalised distortion coefficients are
-        unchanged. Pixel errors scale by the nominal ``factor``.
+        unchanged. Pixel errors and uncertainties scale by the nominal ``factor``.
         """
         if factor == 1.0:
             return self
@@ -105,7 +119,17 @@ class IntrinsicResult:
             error=self.error * factor,
             per_view_errors=[e * factor for e in self.per_view_errors],
             image_size=output_size(self.image_size, factor),
+            uncertainty=tuple(
+                tuple(None if v is None else round(v * factor, 3) for v in row)
+                for row in self.uncertainty
+            ),
+            uncertainty_covered_px=_times(self.uncertainty_covered_px, factor),
+            uncertainty_uncovered_px=_times(self.uncertainty_uncovered_px, factor),
         )
+
+
+def _times(value: float | None, factor: float) -> float | None:
+    return None if value is None else value * factor
 
 
 # Accumulation-map width; rows derive from the image aspect for ~square cells.
@@ -399,6 +423,9 @@ def calibrate_intrinsic(
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
     coverage = _coverage_map(image_points, (width, height))
+    uncertainty = _uncertainty(
+        object_points, image_points, matrix, dist, rvec_list, tvec_list, coverage, image_size
+    )
     return IntrinsicResult(
         matrix=np.asarray(matrix, float).tolist(),
         distortions=np.asarray(dist, float).ravel().tolist(),
@@ -413,7 +440,58 @@ def calibrate_intrinsic(
         board_quads=_board_quads(rvec_list, tvec_list, cv_board),
         sharpness_min=float(min(used_sharpness)),
         sharpness_median=float(np.median(used_sharpness)),
+        **uncertainty,
     )
+
+
+class _UncertaintyFields(TypedDict, total=False):
+    uncertainty: tuple[tuple[float | None, ...], ...]
+    uncertainty_covered_px: float | None
+    uncertainty_uncovered_px: float | None
+    uncertainty_unmodelled: float
+
+
+def _uncertainty(
+    object_points: list[NDArray[np.float32]],
+    image_points: list[NDArray[np.float32]],
+    matrix: NDArray[np.float64],
+    dist: NDArray[np.float64],
+    rvecs: list[NDArray[np.float64]],
+    tvecs: list[NDArray[np.float64]],
+    coverage: tuple[tuple[int, ...], ...],
+    image_size: tuple[int, int],
+) -> _UncertaintyFields:
+    """The result's uncertainty fields (ADR-0055); empty when the covariance is singular.
+
+    A diagnostic: a degenerate covariance must not cost the solve it describes. A nearly
+    singular one is not caught: it reads as huge, finite figures.
+    """
+    distortions = np.asarray(dist, np.float64).ravel()
+    try:
+        covariances = intrinsic_covariances(
+            object_points, image_points, matrix, distortions, rvecs, tvecs
+        )
+        grid = projection_uncertainty(
+            covariances, matrix, distortions, np.asarray(coverage), image_size
+        )
+    except (np.linalg.LinAlgError, cv2.error) as exc:
+        logger.warning("projection uncertainty skipped: %s", exc)
+        return {}
+    counts = np.asarray(coverage)
+    modelled = np.isfinite(grid)
+
+    def rms(mask: NDArray[np.bool_]) -> float | None:
+        cells = mask & modelled
+        return float(np.sqrt(np.mean(np.square(grid[cells])))) if cells.any() else None
+
+    return {
+        "uncertainty": tuple(
+            tuple(round(float(v), 3) if np.isfinite(v) else None for v in row) for row in grid
+        ),
+        "uncertainty_covered_px": rms(counts >= ROBUST_COVERAGE),
+        "uncertainty_uncovered_px": rms(counts == 0),
+        "uncertainty_unmodelled": float(np.mean(~modelled)),
+    }
 
 
 def compute_intrinsic_from_video(
