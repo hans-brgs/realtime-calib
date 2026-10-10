@@ -41,7 +41,8 @@ _UNDISTORT = (cv2.TERM_CRITERIA_COUNT + cv2.TERM_CRITERIA_EPS, 100, 1e-12)
 ROBUST_COVERAGE = 3
 _MIN_FIT_CELLS = 10
 # A cell whose undistorted ray projects back further than this from the cell centre has
-# no inverse in the model (the undistortion converges to ~1e-6 px elsewhere).
+# no inverse in the model (elsewhere the undistortion lands within 1e-12 px in median,
+# a few hundredths near the fold).
 _ROUND_TRIP_PX = 0.05
 
 

@@ -45,9 +45,9 @@ from calibration_service.resolution import output_size, to_output
 # cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
 # [k1,k2,p1,p2,k3], free aspect ratio. The former RATIONAL_MODEL+FIX_ASPECT anchor
 # was not grounded in caliscope code and produced degenerate per-camera
-# coefficients. The guess seed (Caliscope v0.11.5's) is solved next to OpenCV's own
-# initialisation (the flag-free solve of Caliscope <= 0.5.4), the lower cost kept
-# (ADR-0053).
+# coefficients. The solve starts from Caliscope v0.11.5's guess seed; OpenCV's own
+# initialisation (the flag-free solve of Caliscope <= 0.5.4) only stands in when it
+# fails (ADR-0053).
 _CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
 # stride/cap defaults live in calibration_service.tuning (ADR-0036); the transport
 # layer resolves omitted request fields there and always passes explicit values.
@@ -81,7 +81,7 @@ class IntrinsicResult:
     # Review metrics (ADR-0022). All resolution-independent, so ``scaled()`` leaves them
     # unchanged. `coverage` = per-cell count of keyframes whose detected-corner hull
     # covers it (redundancy map, ADR-0039: 0 = never, 1 = fragile, 3+ = robust);
-    # `image_coverage` = union-of-quads area fraction (no arbitrary grid);
+    # `image_coverage` = union-of-quads area fraction (cell centres on a 384-column grid);
     # `orientation_bins` = occupied 45deg tilt-azimuth sectors (Caliscope, /8);
     # `board_quads` = each keyframe board's 4 outline corners in 3D camera coords.
     coverage: tuple[tuple[int, ...], ...] = ()

@@ -460,8 +460,31 @@ def test_solver_failure_is_reported_as_unusable_input(monkeypatch: pytest.Monkey
     )
     views = [_detection(100.0 + 40.0 * i, 100.0 + 20.0 * i, 10.0) for i in range(8)]
     monkeypatch.setattr(cv2, "calibrateCameraExtended", _assert_fails)
-    with pytest.raises(ValueError, match="OpenCV calibration failed"):
+    with pytest.raises(ValueError, match="OpenCV calibration failed") as raised:
         calibrate_intrinsic(views, board, (640, 480))
+    assert str(raised.value).count("degenerate view") == 2  # both starts' causes
+
+
+def test_cells_outside_the_model_are_none_and_kept_out_of_the_summaries(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The producer side of the fold mask: a NaN cell must reach metrics.json as null
+    # (Starlette refuses NaN), stay out of both summaries, and count as unmodelled.
+    import json
+
+    import calibration_service.calibration.intrinsic as intrinsic_module
+
+    grid = np.array([[1.0, np.nan], [2.0, 4.0]])
+    monkeypatch.setattr(intrinsic_module, "intrinsic_covariances", lambda *a: (None, None))
+    monkeypatch.setattr(intrinsic_module, "projection_uncertainty", lambda *a: grid)
+    fields = intrinsic_module._uncertainty(
+        [], [], np.eye(3), np.zeros(5), [], [], ((3, 0), (3, 0)), (64, 48)
+    )
+    assert fields["uncertainty"] == ((1.0, None), (2.0, 4.0))
+    assert fields["uncertainty_covered_px"] == pytest.approx(np.sqrt((1.0 + 4.0) / 2))
+    assert fields["uncertainty_uncovered_px"] == 4.0  # the NaN cell is not averaged in
+    assert fields["uncertainty_unmodelled"] == 0.25
+    json.dumps(fields, allow_nan=False)
 
 
 # --- Projection uncertainty (ADR-0055) -------------------------------------------------
