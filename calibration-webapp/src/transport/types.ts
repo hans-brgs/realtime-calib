@@ -76,6 +76,9 @@ export interface BoardConfigRequest {
   // measured size is read — the service rebuilds the copy from the intrinsic
   // board, so what lands in config.toml cannot drift from what is on screen.
   inherited?: boolean;
+  // Confirms a definition that changes the solved extrinsic target: the service
+  // discards the solve (ADR-0048). Without it such a request is refused (409).
+  discard_extrinsic?: boolean;
 }
 
 // One actionable load-time anomaly (ADR-0036 fail-loud): the wizard stage to
@@ -100,6 +103,9 @@ export interface Session {
   // "step not validated" and nothing else.
   extrinsic_board: Board | null;
   extrinsic_inherited?: boolean; // that copy is an inherited one, not a board of its own
+  // A sweep is recorded: after a discarded solve (ADR-0048) the Extrinsic step
+  // offers a recompute from it instead of a new recording.
+  extrinsic_recorded?: boolean;
 }
 
 // Pipeline defaults AND bounds served by the backend (GET /defaults, ADR-0036).

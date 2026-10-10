@@ -40,7 +40,7 @@ from calibration_service.calibration import (
     sweep_groups,
 )
 from calibration_service.export import (
-    PLATFORM_FORMATS,
+    aniposelib_document,
     caliscope_document,
     export_targets,
     platform_variant,
@@ -205,6 +205,9 @@ class BoardConfigRequest(BaseModel):
     # measured size is read from `board` — the service rebuilds the copy from the
     # intrinsic board so a client cannot desynchronize it (ADR-0045).
     inherited: bool = False
+    # Confirms a definition that changes the solved extrinsic target: the solve
+    # is discarded (ADR-0048). Without it such a request is refused with 409.
+    discard_extrinsic: bool = False
 
 
 class BoardOut(BoardIn):
@@ -234,6 +237,10 @@ class SessionOut(BaseModel):
     # Whether extrinsic_board is a materialized copy of the intrinsic one
     # (ADR-0045) — drives the webapp's "different board" toggle.
     extrinsic_inherited: bool = False
+    # Whether a sweep of the CURRENT cameras is recorded (a camera rebuild forgets
+    # it): after a discarded solve (ADR-0048) the Extrinsic step offers to
+    # recompute from it instead of re-recording.
+    extrinsic_recorded: bool = False
 
 
 class SessionSummaryOut(BaseModel):
@@ -328,6 +335,7 @@ def _session_out(session: CalibrationSession, manager: SessionManager) -> Sessio
         intrinsic_board=_board_out(session.intrinsic_board),
         extrinsic_board=_board_out(session.extrinsic_board),
         extrinsic_inherited=session.extrinsic_inherited,
+        extrinsic_recorded=manager.has_extrinsic_recording(),
     )
 
 
@@ -384,6 +392,24 @@ def _read_json(path: Path) -> dict[str, Any]:
     if not isinstance(payload, dict):
         raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — recompute")
     return payload
+
+
+# Machine-readable code of the 409 a destructive request gets until confirmed: the
+# webapp asks the operator, then resends with ``discard_extrinsic`` (ADR-0048).
+DISCARDS_EXTRINSIC = "discards_extrinsic"
+
+
+def _confirm_extrinsic_discard(message: str) -> HTTPException:
+    # Shares the 409 status with NoActiveSessionError; `detail.code` tells them apart.
+    return HTTPException(
+        status_code=409,
+        detail={
+            "code": DISCARDS_EXTRINSIC,
+            "message": f"{message} — the solved camera array would be discarded. The "
+            "extrinsic sweep stays recorded: recompute from it unless it shows another "
+            "target. Resend with discard_extrinsic=true to confirm.",
+        },
+    )
 
 
 def get_publish_service(request: Request) -> CameraPublishService | None:
@@ -699,6 +725,9 @@ class ComputeRequest(BaseModel):
     )
     frame_start: int = Field(default=0, ge=0)  # trim start (frame index)
     frame_end: int | None = Field(default=None, ge=1)  # trim end (exclusive)
+    # Confirms a recompute while an extrinsic solve exists: the new K invalidates
+    # the poses, so the solve is discarded (ADR-0048). Without it: 409.
+    discard_extrinsic: bool = False
 
 
 @router.post("/intrinsic/{camera}/compute", response_model=SessionOut)
@@ -717,15 +746,17 @@ async def compute_intrinsic(
     board = manager.current().intrinsic_board
     if board is None:
         raise HTTPException(status_code=422, detail="no intrinsic board defined")
+    path = manager.intrinsic_video_path(camera)
+    if not path.is_file():
+        # Before the discard question: confirming it would only lead here.
+        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
+    if manager.has_extrinsic_result() and not params.discard_extrinsic:
+        raise _confirm_extrinsic_discard(f"recomputing {camera}'s intrinsics changes its K")
 
     service = get_publish_service(request)
     if service is not None:
         await service.stop_intrinsic_recording()
         service.set_active_intrinsic(None)
-
-    path = manager.intrinsic_video_path(camera)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"no recording for {camera}")
 
     loop = asyncio.get_running_loop()
     try:
@@ -1222,15 +1253,17 @@ async def extrinsic_preview(request: Request, camera: str) -> FileResponse:
     return FileResponse(path, media_type="video/mp4")
 
 
-_EXPORT_TARGET_IDS = frozenset({"caliscope", *PLATFORM_FORMATS})
+_EXPORT_TARGET_IDS = frozenset(target.id for target in export_targets())
 # The export units the writers accept (TUNING.export_units_options, ADR-0026).
 ExportUnits = Literal["mm", "m"]
 
 
 class ExportRequest(BaseModel):
     """Targets to export (ADR-0026): all optional, none forced. 'caliscope' writes
-    camera_array.toml; platform ids (threejs/blender/unity/unreal) write a JSON
-    each. ``units`` scales the extrinsic translations of every target, TOML included."""
+    camera_array.toml, 'aniposelib' camera_array_aniposelib.toml; platform ids
+    (threejs/blender/unity/unreal) write a JSON each. ``units`` scales the
+    extrinsic translations of every target but the Caliscope TOML, which is
+    always in metres — Caliscope's world unit (ADR-0047)."""
 
     formats: list[str] = []
     # None = the session's persisted preference (seeded from TUNING at creation).
@@ -1258,7 +1291,9 @@ def _render_target(
 ) -> tuple[str, str]:
     """Serialized content of one export target — no disk write (dry-run + write)."""
     if target_id == "caliscope":
-        return "toml", rtoml.dumps(caliscope_document(session, square, units=units))
+        return "toml", rtoml.dumps(caliscope_document(session, square))
+    if target_id == "aniposelib":
+        return "toml", rtoml.dumps(aniposelib_document(session, square, units=units))
     variant = platform_variant(session, target_id, square, units=units)
     return "json", json.dumps(variant, indent=2)
 
@@ -1394,6 +1429,11 @@ async def define_board(request: Request, body: BoardConfigRequest) -> SessionOut
             # 20 mm measurement next to the default 30 mm marker would take
             # "marker >= square" for a board that never gets stored.
             validate_board(board)
+        if (
+            manager.board_change_discards_extrinsic(body.target, board, body.inherited)
+            and not body.discard_extrinsic
+        ):
+            raise _confirm_extrinsic_discard("this target is not the one the array was solved on")
         session = manager.define_board(body.target, board, inherited=body.inherited)
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc

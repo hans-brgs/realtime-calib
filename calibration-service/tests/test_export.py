@@ -6,7 +6,9 @@ import io
 import json
 import zipfile
 from pathlib import Path
+from typing import Any
 
+import cv2
 import numpy as np
 import pytest
 import rtoml
@@ -14,6 +16,7 @@ from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
 from calibration_service.export import (
+    aniposelib_document,
     caliscope_document,
     export_targets,
     platform_variant,
@@ -64,36 +67,114 @@ def _session() -> CalibrationSession:
     )
 
 
-def test_caliscope_document_round_trips_with_mm_translation() -> None:
-    document = caliscope_document(_session(), SQUARE_MM)
-    parsed = rtoml.loads(rtoml.dumps(document))
-    cam_1 = parsed["cam_1"]
-    assert cam_1["port"] == 1
-    # Additive id -> device reconciliation field (stable v4l path).
-    assert cam_1["device_path"] == "/dev/v4l/by-path/cam1"
-    assert cam_1["size"] == [640, 480]  # output resolution (resize_factor 0.5)
-    assert cam_1["matrix"] == K
-    assert cam_1["distortions"] == DIST  # rational coefficients as calibrated
-    assert cam_1["rotation"] == pytest.approx([0.0, np.pi / 2, 0.0])
-    assert cam_1["translation"] == pytest.approx([80.0, 0.0, 0.0])  # squares -> mm
-    assert cam_1["error"] == 0.2
-    assert parsed["cam_0"]["rotation"] == [0.0, 0.0, 0.0]  # anchor identity
+# --- Upstream loaders, replayed from their sources -------------------------------
+# The promise of ADR-0002/0047 is "loads in the tool", so the tests run each
+# tool's own reading logic (transcribed, not imported: none is a dependency).
 
 
-def test_caliscope_document_honours_metre_units() -> None:
-    # Caliscope's own arrays are metre-scaled: units="m" makes the TOML a true
-    # drop-in (the units knob applies to every artifact, not just the JSONs).
-    document = caliscope_document(_session(), SQUARE_MM, units="m")
-    assert document["cam_1"]["translation"] == pytest.approx([0.08, 0.0, 0.0])
+def _caliscope_v0115_load(text: str) -> dict[int, dict[str, Any]]:
+    """Caliscope v0.11.5 ``CameraArray.from_toml`` (cameras/camera_array.py)."""
+    data = rtoml.loads(text)
+    if not data or "cameras" not in data:
+        return {}  # upstream returns CameraArray({}) — silently empty
+    cameras: dict[int, dict[str, Any]] = {}
+    for cam_id_str, camera in data["cameras"].items():
+        rotation = np.asarray(camera.get("rotation"), np.float64)
+        if rotation.shape in [(3,), (3, 1)]:
+            rotation = cv2.Rodrigues(rotation)[0]
+        cameras[int(cam_id_str)] = {
+            "size": (camera["size"][0], camera["size"][1]),
+            "rotation_count": camera.get("rotation_count", 0),
+            "matrix": np.asarray(camera.get("matrix"), np.float64),
+            "distortions": np.asarray(camera.get("distortions"), np.float64),
+            "rotation": rotation,
+            "translation": np.asarray(camera.get("translation"), np.float64),
+            "fisheye": camera.get("fisheye", False),
+        }
+    return cameras
 
 
-def test_export_targets_catalog_lists_caliscope_plus_platforms() -> None:
-    # Backend = single source for the export catalog (ADR-0026): caliscope (TOML,
-    # OpenCV axes) + the four platform JSONs, with display metadata.
+def _caliscope_v054_load(text: str) -> dict[int, dict[str, Any]]:
+    """Caliscope v0.5.4 ``Configurator.get_configured_camera_data`` (configurator.py)."""
+    cameras: dict[int, dict[str, Any]] = {}
+    for key, params in rtoml.loads(text).items():
+        if key.startswith("cam_"):
+            camera: dict[str, Any] = {
+                "size": params["size"],
+                "rotation_count": params["rotation_count"],  # KeyError when absent
+                "translation": np.asarray(params["translation"]),
+                "rotation": cv2.Rodrigues(np.asarray(params["rotation"]))[0],
+            }
+            if params.get("error") is not None:
+                # An `error` makes it read the intrinsics, grid_count without default.
+                camera["error"] = params["error"]
+                camera["matrix"] = np.asarray(params["matrix"])
+                camera["distortions"] = np.asarray(params["distortions"])
+                camera["grid_count"] = params["grid_count"]  # KeyError when absent
+            cameras[params["port"]] = camera
+    return cameras
+
+
+def _aniposelib_load(text: str) -> list[dict[str, Any]]:
+    """aniposelib ``CameraGroup.load`` + ``Camera.load_dict`` (cameras.py)."""
+    data = rtoml.loads(text)
+    required = ("name", "size", "matrix", "distortions", "rotation", "translation")
+    names = [name for name in sorted(data) if name != "metadata"]
+    return [{key: data[name][key] for key in required} for name in names]
+
+
+def test_caliscope_toml_loads_in_caliscope_0_11_5() -> None:
+    # It used to load as an EMPTY array: from_toml wants [cameras.<id>] tables.
+    cameras = _caliscope_v0115_load(rtoml.dumps(caliscope_document(_session(), SQUARE_MM)))
+    assert sorted(cameras) == [0, 1]
+    cam_1 = cameras[1]
+    assert cam_1["size"] == (640, 480)  # output resolution (resize_factor 0.5)
+    assert np.allclose(cam_1["matrix"], K)
+    assert np.allclose(cam_1["distortions"], DIST)  # exactly as calibrated
+    assert np.allclose(cam_1["rotation"], cv2.Rodrigues(np.array([0.0, np.pi / 2, 0.0]))[0])
+    # Caliscope's world unit is the metre: 2 squares x 40 mm = 0.08 m.
+    assert np.allclose(cam_1["translation"], [0.08, 0.0, 0.0])
+    assert cam_1["rotation_count"] == 0 and cam_1["fisheye"] is False
+    assert np.allclose(cameras[0]["rotation"], np.eye(3))  # anchor identity
+
+
+def test_caliscope_toml_keeps_its_extensions_additive() -> None:
+    entry = caliscope_document(_session(), SQUARE_MM)["cameras"]["1"]
+    assert entry["name"] == "cam_1"
+    assert entry["device_path"] == "/dev/v4l/by-path/cam1"  # id -> physical device
+    assert entry["grid_count"] == 400 and entry["error"] == 0.2
+
+
+def test_aniposelib_toml_loads_in_aniposelib_and_caliscope_0_5_4() -> None:
+    text = rtoml.dumps(aniposelib_document(_session(), SQUARE_MM))
+    cameras = _aniposelib_load(text)
+    assert [c["name"] for c in cameras] == ["cam_0", "cam_1"]
+    assert cameras[1]["translation"] == pytest.approx([0.08, 0.0, 0.0])  # metres by default
+    # The same tables paste into a Caliscope <= 0.5.4 config.toml: rotation_count
+    # (read without default there) is present.
+    legacy = _caliscope_v054_load(text)
+    assert sorted(legacy) == [0, 1]
+    assert legacy[1]["rotation_count"] == 0
+    assert np.allclose(legacy[1]["translation"], [0.08, 0.0, 0.0])
+    assert legacy[1]["error"] == 0.2 and legacy[1]["grid_count"] == 400
+    assert np.allclose(legacy[1]["matrix"], K)
+
+
+def test_aniposelib_toml_follows_the_export_units() -> None:
+    mm = aniposelib_document(_session(), SQUARE_MM, units="mm")
+    assert mm["cam_1"]["translation"] == pytest.approx([80.0, 0.0, 0.0])
+    assert mm["metadata"] == {"adjusted": False}
+
+
+def test_export_targets_catalog_lists_both_tomls_plus_platforms() -> None:
+    # Backend = single source for the export catalog (ADR-0026): the Caliscope and
+    # aniposelib TOMLs (OpenCV axes) + the four platform JSONs, with display metadata.
     targets = {t.id: t for t in export_targets()}
-    assert set(targets) == {"caliscope", "threejs", "blender", "unity", "unreal"}
+    assert set(targets) == {"caliscope", "aniposelib", "threejs", "blender", "unity", "unreal"}
     assert targets["caliscope"].filename == "camera_array.toml"
     assert targets["caliscope"].kind == "toml"
+    assert targets["aniposelib"].filename == "camera_array_aniposelib.toml"
+    assert targets["aniposelib"].kind == "toml"
     assert targets["unity"].filename == "camera_array_unity.json"
     assert targets["unity"].kind == "json"
     assert targets["unity"].handedness == "left"
@@ -252,7 +333,7 @@ def test_export_conventions_catalog_route(tmp_path: Path) -> None:
     client = TestClient(create_app(SessionManager(tmp_path, "default")))
     catalog = client.get("/export/conventions").json()["targets"]
     ids = [t["id"] for t in catalog]
-    assert ids == ["caliscope", "threejs", "blender", "unity", "unreal"]
+    assert ids == ["caliscope", "aniposelib", "threejs", "blender", "unity", "unreal"]
 
 
 def test_export_refuses_a_camera_without_translation() -> None:
@@ -264,12 +345,12 @@ def test_export_refuses_a_camera_without_translation() -> None:
         caliscope_document(session, SQUARE_MM)
 
 
-@pytest.mark.parametrize("writer", ["caliscope", "threejs"])
+@pytest.mark.parametrize("writer", ["aniposelib", "threejs"])
 def test_unknown_units_are_refused_not_defaulted(writer: str) -> None:
     # Used to fall through to millimetres while the JSON announced the bad unit.
     with pytest.raises(ValueError, match="unknown export units"):
-        if writer == "caliscope":
-            caliscope_document(_session(), SQUARE_MM, units="km")
+        if writer == "aniposelib":
+            aniposelib_document(_session(), SQUARE_MM, units="km")
         else:
             platform_variant(_session(), writer, SQUARE_MM, units="km")
 
@@ -295,3 +376,24 @@ def test_export_units_have_one_definition() -> None:
     options = set(TUNING.export_units_options)
     assert set(_UNIT_SCALE) == options
     assert set(get_args(ExportUnits)) == options
+
+
+def test_caliscope_toml_stays_in_metres_whatever_the_units(tmp_path: Path) -> None:
+    # A mm translation in a Caliscope file would read 1000x too large there
+    # (ADR-0047): the units knob scales every target but this one.
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    board = {"board_type": "charuco", "dictionary": "DICT_5X5_100", "columns": 7, "rows": 8}
+    client.post("/board", json={"target": "intrinsic", "board": board})
+    client.post("/board", json={"target": "extrinsic", "board": board, "inherited": True})
+    manager.current().cameras.extend(_session().cameras)
+
+    files = client.post(
+        "/export/preview", json={"formats": ["caliscope", "aniposelib", "threejs"], "units": "mm"}
+    ).json()["files"]
+    content = {f["name"]: f["content"] for f in files}
+    caliscope = _caliscope_v0115_load(content["camera_array.toml"])
+    assert np.allclose(caliscope[1]["translation"], [0.08, 0.0, 0.0])  # metres
+    aniposelib = rtoml.loads(content["camera_array_aniposelib.toml"])
+    assert aniposelib["cam_1"]["translation"] == pytest.approx([80.0, 0.0, 0.0])  # mm
+    assert json.loads(content["camera_array_threejs.json"])["world_units"] == "mm"

@@ -47,10 +47,32 @@ async function errorFrom(response: Response, fallback: string): Promise<Error> {
     if (typeof detail === 'string' && detail.length > 0) {
       return new Error(detail);
     }
+    // A structured detail {code, message} (ADR-0048) keeps its code on the Error:
+    // Redux Toolkit's SerializedError carries `code` through unwrap(), so a screen
+    // can react to WHICH refusal it got (see errorCode) instead of a message.
+    if (typeof detail === 'object' && detail !== null) {
+      const { code, message } = detail as { code?: unknown; message?: unknown };
+      if (typeof message === 'string' && message.length > 0) {
+        return Object.assign(new Error(message), typeof code === 'string' ? { code } : {});
+      }
+    }
   } catch {
     /* non-JSON error body: fall through to the generic message */
   }
   return new Error(fallback);
+}
+
+// The 409 a request that would discard the solved camera array gets until it is
+// confirmed: the screen asks the operator, then resends with `discard_extrinsic`.
+export const DISCARDS_EXTRINSIC = 'discards_extrinsic';
+
+// Machine-readable code of a rejection (Error or SerializedError), if any.
+export function errorCode(err: unknown): string | undefined {
+  if (typeof err === 'object' && err !== null && 'code' in err) {
+    const code = (err as { code?: unknown }).code;
+    return typeof code === 'string' ? code : undefined;
+  }
+  return undefined;
 }
 
 async function getJson<T>(path: string): Promise<T> {
@@ -180,6 +202,9 @@ export interface ComputeParams {
   cap?: number;
   frame_start?: number;
   frame_end?: number;
+  // Confirms a recompute while an extrinsic solve exists: the new K invalidates
+  // the poses, so the service discards the solve (ADR-0048). Without it: 409.
+  discard_extrinsic?: boolean;
 }
 
 export const computeIntrinsic = (camera: string, params?: ComputeParams): Promise<Session> =>
@@ -373,7 +398,8 @@ export const minimizeExtrinsic = (): Promise<ExtrinsicResultPayload> =>
 export const validateExtrinsic = (): Promise<Session> => postJson<Session>('/extrinsic/validate');
 
 // Calibration export (spec calibration-export, ADR-0026). Targets are all optional
-// ('caliscope' TOML + platform JSONs); the backend owns the catalog and preview.
+// (the Caliscope and aniposelib TOMLs + platform JSONs); the backend owns the
+// catalog and preview.
 export interface ExportedFile {
   name: string;
   convention: string;

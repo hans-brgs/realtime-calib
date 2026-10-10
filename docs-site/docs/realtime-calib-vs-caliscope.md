@@ -38,7 +38,7 @@ is the better fit.
 | Camera host OS | Wherever the Python desktop app runs | **Linux** (cameras read via V4L2), via Docker Compose |
 | Live feedback | Offline review of recordings | Detection overlays and quality telemetry, streamed live |
 | Beyond calibration | Basic reconstruction pipeline: ONNX pose estimation, 3D trajectories (CSV / TRC) | **Calibration only**, by design |
-| Exports | Its `camera_array.toml` + an aniposelib export (anipose, Pose2Sim) | **Caliscope-compatible TOML** + engine JSON for three.js, Blender / ROS, Unity, Unreal |
+| Exports | Its `camera_array.toml` + an aniposelib export (anipose, Pose2Sim) | **Caliscope-native TOML** + the same aniposelib export + engine JSON for three.js, Blender / ROS, Unity, Unreal |
 | Calibration math | ChArUco intrinsics, pairwise stereo extrinsics, bundle adjustment | **Same lineage, reimplemented** for a real-time, single-pass flow |
 | GPU | Calibration is CPU-based | Not required — CPU-only |
 | License | BSD-2-Clause | AGPL-3.0, with a [commercial option](/docs/open-source/license#commercial-use) |

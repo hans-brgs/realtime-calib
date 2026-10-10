@@ -21,13 +21,13 @@ which is the source of truth for a run.
 | File | Format | For |
 | --- | --- | --- |
 | `camera_array.toml` | Caliscope-native TOML | Caliscope & OpenCV-style pipelines |
+| `camera_array_aniposelib.toml` | aniposelib TOML | Pose2Sim, anipose, and Caliscope ≤ 0.5.4 projects |
 | `camera_array_threejs.json` | Engine JSON | three.js / OpenGL |
 | `camera_array_blender.json` | Engine JSON | Blender / ROS |
 | `camera_array_unity.json` | Engine JSON | Unity |
 | `camera_array_unreal.json` | Engine JSON | Unreal |
 
-You pick which targets to export (any subset) and the length unit (mm or m). The
-**session folder** also holds the recordings, board config and computed results.
+You pick which targets to export (any subset) and the length unit (mm or m). The unit applies to every target except `camera_array.toml`, which is always in metres, Caliscope's world unit. The **session folder** also holds the recordings, board config and computed results.
 
 ## Coordinate conventions
 
@@ -62,39 +62,59 @@ Each convention maps to a target engine:
   </figcaption>
 </figure>
 
-The Caliscope TOML keeps OpenCV's native axes (right-handed, Y-down, Z-forward).
+Both TOMLs keep OpenCV's native axes (right-handed, Y-down, Z-forward).
 
 ## Caliscope TOML (`camera_array.toml`)
 
-Compatible with Caliscope: native field semantics are preserved, project-specific
-fields are strictly additive. One `[cam_N]` table per camera.
+The file Caliscope itself writes and loads: one `[cameras.N]` table per camera, keyed by the camera index. Native field semantics are preserved; project-specific fields are strictly additive, and Caliscope ignores them.
 
 | Field | Meaning |
 | --- | --- |
-| `port` | Camera index / identifier |
-| `size` | Image size `[width, height]` at the calibration resolution |
+| `cam_id` | Camera index (the table key) |
+| `size` | Image size `[width, height]` the intrinsics refer to (the export resolution) |
+| `rotation_count` | Sensor rotation in quarter turns — always `0` |
+| `error` | Intrinsic reprojection error (RMS, px) |
 | `matrix` | 3×3 intrinsic matrix |
 | `distortions` | Distortion coefficients — 5, OpenCV classic model `[k1, k2, p1, p2, k3]` |
+| `translation` | Extrinsic translation (world→camera), **always in metres** |
 | `rotation` | Extrinsic rotation, Rodrigues vector (world→camera) |
-| `translation` | Extrinsic translation, in the selected export units (mm or m — Caliscope's own files are metre-scaled) |
-| `error` | Reprojection error (RMS) |
 | `grid_count` | Number of board views (keyframes) used for the intrinsic solve |
+| `fisheye` | Lens model flag — always `false` |
 
-Additive, non-Caliscope extensions: `name` (operator label) and `device_path`
-(stable V4L identifier).
+Additive extensions: `name` (operator label) and `device_path` (stable V4L identifier).
 
 ```toml
-[cam_0]
-port = 0
-name = "cam_0"
+[cameras.0]
+cam_id = 0
 size = [ 1920, 1080 ]
+rotation_count = 0
+error = 0.21
 matrix = [ [ 1000.0, 0.0, 960.0 ], [ 0.0, 1000.0, 540.0 ], [ 0.0, 0.0, 1.0 ] ]
 distortions = [ 0.0, 0.0, 0.0, 0.0, 0.0 ]
-rotation = [ 0.0, 0.0, 0.0 ]
 translation = [ 0.0, 0.0, 0.0 ]
-error = 0.0
-grid_count = 0
+rotation = [ 0.0, 0.0, 0.0 ]
+grid_count = 24
+fisheye = false
+name = "cam_0"
+device_path = "/dev/v4l/by-path/pci-0000:00:14.0-usb-0:1:1.0-video-index0"
 ```
+
+Files exported by earlier realtime-calib versions used top-level `[cam_N]` tables instead, which recent Caliscope versions read as an empty camera array: export them again.
+
+## aniposelib TOML (`camera_array_aniposelib.toml`)
+
+The layout aniposelib reads (`CameraGroup.load`), used by Pose2Sim and anipose: one top-level `[cam_N]` table per camera, plus a `[metadata]` table.
+
+| Field | Meaning |
+| --- | --- |
+| `name`, `size`, `matrix`, `distortions`, `rotation`, `fisheye` | As in `camera_array.toml` |
+| `translation` | Extrinsic translation (world→camera), in the selected export units |
+| `port`, `rotation_count`, `error`, `grid_count` | What Caliscope ≤ 0.5.4 reads from its `config.toml` |
+| `device_path` | Additive extension (stable V4L identifier) |
+
+`[metadata]` holds `adjusted = false`: the poses were not refined by anipose's own bundle adjustment.
+
+Exported in metres, the `[cam_N]` tables paste unchanged into the `config.toml` of a Caliscope ≤ 0.5.4 project. Exported in millimetres, that project would read a world 1000 times too large.
 
 ## Engine JSON (`camera_array_<target>.json`)
 
@@ -112,7 +132,7 @@ camera object:
 | `matrix` | 4×4 camera→world transform |
 | `intrinsics` | `{ resolution, matrix, distortions, fov_deg }` |
 | `error` | Reprojection error |
-| `name`, `device_path` | As in the TOML |
+| `name`, `device_path` | As in the TOMLs |
 
 **Right-handed** targets (three.js, Blender) additionally carry a **view form** —
 the OpenCV-style extrinsic for projection (`x_cam = R · x_world + t`):
