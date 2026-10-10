@@ -35,22 +35,13 @@ camera's native maximum for the chosen resolution.
 
 ## Resolution vs. resize factor
 
-Two independent controls change how many pixels calibration works on — but they
-trade off very differently:
+Two independent controls set a pixel count, and they act at different places:
 
-- **Resolution** selects the camera's **native capture mode**. A lower mode costs
-  less compute, but beware: **most USB cameras produce a lower resolution by
-  cropping the sensor**, not by scaling it down — so dropping the resolution often
-  **narrows the field of view**. You gain speed but lose coverage.
-- **Resize factor** *(s)* is a **software downscale** (`cv2.resize`) applied to the
-  captured frame — 1, 0.75, 0.5, ⅓ or 0.25. It keeps the **full field of view**
-  and simply lowers the pixel count, trading fine detail for compute.
+- **Resolution** selects the camera's **native capture mode**: what is recorded and calibrated. A lower mode records and computes faster, but beware: **most USB cameras produce a lower resolution by cropping the sensor**, not by scaling it down, so dropping the resolution often **narrows the field of view**. You gain speed but lose coverage.
+- **Resize factor** *(s)* sets the **output resolution** of the exported calibration — 1, 0.75, 0.5, ⅓ or 0.25 — for downstream tools that work on images resized with `cv2.resize`. It changes neither what is recorded nor how it is calibrated: the **full field of view** is kept, and accuracy is unaffected.
 
-So to cut compute **without losing field of view**, prefer lowering the resize
-factor over dropping to a smaller native resolution.
+So the resize factor is the resolution your downstream pipeline works at; the only lever on the cost of capture and calibration is the native mode, with its field-of-view trade-off.
 
-Whichever you choose, the resulting calibration resolution is recorded so
-intrinsics stay consistent with the images they were computed from: the stored
-**K** corresponds to that resolution, and **K_out = s·K** is written on export.
+Whichever you choose, the intrinsics are calibrated on the native frames, then reported at the output resolution `round(native × s)`. The stored **K** corresponds to that resolution, mapped the way `cv2.resize` maps pixel centres onto that declared size (`c' = s · (c + 0.5) − 0.5` on each axis, with the factor of the rounded size), so it projects exactly onto images resized to it. The distortion coefficients do not depend on the resolution.
 
 → Reference: [Calibration output files](/docs/reference/output-calibration-files)

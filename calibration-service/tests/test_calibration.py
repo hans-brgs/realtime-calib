@@ -88,7 +88,8 @@ def test_intrinsic_result_scaled() -> None:
     )
     s = r.scaled(0.5)
     assert s.matrix[0][0] == 668.5 and s.matrix[1][1] == 668.5  # fx, fy halved
-    assert s.matrix[0][2] == 496.5 and s.matrix[1][2] == 272.0  # cx, cy halved
+    # Pixel centres (ADR-0051): cx' = s (cx + 0.5) - 0.5, not s cx.
+    assert s.matrix[0][2] == 496.25 and s.matrix[1][2] == 271.75
     assert s.matrix[2] == [0.0, 0.0, 1.0]  # homogeneous row untouched
     assert s.distortions == r.distortions  # normalised — unchanged
     assert s.image_size == (960, 540)

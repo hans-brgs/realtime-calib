@@ -42,6 +42,7 @@ from calibration_service.calibration import (
     reorient_result,
     sweep_groups,
 )
+from calibration_service.resolution import to_native
 from calibration_service.export import (
     aniposelib_document,
     caliscope_document,
@@ -984,13 +985,10 @@ class ExtrinsicComputeRequest(BaseModel):
 
 def _native_camera_model(camera: CameraConfig) -> CameraModel:
     """Solver intrinsics at the RECORDING resolution (undo the ADR-0015 scaling)."""
-    factor = camera.resize_factor or 1.0
-    matrix = np.asarray(camera.matrix, np.float64).copy()
-    matrix[0] /= factor
-    matrix[1] /= factor
+    assert camera.matrix is not None  # callers refuse uncalibrated cameras first
     return CameraModel(
         name=camera.name,
-        matrix=matrix,
+        matrix=to_native(camera.matrix, (camera.width, camera.height), camera.resize_factor or 1.0),
         distortions=np.asarray(camera.distortions, np.float64),
     )
 

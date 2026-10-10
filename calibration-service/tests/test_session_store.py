@@ -4,6 +4,9 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import numpy as np
+import pytest
+
 from calibration_service.models.session import (
     CalibrationSession,
     CameraConfig,
@@ -11,6 +14,7 @@ from calibration_service.models.session import (
     SessionMode,
     WizardStep,
 )
+from calibration_service.resolution import to_native
 from calibration_service.session.store import (
     SESSION_FILE,
     create_session,
@@ -145,3 +149,35 @@ def test_reload_defaults_missing_export_units_to_tuning(tmp_path: Path) -> None:
     loaded = load_session(tmp_path, "legacy")
 
     assert loaded.export_units == TUNING.export_units
+
+
+def test_a_schema_1_session_gets_its_output_matrix_migrated(tmp_path: Path) -> None:
+    # Written as s * K_native before ADR-0051: the load re-expresses it at pixel
+    # centres, the native matrix the poses were solved with is unchanged, and the
+    # next save marks schema 2 so a reload never migrates twice.
+    native = [[1500.0, 0.0, 960.0], [0.0, 1500.0, 540.0], [0.0, 0.0, 1.0]]
+    camera = _sample_camera()
+    camera.resize_factor = 0.5
+    camera.matrix = [[750.0, 0.0, 480.0], [0.0, 750.0, 270.0], [0.0, 0.0, 1.0]]  # 0.5 * native
+    save_session(tmp_path, CalibrationSession(session_id="old", cameras=[camera]))
+    path = session_dir(tmp_path, "old") / SESSION_FILE
+    path.write_text(path.read_text().replace("schema_version = 2\n", ""))
+
+    loaded = load_session(tmp_path, "old")
+    migrated = loaded.cameras[0].matrix
+    assert migrated is not None
+    assert migrated[0][2] == 479.75 and migrated[1][2] == 269.75
+    assert migrated[0][0] == 750.0
+    assert np.allclose(to_native(migrated, (1920, 1080), 0.5), native)
+
+    save_session(tmp_path, loaded)
+    assert "schema_version = 2" in path.read_text()
+    assert load_session(tmp_path, "old").cameras[0].matrix == migrated
+
+
+def test_a_session_from_a_newer_schema_is_refused(tmp_path: Path) -> None:
+    save_session(tmp_path, CalibrationSession(session_id="new"))
+    path = session_dir(tmp_path, "new") / SESSION_FILE
+    path.write_text(path.read_text().replace("schema_version = 2", "schema_version = 3"))
+    with pytest.raises(ValueError, match="schema 3"):
+        load_session(tmp_path, "new")

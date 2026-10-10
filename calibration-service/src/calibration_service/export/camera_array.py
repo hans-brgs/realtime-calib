@@ -29,6 +29,7 @@ import cv2
 import numpy as np
 from numpy.typing import NDArray
 
+from calibration_service.resolution import output_size
 from calibration_service.models.session import CalibrationSession, CameraConfig
 
 
@@ -154,8 +155,7 @@ def _unit_scale(units: str) -> float:
 
 def _output_size(camera: CameraConfig) -> list[int]:
     """Calibration (output) resolution the stored K corresponds to (ADR-0015)."""
-    factor = camera.resize_factor or 1.0
-    return [round(camera.width * factor), round(camera.height * factor)]
+    return list(output_size((camera.width, camera.height), camera.resize_factor or 1.0))
 
 
 def _translation_mm(camera: CameraConfig, square_size_mm: float) -> list[float]:

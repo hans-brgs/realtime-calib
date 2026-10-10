@@ -28,6 +28,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.board.dictionaries import resolve
+from calibration_service.resolution import output_size, to_output
 from calibration_service.detection import BoardDetection, BoardDetector, guessed_camera_matrix
 from calibration_service.models.board import BoardType, CalibrationBoard
 
@@ -84,24 +85,19 @@ class IntrinsicResult:
     def scaled(self, factor: float) -> IntrinsicResult:
         """Return the intrinsics at ``factor``x resolution (ADR-0015 resize).
 
-        We calibrate at native resolution for accuracy then rescale K + image size
-        to the operator's output resolution. Scaling the pinhole model is exact:
-        fx, fy, cx, cy (and pixel errors) scale by ``factor``; the normalised
-        distortion coefficients are unchanged.
+        We calibrate at native resolution for accuracy then map K + image size
+        to the operator's output resolution, pixel centres included (ADR-0051,
+        ``calibration_service.resolution``); the normalised distortion coefficients are
+        unchanged. Pixel errors scale by the nominal ``factor``.
         """
         if factor == 1.0:
             return self
-        width, height = self.image_size
         return replace(
             self,
-            matrix=[
-                [v * factor for v in self.matrix[0]],
-                [v * factor for v in self.matrix[1]],
-                list(self.matrix[2]),
-            ],
+            matrix=to_output(self.matrix, self.image_size, factor),
             error=self.error * factor,
             per_view_errors=[e * factor for e in self.per_view_errors],
-            image_size=(round(width * factor), round(height * factor)),
+            image_size=output_size(self.image_size, factor),
         )
 
 

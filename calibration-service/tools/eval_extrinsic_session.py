@@ -30,7 +30,6 @@ from pathlib import Path
 
 import cv2
 import numpy as np
-import rtoml
 from numpy.typing import NDArray
 
 from calibration_service.calibration.extrinsic import (
@@ -41,37 +40,37 @@ from calibration_service.calibration.extrinsic import (
     compute_extrinsic_from_sweep,
     derive_sweep_window,
 )
+from calibration_service.resolution import to_native
 from calibration_service.models.board import BoardType, CalibrationBoard
+from calibration_service.models.session import CalibrationSession
 from calibration_service.session.config_store import load_board_config
+from calibration_service.session.store import load_session
 from calibration_service.tuning import TUNING
 
 
-def _load_session(directory: Path) -> dict[str, object]:
-    path = directory / "session.toml"
-    if not path.is_file():
+def _load_session(directory: Path) -> CalibrationSession:
+    # The service's own loader: a legacy session's matrices are migrated (ADR-0051).
+    if not (directory / "session.toml").is_file():
         raise SystemExit(f"no session.toml under {directory}")
-    return rtoml.load(path.read_text())
+    return load_session(directory.parent, directory.name)
 
 
-def _camera_models(session: dict) -> tuple[list[CameraModel], dict[str, float]]:
+def _camera_models(session: CalibrationSession) -> tuple[list[CameraModel], dict[str, float]]:
     """Solver intrinsics at the RECORDING resolution + each camera's resize factor."""
     models: list[CameraModel] = []
     factors: dict[str, float] = {}
-    for camera in session["cameras"]:
-        if camera.get("matrix") is None:
-            raise SystemExit(f"{camera['name']} has no intrinsics; calibrate it first")
-        factor = float(camera.get("resize_factor") or 1.0)
-        matrix = np.asarray(camera["matrix"], np.float64).copy()
-        matrix[0] /= factor
-        matrix[1] /= factor
+    for camera in session.cameras:
+        if camera.matrix is None or camera.distortions is None:
+            raise SystemExit(f"{camera.name} has no intrinsics; calibrate it first")
+        factor = camera.resize_factor or 1.0
         models.append(
             CameraModel(
-                name=camera["name"],
-                matrix=matrix,
-                distortions=np.asarray(camera["distortions"], np.float64),
+                name=camera.name,
+                matrix=to_native(camera.matrix, (camera.width, camera.height), factor),
+                distortions=np.asarray(camera.distortions, np.float64),
             )
         )
-        factors[camera["name"]] = factor
+        factors[camera.name] = factor
     return models, factors
 
 
