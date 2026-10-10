@@ -1,26 +1,16 @@
 # Runbook — realtime-calib
 
-Operational guide: TLS certificates, launching the stack, and troubleshooting.
-Single stack with Caddy as the mandatory entry point (ADR-0014).
+Operational guide: launching the stack and troubleshooting. Single stack with Caddy as the mandatory entry point, in plain HTTP on the LAN (ADR-0063).
 
 ## 1. One-time setup
 
 ```bash
-# Prerequisites: Docker, uv, mkcert, openssl, Node 24 + yarn 4 (corepack) for local front work.
+# Prerequisites: Docker, uv, Node 24 + yarn 4 (corepack) for local front work.
 
 # Environment file
 cp .env.example .env
 # Edit .env: set HOST_IP to the machine's LAN IP (e.g. 192.168.1.42) and choose
 # dedicated LiveKit API keys.
-
-# Trust the mkcert local CA (once per machine)
-mkcert -install
-
-# Generate the LAN certificate (covers HOST_IP + localhost), long-lived (~100 years).
-# Signed by the mkcert root CA so browsers trust it; HOST_IP is read from .env.
-# Override inline: HOST_IP=... CERT_DAYS=... ./caddy/generate-certs.sh
-./caddy/generate-certs.sh
-# -> writes caddy/certs/livekit.crt and caddy/certs/livekit.key (gitignored)
 ```
 
 ## 2. Launch
@@ -31,8 +21,8 @@ docker compose up --build
 
 Then open:
 
-- **Tablet / other LAN device**: `https://<HOST_IP>`
-- **Same machine**: `https://localhost`
+- **Tablet / other LAN device**: `http://<HOST_IP>`
+- **Same machine**: `http://localhost`
 
 The calibration-service publishes one LiveKit video track per detected USB camera;
 the webapp preview shows one tile per track.
@@ -54,17 +44,15 @@ docker compose build calibration-service    # rebuild one service after dep chan
 - Another process may hold the camera (e.g. another capture stack). Free it first.
 - Check the logs: `docker compose logs calibration-service | grep -i camera`.
 
-### Browser TLS warning
-- The cert must cover the host you typed: regenerate with the right `HOST_IP`.
-- Ensure `mkcert -install` ran on the **browsing** device's trust store (for a
-  tablet, install the mkcert root CA on the tablet).
+### The page does not load from the tablet
+- Use `http://<HOST_IP>` (not `https`): the stack serves plain HTTP on port 80.
+- `HOST_IP` in `.env` must be the LAN IP the tablet reaches; rebuild Caddy after changing it (`docker compose up -d --build caddy`), since the webapp bakes the URLs in at build time.
 
 ### LiveKit media not flowing (tiles stay black)
 - LiveKit runs on the Docker bridge; its media ports are **published to the host**
   and advertised at `HOST_IP` (`NODE_IP`): **UDP `50000-50010`** (WebRTC media) and
   **TCP `7881`** (ICE-TCP fallback). They must be free and reachable at `HOST_IP`.
-- Signaling (`7880`) stays internal to the bridge — Caddy proxies it as `wss`, so
-  it is not published on the host.
+- Signaling (`7880`) stays internal to the bridge — Caddy proxies it as `ws` at `/livekit`, so it is not published on the host.
 - `NODE_IP` (from `HOST_IP`) must be the LAN IP reachable by clients.
 
 ### Running alongside another LiveKit (e.g. samvision)
@@ -72,11 +60,10 @@ docker compose build calibration-service    # rebuild one service after dep chan
   defaults a typical second LiveKit uses, so they **will** clash. Change one
   stack's ports in `livekit.yaml` (`rtc.tcp_port` / `port_range_*`) and the
   matching `docker-compose.yml` port mappings.
-- `443` (Caddy) may also clash — override `CADDY_HTTPS_PORT` in `.env`.
+- `80` (Caddy) may also clash — override `CADDY_HTTP_PORT` in `.env`.
 
-### Port 443 already in use
-- Another service holds it. Override `CADDY_HTTPS_PORT` in `.env` (then access
-  `https://<HOST_IP>:<port>`).
+### Port 80 already in use
+- Another service holds it. Override `CADDY_HTTP_PORT` in `.env`, then access `http://<HOST_IP>:<port>`. The webapp's API, token and LiveKit URLs are built without a port: rebuild Caddy with them pointing at `<HOST_IP>:<port>` (see `caddy/Dockerfile`).
 
 ### calibration-service crashes (SIGILL) during calibration
 - OpenBLAS auto-detects the CPU kernel at load time and can pick one that emits

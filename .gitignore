@@ -3,7 +3,7 @@
 .env.*
 !.env.example
 
-# --- Local TLS certificates (mkcert) ---
+# --- Local TLS certificates (mkcert), unused since ADR-0063 ---
 caddy/certs/
 
 # --- Claude Code: personal settings (the shared `settings.json` is committed) ---

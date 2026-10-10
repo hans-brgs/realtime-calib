@@ -1,5 +1,5 @@
 {
-	# Local LAN certs (mkcert) — no automatic ACME.
+	# Plain HTTP on the LAN (ADR-0063): no certificate, no automatic HTTPS.
 	auto_https off
 	admin off
 	log {
@@ -7,11 +7,9 @@
 	}
 }
 
-# Single entry point (ADR-0014): TLS, static webapp, and reverse proxies.
-# Same cert serves https://<HOST_IP> (tablet) and https://localhost (same-machine).
-https://:443 {
-	tls /certs/livekit.crt /certs/livekit.key
-
+# Single entry point (ADR-0063): static webapp and reverse proxies, plain HTTP.
+# Serves http://<HOST_IP> (tablet) and http://localhost (same-machine).
+http://:80 {
 	# Calibration-service HTTP API (commands/config). Strip /api so /api/health
 	# reaches the service's /health.
 	handle /api* {

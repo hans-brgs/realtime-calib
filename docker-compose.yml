@@ -1,8 +1,8 @@
-# Single stack (ADR-0014): Caddy (TLS) is the mandatory entry point, always present.
-# Access: https://<HOST_IP> (tablet) or https://localhost (same-machine).
+# Single stack (ADR-0063): Caddy is the mandatory entry point, always present, in
+# plain HTTP. Access: http://<HOST_IP> (tablet) or http://localhost (same-machine).
 
 services:
-  # Reverse proxy + TLS termination + static webapp (single entry point).
+  # Reverse proxy + static webapp (single entry point).
   caddy:
     build:
       context: .
@@ -13,10 +13,9 @@ services:
     container_name: calib-caddy
     restart: unless-stopped
     ports:
-      - "${CADDY_HTTPS_PORT:-443}:443"
+      - "${CADDY_HTTP_PORT:-80}:80"
     volumes:
       - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
-      - ./caddy/certs:/certs:ro
     env_file:
       - ./.env
     networks:
@@ -68,7 +67,7 @@ services:
   # LiveKit SFU (upstream), on the bridge with the publisher — same structure as
   # vision-services (proven on this host). The in-container publisher reaches it over
   # the shared bridge; the LAN browser reaches the media via the published UDP range
-  # + TCP fallback at HOST_IP (NODE_IP). Caddy proxies the wss signaling. No host
+  # + TCP fallback at HOST_IP (NODE_IP). Caddy proxies the ws signaling. No host
   # networking — it was fragile across restarts (ICE hairpin broke on every restart).
   livekit:
     image: livekit/livekit-server:latest

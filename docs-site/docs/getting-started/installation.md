@@ -14,9 +14,6 @@ stack.
 
 - One or more **USB cameras**.
 - **Docker** and **Docker Compose v2**.
-- **mkcert** and **openssl** — to issue the local TLS certificate the stack
-  needs. WebRTC requires a secure context, and LAN devices (e.g. a tablet) must
-  trust the certificate.
 - A modern browser on the operator device (desktop, tablet or mobile).
 
 ## One-time setup
@@ -26,14 +23,9 @@ stack.
 cp .env.example .env
 # Edit .env: set HOST_IP to the machine's LAN IP (e.g. 192.168.1.42) and choose
 # dedicated LiveKit API keys.
-
-# 2. Trust the mkcert local CA (once per machine)
-mkcert -install
-
-# 3. Generate the LAN certificate (covers HOST_IP + localhost)
-./caddy/generate-certs.sh
-# -> writes caddy/certs/livekit.crt and caddy/certs/livekit.key (gitignored)
 ```
+
+No certificate is needed: the stack serves plain HTTP on your local network.
 
 :::info Host IP
 The host IP is centralized in `HOST_IP` (in `.env`) and propagated to Caddy,
@@ -42,9 +34,7 @@ LiveKit and the web app build. Do not hard-code IPs elsewhere.
 
 ## Launch
 
-The whole stack — calibration service, web app, LiveKit SFU, token server and the
-Caddy reverse proxy (TLS) — is orchestrated by `docker-compose.yml` as a **single
-stack**. Caddy is the mandatory, always-on entry point.
+The whole stack — calibration service, web app, LiveKit SFU, token server and the Caddy reverse proxy — is orchestrated by `docker-compose.yml` as a **single stack**. Caddy is the mandatory, always-on entry point.
 
 ```bash
 docker compose up --build
@@ -52,10 +42,10 @@ docker compose up --build
 
 Then open the web app:
 
-- **Tablet / other LAN device**: `https://<HOST_IP>`
-- **Same machine**: `https://localhost`
+- **Tablet / other LAN device**: `http://<HOST_IP>`
+- **Same machine**: `http://localhost`
 
-One mkcert certificate covers both.
+The web app only receives video and data from the server, which browsers allow over plain HTTP. One small exception: the **copy** button of the export preview needs a secure context, so it works at `http://localhost` but not from a tablet; download the files instead.
 
 ## Verifying the install
 
@@ -63,21 +53,18 @@ One mkcert certificate covers both.
 docker compose logs -f calibration-service
 ```
 
-Open `https://<HOST_IP>` (or `https://localhost`) and you should land on the
-operator **Dashboard** ("Welcome to the calibration bench").
+Open `http://<HOST_IP>` (or `http://localhost`) and you should land on the operator **Dashboard** ("Welcome to the calibration bench").
 
 ## Networking notes
 
-- **Caddy is the only host-exposed entry point**, serving HTTPS on `443` (override
-  with `CADDY_HTTPS_PORT`). Everything else sits on an internal Docker bridge.
+- **Caddy is the only host-exposed entry point**, serving plain HTTP on `80` (override with `CADDY_HTTP_PORT`). Everything else sits on an internal Docker bridge.
 - Internal services are not published on the host: `calibration-service` (`8000`)
   and `livekit-token-server` (`8080`) are reachable only through Caddy.
 - **LiveKit** runs on the bridge (not host networking). Its media ports are
   published to the host and advertised at `HOST_IP`: **UDP `50000-50010`** (WebRTC
   media) and **TCP `7881`** (ICE-TCP fallback). Signaling (`7880`) stays internal —
-  Caddy proxies it as `wss`.
-- TLS certificates live in `caddy/certs/` (git-ignored); one mkcert certificate
-  covers `HOST_IP` and `localhost`.
+  Caddy proxies it as `ws`.
+- Traffic on your local network is not encrypted. The stack is meant for a trusted LAN, not for exposure to the internet.
 
 :::tip Next
 Continue to the [Quickstart](/docs/getting-started/quickstart) to run your first

@@ -13,7 +13,7 @@ Interface opérateur : un **wizard** qui guide la calibration de bout en bout (c
 
 **Cliente sans état durable** : elle ne possède pas l'état de la session — celui-ci est détenu par le `calibration-service` et persisté sur disque (ADR-0011). Au montage, elle rehydrate depuis l'API HTTP et **reprend le wizard depuis l'état persisté**. Pas de `localStorage`.
 
-**Compatible desktop, tablette et mobile** (ADR-0010) : responsive (reflow des tuiles caméra), tactile (cibles ≥ 44 px, `OrbitControls` pinch/rotate), portrait + paysage. La tablette est un appareil de pilotage de premier ordre (d'où le TLS toujours présent via Caddy, ADR-0014 supersede ADR-0006).
+**Compatible desktop, tablette et mobile** (ADR-0010) : responsive (reflow des tuiles caméra), tactile (cibles ≥ 44 px, `OrbitControls` pinch/rotate), portrait + paysage. La tablette est un appareil de pilotage de premier ordre, servi en HTTP simple via Caddy (ADR-0063) : la webapp ne doit utiliser aucune API qui exige un contexte sécurisé (`getUserMedia`, `navigator.clipboard`, `crypto.randomUUID`, `crypto.subtle`, publication ou RPC LiveKit) sans revenir au TLS par un ADR ; le bouton copier de l'aperçu d'export est la seule exception connue, inopérante depuis la tablette.
 
 ## 🏛️ Architecture interne
 
@@ -118,6 +118,6 @@ Via variables d'environnement Vite (`import.meta.env.VITE_*`), injectées au bui
 
 `realtime-calib-doc/` :
 
-- `10-adr/` — transport 0004, burn-in 0003 (côté affichage), stack webapp + wizard FSM 0010, déploiement/TLS 0006, source de vérité 0011, ancre 0012 (UI de réorganisation).
+- `10-adr/` — transport 0004, burn-in 0003 (côté affichage), stack webapp + wizard FSM 0010, déploiement HTTP 0063 (supersède 0014 et 0006), source de vérité 0011, ancre 0012 (UI de réorganisation).
 - `20-specs/entities/` — `camera`, `coverage-metrics`, `calibration-session`, `camera-array-config`.
 - `20-specs/features/` — `intrinsic-calibration-flow`, `extrinsic-calibration-flow` (+ specs UI à écrire : `multi-camera-preview`, `realtime-telemetry`, `board-generation-download`, `3d-extrinsic-review`, `session-persistence-resume` — cf. `roadmap.md`).
