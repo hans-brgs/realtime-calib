@@ -1115,3 +1115,43 @@ def test_unreadable_intrinsic_metrics_is_a_422_not_a_500(tmp_path: Path) -> None
     response = client.get("/intrinsic/cam_0/metrics")
     assert response.status_code == 422
     assert "metrics.json" in response.json()["detail"]
+
+
+def test_solve_files_carry_their_schema_version(tmp_path: Path) -> None:
+    # A result written before the version (0) still reads; a write stamps the
+    # current one; a newer service's file is refused by its number, not by a field.
+    from calibration_service.transport.api import SOLVE_SCHEMA_VERSION
+
+    manager = SessionManager(tmp_path, "default")
+    client = TestClient(create_app(manager))
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    fixture = {
+        "cameras": ["cam_0", "cam_1"],
+        "rotations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [0.0, 0.1, 0.0]},
+        "translations": {"cam_0": [0.0, 0.0, 0.0], "cam_1": [1.0, 0.0, 0.0]},
+        "per_camera_error": {"cam_0": 0.1, "cam_1": 0.2},
+        "error": 0.15,
+        "pair_errors": {},
+        "group_count": 1,
+        "point_count": 1,
+    }
+    (directory / "result.json").write_text(json.dumps(fixture))
+    assert client.get("/extrinsic/result").status_code == 200
+    rotated = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "y", "degrees": 90})
+    assert rotated.status_code == 200
+    stored = json.loads((directory / "result.json").read_text())
+    assert stored["schema_version"] == SOLVE_SCHEMA_VERSION
+    assert "schema_version" not in client.get("/extrinsic/result").json()
+    (directory / "result.json").write_text(json.dumps({**fixture, "schema_version": 99}))
+    refused = client.get("/extrinsic/result")
+    assert refused.status_code == 422 and "schema version 99" in refused.json()["detail"]
+    turned = client.post("/extrinsic/orient", json={"op": "rotate", "axis": "y", "degrees": 90})
+    assert turned.status_code == 422
+    # A reference survives a recompute: its remedy is to deposit it again.
+    (directory / "reference.json").write_text(json.dumps({"schema_version": 99, "cameras": []}))
+    reference = client.get("/extrinsic/reference")
+    assert reference.status_code == 422
+    assert reference.json()["detail"].endswith("reads up to 1 — deposit it again")
+    (directory / "reference.json").write_text("{not json")
+    assert client.get("/extrinsic/reference").json()["detail"].endswith("— deposit it again")

@@ -425,7 +425,33 @@ def _require_camera(session: CalibrationSession, camera: str) -> CameraConfig:
 
 
 # Any: a JSON object's values are untyped until a dataclass or the route reads them.
-def _read_json(path: Path) -> dict[str, Any]:
+# The solve files (result.json, ba_inputs.json, reference.json) carry a schema
+# version: a payload written by a newer service is refused by its number, not by
+# whichever field happens to differ. Absent = written before the field (version 0).
+SOLVE_SCHEMA_VERSION = 1
+
+
+def _write_solve_file(path: Path, payload: dict[str, Any]) -> None:
+    atomic_write_text(path, json.dumps({"schema_version": SOLVE_SCHEMA_VERSION, **payload}))
+
+
+def _read_solve_file(path: Path, *, remedy: str = "recompute") -> dict[str, Any]:
+    """The payload without its version; 422 when a newer service wrote it.
+
+    A rolled-back service therefore refuses the files a newer one wrote, by number.
+    """
+    data = _read_json(path, remedy=remedy)
+    version = data.pop("schema_version", 0)
+    if type(version) is not int or not 0 <= version <= SOLVE_SCHEMA_VERSION:
+        raise HTTPException(
+            status_code=422,
+            detail=f"{path.name} has schema version {version!r}, this service reads up to "
+            f"{SOLVE_SCHEMA_VERSION} — {remedy}",
+        )
+    return data
+
+
+def _read_json(path: Path, *, remedy: str = "recompute") -> dict[str, Any]:
     """A persisted JSON payload; an unreadable one is a 422 naming the file.
 
     These files are written by the service itself, so a parse error means a
@@ -435,10 +461,10 @@ def _read_json(path: Path) -> dict[str, Any]:
         payload = json.loads(path.read_text())
     except ValueError as exc:  # JSONDecodeError, UnicodeDecodeError
         raise HTTPException(
-            status_code=422, detail=f"{path.name} is unreadable ({exc}) — recompute"
+            status_code=422, detail=f"{path.name} is unreadable ({exc}) — {remedy}"
         ) from exc
     if not isinstance(payload, dict):
-        raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — recompute")
+        raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — {remedy}")
     return payload
 
 
@@ -1158,9 +1184,9 @@ async def compute_extrinsic(
     # (ADR-0042). ba_inputs stay native — they are solver-domain data.
     result = _output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
-    atomic_write_text(directory / "result.json", json.dumps(asdict(result)))
+    _write_solve_file(directory / "result.json", asdict(result))
     # BA observations: lets Minimize refine later without redetecting the videos.
-    atomic_write_text(directory / "ba_inputs.json", json.dumps(asdict(ba_inputs)))
+    _write_solve_file(directory / "ba_inputs.json", asdict(ba_inputs))
     return _session_out(session, manager)
 
 
@@ -1170,7 +1196,7 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
     path = get_manager(request).extrinsic_dir() / "result.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
-    return _read_json(path)
+    return _read_solve_file(path)
 
 
 class OrientRequest(BaseModel):
@@ -1195,7 +1221,7 @@ def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
     try:
-        return ExtrinsicResult(**_read_json(path))
+        return ExtrinsicResult(**_read_solve_file(path))
     except TypeError as exc:  # unknown or missing key: a payload of another schema
         raise HTTPException(
             status_code=422, detail=f"result.json is unreadable ({exc}) — recompute"
@@ -1204,7 +1230,7 @@ def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
 
 def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) -> None:
     manager.set_extrinsic_result(result)
-    atomic_write_text(manager.extrinsic_dir() / "result.json", json.dumps(asdict(result)))
+    _write_solve_file(manager.extrinsic_dir() / "result.json", asdict(result))
 
 
 @router.post("/extrinsic/orient")
@@ -1294,7 +1320,7 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     if not ba_path.is_file():
         raise HTTPException(status_code=404, detail="no BA observations (recompute first)")
     try:
-        ba_inputs = BAInputs(**_read_json(ba_path))
+        ba_inputs = BAInputs(**_read_solve_file(ba_path))
     except TypeError as exc:  # unknown or missing key: a payload of another schema
         raise HTTPException(
             status_code=422, detail=f"ba_inputs.json is unreadable ({exc}) — recompute"
@@ -1336,11 +1362,8 @@ def _stored_reference(manager: SessionManager) -> Reference | None:
     if not path.is_file():
         return None
     try:
-        return reference_from_payload(_read_json(path))
-    except HTTPException as exc:  # not JSON, or not an object
-        raise HTTPException(
-            status_code=422, detail="reference.json is unreadable — deposit it again"
-        ) from exc
+        # A reference survives a recompute: the remedy is to deposit it again.
+        return reference_from_payload(_read_solve_file(path, remedy="deposit it again"))
     except (KeyError, TypeError, ValueError) as exc:
         raise HTTPException(
             status_code=422, detail=f"reference.json is unreadable ({exc}) — deposit it again"
@@ -1386,7 +1409,7 @@ async def put_extrinsic_reference(request: Request, body: ReferenceRequest) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    atomic_write_text(directory / _REFERENCE_FILE, json.dumps(reference_payload(reference)))
+    _write_solve_file(directory / _REFERENCE_FILE, reference_payload(reference))
     return _reference_state(manager, reference)
 
 
@@ -1581,7 +1604,7 @@ def _stored_ba_inputs(manager: SessionManager) -> BAInputs | None:
     if not path.is_file():
         return None
     try:
-        return BAInputs(**_read_json(path))
+        return BAInputs(**_read_solve_file(path))
     except (TypeError, HTTPException) as exc:
         logger.warning("export checks: ba_inputs.json is unreadable (%s)", exc)
         return None
