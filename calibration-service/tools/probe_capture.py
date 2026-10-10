@@ -1,4 +1,5 @@
-"""Manual capture smoke test: ``uv run python -m calibration_service.capture.probe``.
+"""Manual capture smoke test, from the host: ``uv run python tools/probe_capture.py``
+(from calibration-service/; tools/ is not in the Docker image).
 
 Enumerates cameras, then captures a burst from the first one and logs the
 measured fps and frame size. Used to verify real USB capture on the host.
