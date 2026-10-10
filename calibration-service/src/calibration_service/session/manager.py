@@ -382,9 +382,9 @@ class SessionManager:
                 raise ValueError("intrinsic board is required")
         elif target == "extrinsic":
             intrinsic = self.current().intrinsic_board
-            # A separate extrinsic board used to be accepted on a session without an
-            # intrinsic one, and its save moved the step to Camera Setup: the wizard
-            # then unlocked Intrinsics with no board to detect (rig test 2026-10-10).
+            # The extrinsic board comes after the intrinsic one, inherited or not: its
+            # save moves the step to Camera Setup, which would unlock Intrinsics with
+            # no board to detect.
             if board is not None and intrinsic is None:
                 raise ValueError("define the intrinsic board before the extrinsic one")
             if inherited:

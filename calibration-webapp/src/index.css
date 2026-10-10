@@ -80,7 +80,9 @@ body {
   --switch-bg: #2a2a32;
   box-shadow: inset 0 0 0 1px #45454f;
 }
-.mantine-Switch-input:checked + .mantine-Switch-track {
+/* Not when disabled: Mantine's disabled fill is the card colour, the ring is all
+   that keeps a disabled ON switch visible. */
+.mantine-Switch-input:checked:not(:disabled, [data-disabled]) + .mantine-Switch-track {
   box-shadow: none;
 }
 
