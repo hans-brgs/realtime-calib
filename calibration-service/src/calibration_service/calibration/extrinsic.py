@@ -163,6 +163,11 @@ class ExtrinsicResult:
     # board (ADR-0044): the reprojection-INDEPENDENT quality judge the operator
     # reads next to the RMSE. 0.0 when no group has two triangulated corners.
     rigidity_mm: float = 0.0
+    # Single-marker views the border refinement dropped, per camera and by reason, out
+    # of the views it ran on per camera (ADR-0052, ADR-0036 observability). Empty for
+    # ChArUco, and on older payloads.
+    border_refusals: dict[str, dict[str, int]] = field(default_factory=dict)
+    border_attempts: dict[str, int] = field(default_factory=dict)
 
     def scaled_errors(self, factors: dict[str, float]) -> ExtrinsicResult:
         """Express the pixel-error fields at each camera's OUTPUT resolution.
@@ -1212,6 +1217,9 @@ def refine_result(
             for index, name in enumerate(result.cameras)
         },
         rigidity_mm=rigidity_mm(refined, point_group, point_corner, board),
+        # Minimize re-solves the same views: the refinement's counts still hold.
+        border_refusals=result.border_refusals,
+        border_attempts=result.border_attempts,
         board_quads=_group_board_quads(
             point_group,
             point_corner,
@@ -1228,15 +1236,19 @@ def _detect_group_frames(
     groups_frames: list[dict[str, int]],
     models: dict[str, CameraModel],
     board: CalibrationBoard,
-) -> list[dict[str, GroupDetection]]:
+) -> tuple[list[dict[str, GroupDetection]], dict[str, dict[str, int]], dict[str, int]]:
     """Detect the board on each selected (camera, frame-index) and normalize corners.
+
+    Also returns, per camera, the single-marker views the border refinement dropped by
+    reason, and the views it ran on.
 
     Single-ArUco targets: the detector reports every corner under the marker id
     (e.g. [8,8,8,8]); remap to per-CORNER ids 0..3 (cv2's TL,TR,BR,BL order is
     stable across views) so cross-camera correspondence + ``board_object_points``
     indexing work like the ChArUco path.
     """
-    detector = BoardDetector(board)
+    # The compute's detector: unbiased single-marker corners (ADR-0052).
+    detector = BoardDetector(board, border_refine=True)
     single_marker = board.board_type is not BoardType.CHARUCO
     min_corners = _min_corners(board)
     needed: dict[str, list[tuple[int, int]]] = {}
@@ -1245,8 +1257,12 @@ def _detect_group_frames(
             needed.setdefault(name, []).append((frame_index, position))
 
     detections: list[dict[str, GroupDetection]] = [{} for _ in groups_frames]
+    refusals: dict[str, dict[str, int]] = {}
+    attempts: dict[str, int] = {}
     for name, entries in needed.items():
         model = models[name]
+        detector.border_refusals.clear()
+        detector.border_attempts = 0
         capture = cv2.VideoCapture(str(directory / f"{name}.mkv"))
         try:
             # SEQUENTIAL walk — never CAP_PROP_POS_FRAMES. Index seeking on a VFR
@@ -1298,7 +1314,21 @@ def _detect_group_frames(
                     )
         finally:
             capture.release()
-    return [group for group in detections if len(group) >= 2]
+        if detector.border_attempts:
+            attempts[name] = detector.border_attempts
+        if detector.border_refusals:
+            refusals[name] = dict(detector.border_refusals)
+    if refusals:
+        logger.info(
+            "border refinement dropped %d of %d views: %s",
+            sum(sum(counts.values()) for counts in refusals.values()),
+            sum(attempts.values()),
+            ", ".join(
+                f"{name} {sum(counts.values())}/{attempts.get(name, 0)} {counts}"
+                for name, counts in sorted(refusals.items())
+            ),
+        )
+    return [group for group in detections if len(group) >= 2], refusals, attempts
 
 
 def _select_quality_groups(
@@ -1468,7 +1498,9 @@ def compute_extrinsic_from_sweep(
     groups_frames = [
         {name: frame.payload for name, frame in group.frames.items()} for group in groups
     ]
-    detections = _detect_group_frames(directory, groups_frames, by_name, board)
+    detections, border_refusals, border_attempts = _detect_group_frames(
+        directory, groups_frames, by_name, board
+    )
     if not detections:
         raise ValueError("no synchronized board views across >= 2 cameras")
     selected = _select_quality_groups(detections, max(1, max_groups))
@@ -1556,6 +1588,8 @@ def compute_extrinsic_from_sweep(
             name: int((triangulation.obs_camera == index).sum())
             for index, name in enumerate(order)
         },
+        border_refusals=border_refusals,
+        border_attempts=border_attempts,
         rigidity_mm=rigidity_mm(
             points_opt, triangulation.point_group, triangulation.point_corner, board
         ),

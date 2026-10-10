@@ -176,6 +176,25 @@ def main(argv: list[str] | None = None) -> int:
         f"{result.observations_total} observations"
     )
     print(f"bundle adj.  : {status} (nfev {result.ba_nfev})")
+    if result.border_attempts:
+        refused = {name: sum(c.values()) for name, c in result.border_refusals.items()}
+        reasons: dict[str, int] = {}
+        for counts in result.border_refusals.values():
+            for reason, count in counts.items():
+                reasons[reason] = reasons.get(reason, 0) + count
+        print(
+            f"views dropped: {sum(refused.values())} of {sum(result.border_attempts.values())}"
+            " by the corner refinement, ADR-0052"
+        )
+        print(
+            "  per camera : "
+            + "  ".join(
+                f"{name} {refused.get(name, 0)}/{tried}"
+                for name, tried in sorted(result.border_attempts.items())
+            )
+        )
+        if reasons:
+            print("  by reason  : " + ", ".join(f"{k} {v}" for k, v in sorted(reasons.items())))
     print()
     print(f"RMSE native  : {result.error:.3f} px")
     print(f"RMSE output  : {scaled.error:.3f} px  (ADR-0042 reporting contract)")
@@ -208,6 +227,8 @@ def main(argv: list[str] | None = None) -> int:
             "point_count": result.point_count,
             "observations": result.observations_total,
             "ba_converged": result.ba_converged,
+            "border_refusals": result.border_refusals,
+            "border_attempts": result.border_attempts,
         }
         args.json.write_text(json.dumps(payload, indent=2))
         print(f"\nJSON report  : {args.json}")

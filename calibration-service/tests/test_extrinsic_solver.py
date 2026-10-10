@@ -227,9 +227,10 @@ def test_sweep_orchestration_solves_from_sidecars(
         groups_frames: list[dict[str, int]],
         models: dict[str, CameraModel],
         board: CalibrationBoard,
-    ) -> list[dict[str, GroupDetection]]:
+    ) -> tuple[list[dict[str, GroupDetection]], dict[str, dict[str, int]], dict[str, int]]:
         assert len(groups_frames) == 6  # all groups synchronized + selected
-        return [groups[frames[cameras[0]]] for frames in groups_frames]
+        refusals = {"cam_1": {"marker_too_small": 2}}
+        return [groups[frames[cameras[0]]] for frames in groups_frames], refusals, {"cam_1": 8}
 
     monkeypatch.setattr(
         "calibration_service.calibration.extrinsic._detect_group_frames", fake_detect
@@ -248,6 +249,8 @@ def test_sweep_orchestration_solves_from_sidecars(
     assert len(ba_inputs.obs_camera) == len(ba_inputs.obs_norm) == len(ba_inputs.obs_px)
     assert len(ba_inputs.point_corner) == result.point_count
     assert result.cameras == ["cam_0", "cam_1", "cam_2"]
+    assert result.border_refusals == {"cam_1": {"marker_too_small": 2}}  # carried over
+    assert result.border_attempts == {"cam_1": 8}
     assert np.allclose(result.rotations["cam_0"], np.zeros(3), atol=1e-9)
     assert np.allclose(result.translations["cam_0"], np.zeros(3), atol=1e-9)
     rot_1, _ = cv2.Rodrigues(POSES["cam_1"][:3, :3])
@@ -449,6 +452,8 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
         points=[[float(v) for v in p] for p in refined],
         point_groups=[int(g) for g in tri.point_group],
         board_quads=[None] * 4,
+        border_refusals={"cam_1": {"outer_edge_noisy": 3}},
+        border_attempts={"cam_0": 9, "cam_1": 9},
     )
     ba = BAInputs(
         obs_camera=[int(v) for v in tri.obs_camera],
@@ -460,6 +465,10 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
     turned = reorient_result(result, axis_rotation_transform("y", 90.0))
     models = [CameraModel(name=n, matrix=K, distortions=DIST) for n in tri.camera_order]
     minimized = refine_result(turned, ba, models, BOARD, "cam_0")
+    # The corner refinement's counts describe the same views (ADR-0052).
+    for kept in (turned, minimized):
+        assert kept.border_refusals == {"cam_1": {"outer_edge_noisy": 3}}
+        assert kept.border_attempts == {"cam_0": 9, "cam_1": 9}
     # Anchor pose preserved exactly (held fixed at its reoriented pose).
     assert np.allclose(minimized.rotations["cam_0"], turned.rotations["cam_0"], atol=1e-12)
     assert np.allclose(minimized.translations["cam_0"], turned.translations["cam_0"], atol=1e-12)
@@ -984,3 +993,62 @@ def test_bundle_adjust_converges_on_a_real_marker_sweep() -> None:
     assert status.converged
     assert status.nfev < 200
     assert rigidity_mm(points, point_group, point_corner, board) < 2.0  # the green band
+
+
+def _marker_frame() -> NDArray[np.uint8]:
+    """A 640x480 BGR frame holding marker 8 of DICT_4X4_100, 180 px, on a white page."""
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_100)
+    page = np.full((480, 640), 255, np.uint8)
+    page[150:330, 230:410] = cv2.aruco.generateImageMarker(dictionary, 8, 180)
+    return np.asarray(cv2.cvtColor(cv2.GaussianBlur(page, (0, 0), 1.0), cv2.COLOR_GRAY2BGR))
+
+
+def test_the_compute_refines_marker_corners_and_counts_refusals_per_camera(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # ADR-0052: the compute's detector refines single-marker corners from the border,
+    # drops a view the refinement refuses (never keeps CONTOUR's inward corners) and
+    # reports, per camera, the refusals out of the views it ran on.
+    from calibration_service.calibration import extrinsic
+    from calibration_service.detection import BoardDetector
+    from calibration_service.detection import detector as detector_module
+    from calibration_service.detection.border_refine import BorderRefusal
+    from calibration_service.recording import VideoRecorder
+
+    marker = CalibrationBoard(
+        board_type=BoardType.ARUCO,
+        dictionary="DICT_4X4_100",
+        columns=1,
+        rows=1,
+        marker_id=8,
+        marker_size_mm=297.0,
+    )
+    frame = _marker_frame()
+    for name in ("cam_0", "cam_1"):
+        with VideoRecorder(tmp_path / f"{name}.mkv", 640, 480, fps=30) as recorder:
+            for _ in range(3):
+                recorder.write(frame)
+    built: list[dict[str, object]] = []
+    real_detector = BoardDetector
+
+    def spy(board: CalibrationBoard, **kwargs: bool) -> object:
+        built.append(dict(kwargs))
+        return real_detector(board, **kwargs)
+
+    def refuse(*_args: object, **_kwargs: object) -> BorderRefusal:
+        return BorderRefusal.OUTER_EDGE_NOISY
+
+    monkeypatch.setattr("calibration_service.calibration.extrinsic.BoardDetector", spy)
+    models = {n: CameraModel(name=n, matrix=K, distortions=DIST) for n in ("cam_0", "cam_1")}
+    groups = [{"cam_0": 0, "cam_1": 0}, {"cam_0": 2, "cam_1": 2}]
+
+    kept, refusals, attempts = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    assert built == [{"border_refine": True}]
+    assert len(kept) == 2 and attempts == {"cam_0": 2, "cam_1": 2}
+    assert refusals == {}
+
+    monkeypatch.setattr(detector_module, "refine_marker_corners", refuse)
+    kept, refusals, attempts = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    assert kept == []  # every view refused: dropped, not kept with CONTOUR's corners
+    assert attempts == {"cam_0": 2, "cam_1": 2}
+    assert refusals == {"cam_0": {"outer_edge_noisy": 2}, "cam_1": {"outer_edge_noisy": 2}}
