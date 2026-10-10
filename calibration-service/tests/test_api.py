@@ -985,6 +985,126 @@ def test_unreadable_ba_inputs_is_a_422_not_a_500(tmp_path: Path) -> None:
     assert "ba_inputs.json" in response.json()["detail"]
 
 
+def test_minimize_refits_the_persisted_solve_at_the_output_resolution(tmp_path: Path) -> None:
+    # The whole route, not refine_result alone: it reads result.json and ba_inputs.json,
+    # re-fits with the session's native intrinsics, reports the errors at the output
+    # resolution (ADR-0042) and keeps the framed group and the anchor's pose.
+    from dataclasses import asdict
+
+    import cv2
+
+    from calibration_service.calibration.extrinsic import (
+        BAInputs,
+        CameraModel,
+        ExtrinsicResult,
+        board_object_points,
+        refine_result,
+    )
+    from calibration_service.models.session import CameraStatus
+    from calibration_service.resolution import to_output
+
+    client, manager = _configured_client(tmp_path, intrinsic_done=True)
+    # Three cameras: a corner seen twice keeps both views (BA guard), so only a
+    # third view can be filtered out.
+    client.post(
+        "/cameras/config",
+        json={
+            "prefix": "cam",
+            "cameras": [
+                {
+                    "index": i,
+                    "device_path": f"/dev/v4l/by-path/cam{i}",
+                    "device_node": f"/dev/video{i}",
+                    "width": 64,
+                    "height": 48,
+                    "fps": 30,
+                }
+                for i in range(3)
+            ],
+        },
+    )
+    native = np.array([[30.0, 0.0, 31.5], [0.0, 30.0, 23.5], [0.0, 0.0, 1.0]])
+    assert len(manager.current().cameras) == 3
+    for camera in manager.current().cameras:
+        camera.status = CameraStatus.INTRINSIC_DONE
+        camera.resize_factor = 0.5
+        camera.matrix = to_output(native.tolist(), (64, 48), 0.5)
+        camera.distortions = [0.0] * 5
+    board = manager.current().extrinsic_board
+    assert board is not None
+    corners = board_object_points(board)
+    poses = {
+        "cam_0": (np.zeros(3), np.zeros(3)),
+        "cam_1": (np.array([0.0, 0.2, 0.0]), np.array([-2.0, 0.0, 0.5])),
+        "cam_2": (np.array([0.0, -0.2, 0.0]), np.array([2.0, 0.0, 0.5])),
+    }
+    rng = np.random.default_rng(5)
+    points: list[list[float]] = []
+    point_groups: list[int] = []
+    point_corner: list[int] = []
+    obs_camera: list[int] = []
+    obs_point: list[int] = []
+    obs_norm: list[list[float]] = []
+    obs_px: list[list[float]] = []
+    for group, (tilt, shift) in enumerate([(0.1, -1.0), (-0.2, 0.0), (0.3, 1.0)]):
+        rotation = cv2.Rodrigues(np.array([tilt, 0.1, 0.0]))[0]
+        world = corners @ rotation.T + np.array([shift - 3.0, -3.5, 8.0])
+        for corner, point in enumerate(world):
+            index = len(points)
+            points.append(point.tolist())
+            point_groups.append(group)
+            point_corner.append(corner)
+            for view, (rvec, tvec) in enumerate(poses.values()):
+                pixel = cv2.projectPoints(point.reshape(1, 3), rvec, tvec, native, None)[0]
+                pixel = pixel.reshape(2) + rng.normal(0.0, 0.05, 2)
+                obs_camera.append(view)
+                obs_point.append(index)
+                obs_px.append(pixel.tolist())
+                obs_norm.append(((pixel - native[:2, 2]) / 30.0).tolist())
+    total = len(obs_camera)
+    result = ExtrinsicResult(
+        cameras=list(poses),
+        rotations={n: r.tolist() for n, (r, _) in poses.items()},
+        translations={n: t.tolist() for n, (_, t) in poses.items()},
+        per_camera_error={name: 0.1 for name in poses},
+        error=0.1,
+        pair_errors={},
+        group_count=3,
+        point_count=len(points),
+        points=points,
+        point_groups=point_groups,
+        observations_used=total,
+        observations_total=total,
+        framed_group=1,
+        board_quads=[None] * 3,
+        per_camera_observations={name: total // 3 for name in poses},
+    )
+    ba = BAInputs(
+        obs_camera=obs_camera,
+        obs_point=obs_point,
+        obs_norm=obs_norm,
+        obs_px=obs_px,
+        point_corner=point_corner,
+    )
+    directory = manager.extrinsic_dir()
+    directory.mkdir(parents=True, exist_ok=True)
+    (directory / "result.json").write_text(json.dumps(asdict(result)))
+    (directory / "ba_inputs.json").write_text(json.dumps(asdict(ba)))
+
+    response = client.post("/extrinsic/minimize")
+    assert response.status_code == 200
+    body = response.json()
+    assert body["framed_group"] == 1
+    assert body["observations_total"] == total
+    assert 0 < body["observations_used"] < total  # the worst 2.5 % filtered out
+    assert body["rotations"]["cam_0"] == [0.0, 0.0, 0.0]  # the anchor keeps its pose
+    models = [CameraModel(name=n, matrix=native, distortions=np.zeros(5)) for n in poses]
+    direct = refine_result(result, ba, models, board, "cam_0")
+    for name in poses:
+        assert body["per_camera_error"][name] == pytest.approx(0.5 * direct.per_camera_error[name])
+    assert client.get("/extrinsic/result").json()["observations_used"] == body["observations_used"]
+
+
 def test_unreadable_intrinsic_metrics_is_a_422_not_a_500(tmp_path: Path) -> None:
     manager = SessionManager(tmp_path, "default")
     client = TestClient(create_app(manager))
