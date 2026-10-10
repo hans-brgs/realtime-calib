@@ -20,7 +20,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal, cast
 
-import numpy as np
 import rtoml
 from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import FileResponse
@@ -30,11 +29,9 @@ from calibration_service.atomic_io import atomic_write_text, replace_directory
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
 from calibration_service.calibration import (
     BAInputs,
-    CameraModel,
     ExtrinsicResult,
     axis_rotation_transform,
     board_unit_mm,
-    compute_extrinsic_from_sweep,
     compute_intrinsic_from_video,
     derive_sweep_window,
     quad_origin_transform,
@@ -71,9 +68,14 @@ from calibration_service.recording import (
     preview_path,
 )
 from calibration_service.recording.ffmpeg import FfmpegError
-from calibration_service.resolution import to_native
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
 from calibration_service.session.manager import SessionManager
+from calibration_service.session.workflow import (
+    native_camera_model,
+    output_scaled_errors,
+    solve_extrinsics,
+    sweep_settings,
+)
 from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.site_template import (
     SiteTemplate,
@@ -1072,32 +1074,6 @@ class ExtrinsicComputeRequest(BaseModel):
     )
 
 
-def _native_camera_model(camera: CameraConfig) -> CameraModel:
-    """Solver intrinsics at the RECORDING resolution (undo the ADR-0015 scaling)."""
-    assert camera.matrix is not None  # callers refuse uncalibrated cameras first
-    return CameraModel(
-        name=camera.name,
-        matrix=to_native(camera.matrix, (camera.width, camera.height), camera.resize_factor or 1.0),
-        distortions=np.asarray(camera.distortions, np.float64),
-    )
-
-
-def _output_scaled_errors(
-    result: ExtrinsicResult, session: CalibrationSession
-) -> ExtrinsicResult:
-    """Extrinsic pixel errors at the operator's output resolution (ADR-0042).
-
-    The solver reports at the native recording resolution; every operator-facing
-    surface (session state, result.json, webapp) speaks output pixels — the same
-    contract the intrinsic path applies via ``IntrinsicResult.scaled``
-    (ADR-0015). Applied exactly once, on the compute and minimize exits;
-    reorientation carries the already-scaled errors through untouched.
-    """
-    return result.scaled_errors(
-        {camera.name: camera.resize_factor or 1.0 for camera in session.cameras}
-    )
-
-
 @router.post("/extrinsic/compute", response_model=SessionOut)
 @_exclusive("an extrinsic compute")
 async def compute_extrinsic(
@@ -1131,58 +1107,27 @@ async def compute_extrinsic(
     if service is not None:
         await service.stop_extrinsic_recording()
 
-    anchor = min(session.cameras, key=lambda c: c.index)  # index 0 = anchor (ADR-0012)
-    models = [_native_camera_model(c) for c in session.cameras]
-    # Window from the RECORDED cadence (sidecars), not the configured fps: the
-    # effective write rate can sit well below it (ADR-0007 intent = real interval).
-    try:
-        window_s = derive_sweep_window(directory, [c.name for c in session.cameras])
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    # Resolve omitted knobs against TUNING in one place (ADR-0036); an explicit
-    # value is honoured verbatim — the Pydantic bounds already rejected nonsense.
-    max_spread_s = (
-        params.max_spread_ms / 1000.0 if params.max_spread_ms is not None else None
+    # Omitted knobs resolve against TUNING in one place (ADR-0036); an explicit value
+    # is honoured verbatim — the Pydantic bounds already rejected nonsense.
+    settings = sweep_settings(
+        board,
+        stride=params.stride,
+        max_groups=params.max_groups,
+        min_shared=params.min_shared,
+        max_spread_ms=params.max_spread_ms,
+        max_motion_px=params.max_motion_px,
     )
-    charuco = board.board_type is BoardType.CHARUCO
-    stride = (
-        params.stride
-        if params.stride is not None
-        else (TUNING.extrinsic_stride_charuco if charuco else TUNING.extrinsic_stride_marker)
-    )
-    max_groups = (
-        params.max_groups
-        if params.max_groups is not None
-        else (TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker)
-    )
-    min_shared = params.min_shared if params.min_shared is not None else TUNING.min_shared
-    max_motion_px = (
-        params.max_motion_px if params.max_motion_px is not None else TUNING.extrinsic_max_motion_px
-    )
-
     loop = asyncio.get_running_loop()
     try:
         result, ba_inputs = await loop.run_in_executor(
-            None,
-            lambda: compute_extrinsic_from_sweep(
-                directory,
-                board,
-                models,
-                anchor=anchor.name,
-                window_s=window_s,
-                stride=stride,
-                max_groups=max_groups,
-                max_spread_s=max_spread_s,
-                min_shared=min_shared,
-                max_motion_px=max_motion_px,
-            ),
+            None, lambda: solve_extrinsics(directory, session, board, settings)
         )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     # Errors leave the solver in native px; the operator contract is output px
     # (ADR-0042). ba_inputs stay native — they are solver-domain data.
-    result = _output_scaled_errors(result, session)
+    result = output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
     _write_solve_file(directory / "result.json", asdict(result))
     # BA observations: lets Minimize refine later without redetecting the videos.
@@ -1325,7 +1270,7 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         raise HTTPException(
             status_code=422, detail=f"ba_inputs.json is unreadable ({exc}) — recompute"
         ) from exc
-    models = [_native_camera_model(c) for c in session.cameras if c.matrix is not None]
+    models = [native_camera_model(c) for c in session.cameras if c.matrix is not None]
     anchor = min(session.cameras, key=lambda c: c.index)
 
     loop = asyncio.get_running_loop()
@@ -1337,7 +1282,7 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Refine recomputes errors in native px; re-express them in output px
     # (ADR-0042) before persisting, like the compute exit.
-    refined = _output_scaled_errors(refined, session)
+    refined = output_scaled_errors(refined, session)
     # Minimize keeps the anchor pose, so the framing marker and a re-alignment on a
     # reference stay meaningful.
     refined = replace(refined, framed_group=result.framed_group, alignment=result.alignment)

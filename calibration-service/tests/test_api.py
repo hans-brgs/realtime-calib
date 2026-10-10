@@ -17,6 +17,7 @@ from calibration_service.calibration import ExtrinsicResult, camera_centres
 from calibration_service.models.camera import CameraDevice, CameraMode, Resolution
 from calibration_service.models.session import WizardStep
 from calibration_service.recording import VideoRecorder, preview_path
+from calibration_service.session import workflow
 from calibration_service.session.manager import SessionManager
 from calibration_service.session.store import create_session, load_session, save_session
 
@@ -778,7 +779,6 @@ def test_extrinsic_compute_stores_result_and_persists_json(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     from calibration_service.calibration.extrinsic import ExtrinsicResult
-    from calibration_service.transport import api as api_module
 
     client, manager = _configured_client(tmp_path, intrinsic_done=True)
     for camera in manager.current().cameras:
@@ -807,7 +807,7 @@ def test_extrinsic_compute_stores_result_and_persists_json(
         obs_px=[[10.0, 20.0], [30.0, 40.0]], point_corner=[0],
     )
     monkeypatch.setattr(
-        api_module, "compute_extrinsic_from_sweep", lambda *a, **k: (fixture, ba_fixture)
+        workflow, "compute_extrinsic_from_sweep", lambda *a, **k: (fixture, ba_fixture)
     )
 
     response = client.post("/extrinsic/compute", json={"max_groups": 120, "max_spread_ms": 12.0})
