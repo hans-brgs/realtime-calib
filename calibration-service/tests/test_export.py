@@ -468,6 +468,10 @@ def test_the_opencv_target_ignores_the_export_units(tmp_path: Path) -> None:
         "frame",
         "cameras_above_floor",
         "reference",
+        "template_binding",
+        "template_placement",
+        "template_scale",
+        "template_resolution",
     ]
     assert checks[3]["status"] == "warn"  # no solve on disk: the world is unknown
     served = client.get("/export/checks").json()["checks"]

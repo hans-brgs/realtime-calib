@@ -21,10 +21,12 @@ import numpy as np
 from numpy.typing import NDArray
 
 from calibration_service.calibration.extrinsic import BAInputs, ExtrinsicResult
-from calibration_service.export.opencv import WorldFrame
-from calibration_service.export.reference import Reference, align
+from calibration_service.export.camera_array import _output_size
+from calibration_service.export.opencv import BASIS, WorldFrame
+from calibration_service.export.reference import Reference, align, export_centres
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.models.session import CalibrationSession
+from calibration_service.site_template import SiteTemplate
 
 logger = logging.getLogger(__name__)
 
@@ -361,6 +363,269 @@ def reference_check(
     )
 
 
+_TEMPLATE_IDS = ("template_binding", "template_placement", "template_scale", "template_resolution")
+# Template scale bands, in standard deviations of the implicit scale (ADR-0062).
+TEMPLATE_SCALE_SIGMAS = (2.0, 3.0)
+_IMPORTED_PREFIX = "import:"
+
+
+def _external(
+    check_id: str,
+    status: str,
+    detail: str,
+    *,
+    value: float | None = None,
+    thresholds: list[float] | None = None,
+    items: dict[str, float] | None = None,
+) -> Check:
+    return Check(check_id, status, value, thresholds or [], "external", detail, items or {})
+
+
+def _template_names(session: CalibrationSession, template: SiteTemplate) -> dict[str, str]:
+    """Template device path -> this session's camera name. An imported session has no
+    devices: its cameras are matched by the template's expected port, as a reference is
+    (ADR-0061)."""
+    if any(c.device_path.startswith(_IMPORTED_PREFIX) for c in session.cameras):
+        by_port = {c.index: c.name for c in session.cameras}
+        return {t.device_path: by_port[t.port] for t in template.cameras if t.port in by_port}
+    known = {t.device_path for t in template.cameras}
+    return {c.device_path: c.name for c in session.cameras if c.device_path in known}
+
+
+def _binding_check(session: CalibrationSession, template: SiteTemplate) -> Check:
+    if any(c.device_path.startswith(_IMPORTED_PREFIX) for c in session.cameras):
+        return _external(
+            "template_binding", "unavailable", "an imported session has no devices to bind"
+        )
+    by_device = {c.device_path: c for c in session.cameras}
+    wrong: list[str] = []
+    for expected in template.cameras:
+        camera = by_device.get(expected.device_path)
+        if camera is None:
+            wrong.append(f"{expected.device_path} (port {expected.port}) is missing")
+        elif camera.index != expected.port:
+            wrong.append(
+                f"{expected.device_path} is at port {camera.index}, expected {expected.port}"
+            )
+    known = {t.device_path for t in template.cameras}
+    extra = sorted(c.name for c in session.cameras if c.device_path not in known)
+    if wrong:
+        return _external(
+            "template_binding",
+            "fail",
+            "cable or camera order changed: " + "; ".join(wrong),
+            value=float(len(wrong)),
+        )
+    if extra:
+        return _external(
+            "template_binding",
+            "warn",
+            f"every template camera at its port; not in the template: {', '.join(extra)}",
+            value=0.0,
+        )
+    return _external(
+        "template_binding",
+        "ok",
+        f"every camera of {template.name} at its expected port",
+        value=0.0,
+    )
+
+
+def _placement(
+    result: ExtrinsicResult, board: CalibrationBoard
+) -> dict[str, tuple[NDArray[np.float64], float, float]]:
+    """Per camera, in the export world: optical centre, pitch and yaw to the origin."""
+    centres = export_centres(result, board)
+    placed: dict[str, tuple[NDArray[np.float64], float, float]] = {}
+    for name, centre in centres.items():
+        rotation = np.asarray(cv2.Rodrigues(np.asarray(result.rotations[name]))[0], np.float64)
+        axis = BASIS @ rotation.T @ np.array([0.0, 0.0, 1.0])  # optical axis, export world
+        pitch = float(np.degrees(np.arcsin(np.clip(-axis[1], -1.0, 1.0))))
+        flat_axis, flat_origin = axis[[0, 2]], -centre[[0, 2]]
+        norms = float(np.linalg.norm(flat_axis) * np.linalg.norm(flat_origin))
+        cosine = float(flat_axis @ flat_origin) / norms if norms > 0 else 1.0
+        placed[name] = (centre, pitch, float(np.degrees(np.arccos(np.clip(cosine, -1.0, 1.0)))))
+    return placed
+
+
+def _placement_check(
+    session: CalibrationSession,
+    result: ExtrinsicResult | None,
+    board: CalibrationBoard,
+    world: WorldFrame,
+    template: SiteTemplate,
+) -> Check:
+    if result is None:
+        return _external("template_placement", "unavailable", "no extrinsic solve")
+    if world.up != "y":
+        return _external(
+            "template_placement",
+            "unavailable",
+            "the world is not posed on a level floor: bounds cannot be read",
+        )
+    names = _template_names(session, template)
+    placed = _placement(result, board)
+    outside: list[str] = []
+    checked = 0
+    for expected in template.cameras:
+        name = names.get(expected.device_path)
+        if name is None or name not in placed:
+            continue
+        checked += 1
+        centre, pitch, yaw = placed[name]
+        for axis, bounds in zip(
+            "xyz",
+            (expected.position_m.x, expected.position_m.y, expected.position_m.z),
+            strict=True,
+        ):
+            value = float(centre["xyz".index(axis)])
+            if bounds is not None and not bounds[0] <= value <= bounds[1]:
+                outside.append(f"{name} {axis} {value:.2f} m not in [{bounds[0]}, {bounds[1]}]")
+        if (
+            expected.pitch_deg is not None
+            and not expected.pitch_deg[0] <= pitch <= expected.pitch_deg[1]
+        ):
+            outside.append(
+                f"{name} pitch {pitch:.1f}° not in "
+                f"[{expected.pitch_deg[0]}, {expected.pitch_deg[1]}]"
+            )
+        if expected.yaw_to_origin_deg_max is not None and yaw > expected.yaw_to_origin_deg_max:
+            outside.append(
+                f"{name} yaw {yaw:.1f}° to the origin over {expected.yaw_to_origin_deg_max}"
+            )
+    if checked == 0:
+        return _external("template_placement", "unavailable", "no template camera on this rig")
+    if outside:
+        return _external(
+            "template_placement",
+            "fail",
+            "out of the site's bounds: " + "; ".join(outside),
+            value=float(len(outside)),
+        )
+    return _external(
+        "template_placement",
+        "ok",
+        f"{checked} cameras within the bounds of {template.name}",
+        value=0.0,
+    )
+
+
+def _scale_check(
+    session: CalibrationSession,
+    result: ExtrinsicResult | None,
+    board: CalibrationBoard,
+    template: SiteTemplate,
+) -> Check:
+    """The implicit scale of the tape distances, as Caliscope v0.11.5's scaled() derives it."""
+    if result is None:
+        return _external("template_scale", "unavailable", "no extrinsic solve")
+    if not template.distances_m:
+        return _external("template_scale", "unavailable", "the template holds no distance")
+    names = _template_names(session, template)
+    centres = export_centres(result, board)
+    cues: list[tuple[str, float, float, float]] = []
+    for distance in template.distances_m:
+        a, b = names.get(distance.a), names.get(distance.b)
+        if a in centres and b in centres:
+            length = float(np.linalg.norm(centres[a] - centres[b]))
+            label = f"{a}|{b}"
+            repeats = sum(1 for c in cues if c[0].split("#")[0] == label)
+            cues.append(
+                (
+                    f"{label}#{repeats + 1}" if repeats else label,
+                    length,
+                    distance.m,
+                    distance.sigma_m,
+                )
+            )
+    if not cues:
+        return _external(
+            "template_scale", "unavailable", "no template distance joins two cameras of this rig"
+        )
+    solved = np.array([c[1] for c in cues])
+    taped = np.array([c[2] for c in cues])
+    sigma = np.array([c[3] for c in cues])
+    weight = float(np.sum(solved**2 / sigma**2))
+    scale = float(np.sum(taped * solved / sigma**2)) / weight
+    sigma_scale = 1.0 / float(np.sqrt(weight))
+    bands = (TEMPLATE_SCALE_SIGMAS[0] * sigma_scale, TEMPLATE_SCALE_SIGMAS[1] * sigma_scale)
+    status = _band(abs(scale - 1.0), bands)
+    implied, implied_sigma = taped / solved, sigma / solved
+    disagree = [
+        f"{cues[i][0]} vs {cues[j][0]}"
+        for i in range(len(cues))
+        for j in range(i + 1, len(cues))
+        if abs(implied[i] - implied[j]) > 2.0 * float(np.hypot(implied_sigma[i], implied_sigma[j]))
+    ]
+    if disagree and status == "ok":
+        status = "warn"
+    detail = (
+        f"the solve's distances need x{scale:.4f} ({100.0 * (scale - 1.0):+.2f} %, "
+        f"±{100.0 * sigma_scale:.2f} % at 1 sigma) against {len(cues)} of "
+        f"{len(template.distances_m)} tape distances: "
+        "the scale check, which validates the declared target size"
+    )
+    if disagree:
+        detail += "; distances disagree beyond 2 sigma: " + ", ".join(disagree)
+    return _external(
+        "template_scale",
+        status,
+        detail,
+        value=scale - 1.0,
+        thresholds=list(bands),
+        items={c[0]: c[2] / c[1] - 1.0 for c in cues},
+    )
+
+
+def _resolution_check(session: CalibrationSession, template: SiteTemplate) -> Check:
+    if template.resolution is None:
+        return _external("template_resolution", "unavailable", "the template sets no resolution")
+    expected = list(template.resolution)
+    wrong = [f"{c.name} {_output_size(c)}" for c in session.cameras if _output_size(c) != expected]
+    if wrong:
+        return _external(
+            "template_resolution",
+            "fail",
+            f"expected {expected[0]}x{expected[1]}: " + ", ".join(wrong),
+            value=float(len(wrong)),
+        )
+    return _external(
+        "template_resolution",
+        "ok",
+        f"every camera exports at {expected[0]}x{expected[1]}",
+        value=0.0,
+    )
+
+
+def template_checks(
+    session: CalibrationSession,
+    result: ExtrinsicResult | None,
+    board: CalibrationBoard,
+    world: WorldFrame,
+    template: SiteTemplate | None,
+    unreadable: str | None = None,
+) -> list[Check]:
+    """The site template's external checks (ADR-0062), unavailable without a template."""
+    if unreadable is not None:
+        return [_external(i, "unavailable", unreadable) for i in _TEMPLATE_IDS]
+    if template is None:
+        return [
+            _external(i, "unavailable", "no site template: set one in the settings")
+            for i in _TEMPLATE_IDS
+        ]
+    return [
+        _binding_check(session, template),
+        _placement_check(session, result, board, world, template),
+        _scale_check(session, result, board, template),
+        _resolution_check(session, template),
+    ]
+
+
+def _scope(check_id: str) -> str:
+    """What a check is judged against: the reference and the template are measured apart."""
+    return "external" if check_id == "reference" or check_id in _TEMPLATE_IDS else "internal"
+
+
 def run_checks(
     session: CalibrationSession,
     result: ExtrinsicResult | None,
@@ -369,6 +634,8 @@ def run_checks(
     world: WorldFrame,
     reference: Reference | None = None,
     reference_unreadable: str | None = None,
+    template: SiteTemplate | None = None,
+    template_unreadable: str | None = None,
 ) -> list[Check]:
     """Every check; one that cannot run reads ``unavailable``, it never blocks an export."""
     checks: list[Check] = []
@@ -383,6 +650,10 @@ def run_checks(
                 reference_check(session, result, board, world, reference, reference_unreadable)
             ],
         ),
+        (
+            _TEMPLATE_IDS,
+            lambda: template_checks(session, result, board, world, template, template_unreadable),
+        ),
     ]
     for ids, run in runs:
         try:
@@ -390,6 +661,6 @@ def run_checks(
         except Exception as exc:  # a malformed input must not fail the export (ADR-0057)
             logger.warning("export check %s could not run: %s", "/".join(ids), exc)
             checks.extend(
-                Check(i, "unavailable", None, [], "internal", f"could not run: {exc}") for i in ids
+                Check(i, "unavailable", None, [], _scope(i), f"could not run: {exc}") for i in ids
             )
     return checks

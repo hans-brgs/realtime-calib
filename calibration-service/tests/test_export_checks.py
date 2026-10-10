@@ -9,7 +9,7 @@ from numpy.typing import NDArray
 
 from calibration_service.calibration import ExtrinsicResult
 from calibration_service.calibration.extrinsic import BAInputs
-from calibration_service.export import WorldFrame, run_checks, world_frame
+from calibration_service.export import Reference, WorldFrame, run_checks, world_frame
 from calibration_service.export.checks import (
     _band,
     camera_error_check,
@@ -327,7 +327,19 @@ def test_a_check_that_cannot_run_does_not_block() -> None:
         "frame",
         "cameras_above_floor",
         "reference",
+        "template_binding",
+        "template_placement",
+        "template_scale",
+        "template_resolution",
     ]
     assert checks[1].status == "unavailable"
     assert checks[1].detail.startswith("could not run")
+    # A check measured apart keeps its scope when it cannot run: a reference whose
+    # cameras are not a list makes the reference check raise.
+    broken_reference = Reference("bad.json", "bare", None)  # type: ignore[arg-type]
+    guarded = run_checks(session, result, broken, CHARUCO, unframed, broken_reference)
+    by_id = {c.id: c for c in guarded}
+    assert by_id["epipolar"].scope == "internal"
+    assert by_id["reference"].detail.startswith("could not run")
+    assert by_id["reference"].scope == "external"
     assert checks[0].status == "ok"
