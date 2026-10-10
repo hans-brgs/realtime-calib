@@ -72,6 +72,18 @@ body {
   color: var(--rc-accent-bright);
 }
 
+/* Switches: Mantine's dark OFF track is dark-5 (#16161b), one step from the card
+   surface (#0f0f12) it sits on, with no outline: the control vanished. A lighter
+   track plus an inset ring (a box-shadow, so the track keeps its size and the thumb
+   its position); ON keeps Mantine's accent fill, which wins on specificity. */
+[data-mantine-color-scheme='dark'] .mantine-Switch-track {
+  --switch-bg: #2a2a32;
+  box-shadow: inset 0 0 0 1px #45454f;
+}
+.mantine-Switch-input:checked + .mantine-Switch-track {
+  box-shadow: none;
+}
+
 /* Cool, slim scrollbars to match the dark surfaces. */
 ::-webkit-scrollbar {
   width: 10px;

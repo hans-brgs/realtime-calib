@@ -12,7 +12,14 @@ import {
   Switch,
   Text,
 } from '@mantine/core';
-import { IconAlertTriangle, IconDownload, IconInfoCircle, IconRuler } from '@tabler/icons-react';
+import {
+  IconAlertCircle,
+  IconAlertTriangle,
+  IconCircleCheck,
+  IconDownload,
+  IconInfoCircle,
+  IconRuler,
+} from '@tabler/icons-react';
 import { type ReactNode, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
@@ -24,6 +31,7 @@ import {
   useCompactLayout,
 } from '@/components/layout/useCompactLayout';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { type DraftStatus, extrinsicStatus, intrinsicStatus } from '@/features/board/boardDraft';
 import { measurementOf, withMeasurement } from '@/features/board/measurement';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { applyBoardConfig, selectSession } from '@/features/session/sessionSlice';
@@ -43,6 +51,47 @@ function normalizeBoard(board: Board): Board {
     return board;
   }
   return { ...board, marker_size_mm: board.marker_ratio * board.square_size_mm };
+}
+
+// What the stored board is, next to the Save button: a board left unsaved is what
+// sent the rig test to Intrinsics with nothing to detect.
+const DRAFT_STATUS: Record<
+  DraftStatus,
+  { color: string; Icon: typeof IconCircleCheck; text: Record<BoardTarget, string> }
+> = {
+  saved: {
+    color: 'var(--rc-success)',
+    Icon: IconCircleCheck,
+    text: { intrinsic: 'Intrinsic board saved', extrinsic: 'Extrinsic board saved' },
+  },
+  edited: {
+    color: 'var(--rc-warning)',
+    Icon: IconAlertCircle,
+    text: {
+      intrinsic: 'Unsaved changes: the next steps use the saved board until you save',
+      extrinsic: 'Unsaved changes: the next steps use the saved board until you save',
+    },
+  },
+  unsaved: {
+    color: 'var(--rc-warning)',
+    Icon: IconAlertCircle,
+    text: {
+      intrinsic: 'Not saved yet: save it to unlock the extrinsic board',
+      extrinsic: 'Not saved yet: save it to unlock Camera Setup',
+    },
+  },
+};
+
+function DraftStatusLine({ target, status }: { target: BoardTarget; status: DraftStatus }) {
+  const { color, Icon, text } = DRAFT_STATUS[status];
+  return (
+    <Group gap={6} wrap="nowrap" align="flex-start" mt="lg">
+      <Icon size={15} color={color} style={{ flex: 'none', marginTop: 1 }} />
+      <Text fz="0.76rem" c={color} style={{ lineHeight: 1.4 }}>
+        {text[target]}
+      </Text>
+    </Group>
+  );
 }
 
 // Marker capacity from a predefined dictionary name (mirrors the backend): the
@@ -184,6 +233,13 @@ function TargetConfigForm({
   // board object itself, so the measurement taken here ends up on THAT board.
   const missingMeasurement =
     active === 'extrinsic' && !(typeof measurement === 'number' && measurement > 0);
+  // Saved, edited or never saved, against what the service stores: the next steps
+  // read the stored boards, never this form.
+  const intrinsicSaved = session?.intrinsic_board != null;
+  const status =
+    active === 'intrinsic'
+      ? intrinsicStatus(normalizeBoard(intrinsic), session)
+      : extrinsicStatus(extrinsic, extrinsicDifferent, measurement, session);
   const measurementError = missingMeasurement
     ? 'Required — this measurement sets the extrinsic scale.'
     : undefined;
@@ -417,11 +473,23 @@ function TargetConfigForm({
             size="md"
             value={active}
             onChange={(v) => setActive(v as BoardTarget)}
+            // The extrinsic board is defined after the intrinsic one (the service
+            // refuses it before): locked until the intrinsic board is saved.
             data={[
-              { label: 'Intrinsic board', value: 'intrinsic' },
-              { label: 'Extrinsic board', value: 'extrinsic' },
+              { label: 'Intrinsic', value: 'intrinsic' },
+              { label: 'Extrinsic', value: 'extrinsic', disabled: !intrinsicSaved },
             ]}
-            styles={{ label: { fontWeight: 600 } }}
+            // Two guards against the 280px floor of the right column. Width: "Extrinsic
+            // board" at md/600 was wider than its half, the control overflowed by 6px and
+            // the root's overflow:hidden cropped the indicator; `minWidth: 0` lets a label
+            // ellipsize instead. Height: that same overflow:hidden zeroes the flex item's
+            // automatic min-height, so a column taller than the screen (separate ChArUco
+            // board) squashed the control — it must not shrink.
+            styles={{
+              root: { flexShrink: 0 },
+              control: { minWidth: 0 },
+              label: { fontWeight: 600 },
+            }}
             mb="md"
           />
 
@@ -616,7 +684,14 @@ function TargetConfigForm({
           <StickyActionBar>
             {/* Blocked client-side rather than letting the backend's gt=0
                 rejection come back as a raw 422. */}
-            <Button fullWidth mt="lg" onClick={save} loading={saving} disabled={missingMeasurement}>
+            <DraftStatusLine target={active} status={status} />
+            <Button
+              fullWidth
+              mt={8}
+              onClick={save}
+              loading={saving}
+              disabled={missingMeasurement || status === 'saved'}
+            >
               Save {active} board
             </Button>
             {saveError && (
