@@ -268,6 +268,13 @@ export interface IntrinsicMetrics {
   board_quads: number[][][];
   sharpness_min?: number;
   sharpness_median?: number;
+  // Projection uncertainty (ADR-0055), px at the export resolution: per coverage cell
+  // (null past the lens model's distortion fold), its RMS where >= 3 keyframes covered
+  // / where none did, and the share of cells outside the model. Absent before it existed.
+  uncertainty?: (number | null)[][];
+  uncertainty_covered_px?: number | null;
+  uncertainty_uncovered_px?: number | null;
+  uncertainty_unmodelled?: number;
 }
 
 export const fetchIntrinsicMetrics = (camera: string): Promise<IntrinsicMetrics> =>

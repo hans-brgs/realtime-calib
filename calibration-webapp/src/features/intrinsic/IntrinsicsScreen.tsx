@@ -22,6 +22,7 @@ import { Track } from 'livekit-client';
 import { type CSSProperties, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { InfoPopover } from '@/components/InfoPopover';
 import { labelWithHelp } from '@/components/labelWithHelp';
 import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLayout';
 import { PhaseStepper } from '@/components/PhaseStepper';
@@ -31,8 +32,9 @@ import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
 import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
 import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
 import { usePreviewTranscode } from '@/features/capture/usePreviewTranscode';
-import { CoverageHeatmap } from '@/features/intrinsic/CoverageHeatmap';
+import { CoverageHeatmap, UncertaintyHeatmap } from '@/features/intrinsic/CoverageHeatmap';
 import { PrepareScrubber } from '@/features/intrinsic/PrepareScrubber';
+import { formatUncertainty } from '@/features/intrinsic/uncertaintyBands';
 import { CameraHealthOverlay } from '@/features/preview/CameraHealthOverlay';
 import { CameraTile } from '@/features/preview/CameraTile';
 import { useCameraHealth } from '@/features/preview/useCameraHealth';
@@ -58,7 +60,7 @@ import {
 import { DESTRUCTIVE_BUTTON_VARS } from '@/theme';
 import type { CameraConfig } from '@/transport/types';
 
-type ResultsView = 'coverage' | 'poses';
+type ResultsView = 'coverage' | 'uncertainty' | 'poses';
 
 // Lazy so three.js / R3F only load when the operator opens the 3D pose view.
 const PoseScene = lazy(() =>
@@ -248,6 +250,26 @@ function ResultPanel({
           }
         >
           {coveragePct == null ? '—' : `${coveragePct}%`}
+        </Text>
+      </Group>
+      <Group justify="space-between" mt="sm" wrap="nowrap">
+        <Group gap={2} wrap="nowrap">
+          <Text fz="0.72rem" c="dark.2">
+            Projection uncertainty (covered / never covered)
+          </Text>
+          <InfoPopover label="About the projection uncertainty">
+            How far the solved model could misplace a pixel&apos;s ray (1 σ), in pixels at the
+            export resolution, estimated from the corner errors of the solve itself.
+            <br />
+            <br />
+            The first figure is where three or more keyframes covered the image, the second where
+            none did: there the model extrapolates. The <b>Uncertainty</b> map shows it cell by cell
+            — re-shoot any red zone you will rely on. Grey cells are past the lens model&apos;s
+            distortion fold: no ray reaches them, so no figure is given.
+          </InfoPopover>
+        </Group>
+        <Text fz="0.78rem" fw={600} className="rc-tnum" style={{ whiteSpace: 'nowrap' }}>
+          {formatUncertainty(metrics?.uncertainty_covered_px, metrics?.uncertainty_uncovered_px)}
         </Text>
       </Group>
       <Group justify="space-between" mt="sm">
@@ -683,16 +705,28 @@ function IntrinsicsInner() {
                     >
                       <PoseScene quads={metrics.board_quads} />
                     </Suspense>
+                  ) : resultsView === 'uncertainty' && metrics.uncertainty?.length ? (
+                    <UncertaintyHeatmap grid={metrics.uncertainty} />
                   ) : (
                     <CoverageHeatmap grid={metrics.coverage} />
                   )}
                   <Box style={{ position: 'absolute', top: 38, right: 12, zIndex: 2 }}>
                     <SegmentedControl
                       size="xs"
-                      value={resultsView}
+                      // A camera without a map (metrics from before ADR-0055) shows the
+                      // coverage, whatever view the previous camera was left on.
+                      value={
+                        resultsView === 'uncertainty' && !metrics.uncertainty?.length
+                          ? 'coverage'
+                          : resultsView
+                      }
                       onChange={(v) => setResultsView(v as ResultsView)}
                       data={[
                         { label: 'Coverage', value: 'coverage' },
+                        // Metrics computed before ADR-0055 carry no uncertainty map.
+                        ...(metrics.uncertainty?.length
+                          ? [{ label: 'Uncertainty', value: 'uncertainty' }]
+                          : []),
                         { label: '3D poses', value: 'poses' },
                       ]}
                       styles={{

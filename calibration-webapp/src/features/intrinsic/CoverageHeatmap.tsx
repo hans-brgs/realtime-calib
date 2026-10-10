@@ -1,17 +1,24 @@
 import { Box, ColorSwatch, Group, Text } from '@mantine/core';
-import { useEffect, useRef } from 'react';
+import { type ReactNode, useEffect, useRef } from 'react';
 
-// Results heatmap (ADR-0039): the quad-accumulation count of the RETAINED
-// keyframes' detected-corner hulls — what actually constrained the solve.
-// Intensity = redundancy (ramp). Note ChArUco corners are the board's INTERIOR
-// lattice: a ~1-square margin along the image border can never light up at
-// close board distances — that is physics, not a bug (edge positions: overflow
-// the frame at a larger distance). Canvas-rendered: the map is ~96 cells wide
-// (thousands of cells), painted one pixel per cell and upscaled with crisp
-// edges (a DOM grid would melt on tablets).
-interface CoverageHeatmapProps {
-  grid: number[][];
-}
+import {
+  OUTSIDE_MODEL,
+  UNCERTAINTY_BANDS,
+  uncertaintyBand,
+} from '@/features/intrinsic/uncertaintyBands';
+
+// Results heatmaps, one value per cell of the same sensor grid:
+// - coverage (ADR-0039): the quad-accumulation count of the RETAINED keyframes'
+//   detected-corner hulls — what actually constrained the solve. Intensity =
+//   redundancy (ramp). Note ChArUco corners are the board's INTERIOR lattice: a
+//   ~1-square margin along the image border can never light up at close board
+//   distances — that is physics, not a bug (edge positions: overflow the frame at a
+//   larger distance);
+// - projection uncertainty (ADR-0055): where the solved model can be trusted; a null
+//   cell is past the lens model's distortion fold, painted apart from the scale.
+// Canvas-rendered: the map is ~96 cells wide (thousands of cells), painted one pixel
+// per cell and upscaled with crisp edges (a DOM grid would melt on tablets).
+type Rgba = readonly [number, number, number, number]; // alpha in 0..1
 
 const GREEN = [74, 222, 128] as const; // matches the gauges' success green
 
@@ -27,6 +34,20 @@ const LEGEND_ROW_PX = 24;
 
 function alphaFor(count: number): number {
   return RAMP[Math.min(Math.max(count, 0), RAMP.length - 1)];
+}
+
+// Module-level painters: a stable identity, so the canvas only repaints on new data.
+function paintCoverage(count: number | null): Rgba {
+  return [GREEN[0], GREEN[1], GREEN[2], alphaFor(count ?? 0)];
+}
+
+function paintUncertainty(px: number | null): Rgba {
+  if (px == null) {
+    const [red, green, blue] = OUTSIDE_MODEL.rgb;
+    return [red, green, blue, OUTSIDE_MODEL.alpha];
+  }
+  const band = uncertaintyBand(px);
+  return [band.rgb[0], band.rgb[1], band.rgb[2], band.alpha];
 }
 
 function LegendChip({ color, label }: { color: string; label: string }) {
@@ -48,7 +69,14 @@ function LegendChip({ color, label }: { color: string; label: string }) {
   );
 }
 
-export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
+interface SensorMapProps {
+  title: string;
+  grid: (number | null)[][];
+  paint: (value: number | null) => Rgba;
+  legend: ReactNode;
+}
+
+function SensorMap({ title, grid, paint, legend }: SensorMapProps) {
   const canvas = useRef<HTMLCanvasElement>(null);
   const rows = grid.length;
   const cols = grid[0]?.length ?? 0;
@@ -60,18 +88,18 @@ export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
     if (!context) return;
     const image = context.createImageData(cols, rows);
     grid.forEach((row, r) =>
-      row.forEach((count, c) => {
+      row.forEach((value, c) => {
         const i = (r * cols + c) * 4;
-        image.data[i] = GREEN[0];
-        image.data[i + 1] = GREEN[1];
-        image.data[i + 2] = GREEN[2];
-        image.data[i + 3] = Math.round(alphaFor(count) * 255);
+        const [red, green, blue, alpha] = paint(value);
+        image.data[i] = red;
+        image.data[i + 1] = green;
+        image.data[i + 2] = blue;
+        image.data[i + 3] = Math.round(alpha * 255);
       }),
     );
     context.putImageData(image, 0, 0);
-  }, [grid, rows, cols]);
+  }, [grid, rows, cols, paint]);
 
-  const top = RAMP.length - 1;
   return (
     <Box style={{ display: 'flex', flexDirection: 'column', height: '100%', minHeight: 0 }}>
       <Text
@@ -82,7 +110,7 @@ export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
         mb="sm"
         style={{ letterSpacing: '0.07em' }}
       >
-        Field-of-view coverage
+        {title}
       </Text>
       <Box
         style={{
@@ -133,31 +161,66 @@ export function CoverageHeatmap({ grid }: CoverageHeatmapProps) {
               borderRadius: 4,
             }}
           />
-          <Group justify="space-between" mt={7} wrap="nowrap" gap="xs">
-            {/* Matches what an uncovered cell actually shows: the canvas background
-                through a transparent cell (alpha 0 in the ramp). */}
-            <LegendChip color="var(--rc-input)" label="never" />
-            <Group gap={2} wrap="nowrap">
-              {RAMP.slice(1).map((alpha, i) => (
-                <Box
-                  key={i}
-                  title={i + 1 >= top ? `${top}+× measured` : `${i + 1}× measured`}
-                  style={{
-                    width: 9,
-                    height: 9,
-                    borderRadius: 2,
-                    flex: 'none',
-                    background: `rgba(${GREEN[0]},${GREEN[1]},${GREEN[2]},${alpha})`,
-                  }}
-                />
-              ))}
-              <Text fz="0.62rem" c="dark.3" ml={4} style={{ whiteSpace: 'nowrap' }}>
-                1× → {top}+× measured
-              </Text>
-            </Group>
-          </Group>
+          {legend}
         </Box>
       </Box>
     </Box>
+  );
+}
+
+export function CoverageHeatmap({ grid }: { grid: number[][] }) {
+  const top = RAMP.length - 1;
+  return (
+    <SensorMap
+      title="Field-of-view coverage"
+      grid={grid}
+      paint={paintCoverage}
+      legend={
+        <Group justify="space-between" mt={7} wrap="nowrap" gap="xs">
+          {/* Matches what an uncovered cell actually shows: the canvas background
+              through a transparent cell (alpha 0 in the ramp). */}
+          <LegendChip color="var(--rc-input)" label="never" />
+          <Group gap={2} wrap="nowrap">
+            {RAMP.slice(1).map((alpha, i) => (
+              <Box
+                key={i}
+                title={i + 1 >= top ? `${top}+× measured` : `${i + 1}× measured`}
+                style={{
+                  width: 9,
+                  height: 9,
+                  borderRadius: 2,
+                  flex: 'none',
+                  background: `rgba(${GREEN[0]},${GREEN[1]},${GREEN[2]},${alpha})`,
+                }}
+              />
+            ))}
+            <Text fz="0.62rem" c="dark.3" ml={4} style={{ whiteSpace: 'nowrap' }}>
+              1× → {top}+× measured
+            </Text>
+          </Group>
+        </Group>
+      }
+    />
+  );
+}
+
+export function UncertaintyHeatmap({ grid }: { grid: (number | null)[][] }) {
+  return (
+    <SensorMap
+      title="Projection uncertainty"
+      grid={grid}
+      paint={paintUncertainty}
+      legend={
+        <Group justify="space-between" mt={7} wrap="nowrap" gap="xs">
+          {[...UNCERTAINTY_BANDS, OUTSIDE_MODEL].map((band) => (
+            <LegendChip
+              key={band.label}
+              color={`rgba(${band.rgb[0]},${band.rgb[1]},${band.rgb[2]},${band.alpha})`}
+              label={band.label}
+            />
+          ))}
+        </Group>
+      }
+    />
   );
 }
