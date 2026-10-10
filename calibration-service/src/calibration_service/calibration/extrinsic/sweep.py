@@ -40,21 +40,26 @@ def derive_sweep_window(directory: Path, names: list[str]) -> float:
     The capture loop's effective write rate can be well below the camera fps
     (detection/encode contention) — observed ~18 fps for a 30 fps config. A window
     below one REAL frame interval keeps pairing unambiguous (ADR-0007 intent):
-    0.95 x the slowest camera's median inter-frame delta, clamped to sane bounds.
+    0.95 x the slowest camera's mean recorded period, clamped to sane bounds.
+
+    The mean period (span / intervals), not the median interval: uvcvideo's kernel
+    stamps (ADR-0049) land on a coarse grid, so a 30 fps sweep records intervals of
+    20, 24, 40 and 44 ms whose median is 40 ms. The median widened the window to
+    38 ms, past one frame period: on a real sweep the group spread p95 went from
+    21 to 48 ms. The span keeps the cadence exact whatever the per-frame jitter.
     """
-    medians: list[float] = []
+    periods: list[float] = []
     for name in names:
         path = directory / f"{name}.timestamps"
         if not path.is_file():
             continue  # camera missing from the sweep: sync simply excludes it
         stamps = read_timestamps(path)
         if len(stamps) >= 2:
-            deltas = np.diff(np.asarray(stamps, np.float64))
-            medians.append(float(np.median(deltas)))
-    if not medians:
+            periods.append((stamps[-1] - stamps[0]) / (len(stamps) - 1))
+    if not periods:
         raise ValueError(f"no recorded timestamps under {directory}")
     # Same derivation rule as the live synchronizer (ADR-0037): one truth.
-    return sync_window(max(medians))
+    return sync_window(max(periods))
 
 
 class _Detected(NamedTuple):
