@@ -681,7 +681,6 @@ function IntrinsicsInner() {
               label: c.matrix != null ? `${c.name} ✓` : c.name,
               value: c.name,
             }))}
-            mb="md"
           />
         }
         stepper={
@@ -984,7 +983,7 @@ export function IntrinsicsScreen() {
       <ScreenHeader
         panelToggle
         title="Intrinsics"
-        subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
+        info="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
       />
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <IntrinsicsInner />

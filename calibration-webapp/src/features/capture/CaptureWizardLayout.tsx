@@ -1,4 +1,4 @@
-import { Box, Paper, Text } from '@mantine/core';
+import { Box, Group, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
@@ -11,7 +11,8 @@ import {
 } from '@/components/layout/useCompactLayout';
 
 interface CaptureWizardLayoutProps {
-  // Optional row above the stepper (e.g. the intrinsic per-camera SegmentedControl).
+  // Optional control before the stepper (e.g. the intrinsic per-camera tabs): on the
+  // stepper's row in the locked regime, above it in compact.
   top?: ReactNode;
   stepper: ReactNode;
   // Left area (the big preview / scrubber / 3D scene) — the screen picks it by step.
@@ -50,8 +51,20 @@ export function CaptureWizardLayout({
   const { collapsed: panelCollapsed } = useSidePanel();
   return (
     <>
-      {top}
-      {stepper}
+      {/* One header row in the locked regime: the camera tabs, then the phases — two
+          stacked rows took ~120px above the view. Compact stacks them, a phone has no
+          width for both. */}
+      {compact ? (
+        <>
+          {top && <Box mb="md">{top}</Box>}
+          <Box mb="md">{stepper}</Box>
+        </>
+      ) : (
+        <Group wrap="nowrap" gap="md" mb="md" align="center">
+          {top && <Box style={{ flex: 'none', maxWidth: '50%', overflowX: 'auto' }}>{top}</Box>}
+          <Box style={{ flex: 1, minWidth: 0 }}>{stepper}</Box>
+        </Group>
+      )}
 
       <Box
         style={{

@@ -926,7 +926,7 @@ export function ExtrinsicScreen() {
       <ScreenHeader
         panelToggle
         title="Extrinsics"
-        subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
+        info="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
       />
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ExtrinsicInner />
