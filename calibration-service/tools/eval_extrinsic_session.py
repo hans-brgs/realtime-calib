@@ -127,6 +127,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", type=Path, default=None, help="also write the report as JSON")
     parser.add_argument("--stride", type=int, default=None)
     parser.add_argument("--max-groups", type=int, default=None)
+    parser.add_argument(
+        "--max-motion-px",
+        default=None,
+        help="motion gate in native px (ADR-0056), or 'off' to solve without it",
+    )
     parser.add_argument("--verbose", action="store_true", help="show solver logs")
     args = parser.parse_args(argv)
 
@@ -152,6 +157,13 @@ def main(argv: list[str] | None = None) -> int:
         TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker
     )
 
+    if args.max_motion_px == "off":
+        max_motion_px: float | None = None
+    elif args.max_motion_px is None:
+        max_motion_px = TUNING.extrinsic_max_motion_px
+    else:
+        max_motion_px = float(args.max_motion_px)
+
     window_s = derive_sweep_window(sweep, names)
     result, ba_inputs = compute_extrinsic_from_sweep(
         sweep,
@@ -162,6 +174,7 @@ def main(argv: list[str] | None = None) -> int:
         stride=stride,
         max_groups=max_groups,
         min_shared=TUNING.min_shared,
+        max_motion_px=max_motion_px,
     )
     scaled = result.scaled_errors(factors)
     rigidity = board_rigidity_mm(result, ba_inputs.point_corner, extrinsic_board)
@@ -176,6 +189,13 @@ def main(argv: list[str] | None = None) -> int:
         f"{result.observations_total} observations"
     )
     print(f"bundle adj.  : {status} (nfev {result.ba_nfev})")
+    if max_motion_px is None:
+        print("motion gate  : off")
+    else:
+        print(
+            f"motion gate  : {result.moving_groups} detected groups dropped as moving "
+            f"(> {max_motion_px} px, ADR-0056)"
+        )
     if result.border_attempts:
         refused = {name: sum(c.values()) for name, c in result.border_refusals.items()}
         reasons: dict[str, int] = {}
@@ -229,6 +249,8 @@ def main(argv: list[str] | None = None) -> int:
             "ba_converged": result.ba_converged,
             "border_refusals": result.border_refusals,
             "border_attempts": result.border_attempts,
+            "moving_groups": result.moving_groups,
+            "max_motion_px": max_motion_px,  # None: solved with the gate off
         }
         args.json.write_text(json.dumps(payload, indent=2))
         print(f"\nJSON report  : {args.json}")

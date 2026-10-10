@@ -23,6 +23,7 @@ from calibration_service.calibration.extrinsic import (
     GroupDetection,
     PairEstimate,
     Triangulation,
+    _Detected,
     _select_quality_groups,
     _transform,
     bundle_adjust,
@@ -227,10 +228,14 @@ def test_sweep_orchestration_solves_from_sidecars(
         groups_frames: list[dict[str, int]],
         models: dict[str, CameraModel],
         board: CalibrationBoard,
-    ) -> tuple[list[dict[str, GroupDetection]], dict[str, dict[str, int]], dict[str, int]]:
+    ) -> _Detected:
         assert len(groups_frames) == 6  # all groups synchronized + selected
-        refusals = {"cam_1": {"marker_too_small": 2}}
-        return [groups[frames[cameras[0]]] for frames in groups_frames], refusals, {"cam_1": 8}
+        return _Detected(
+            groups=[groups[frames[cameras[0]]] for frames in groups_frames],
+            motions=[{} for _ in groups_frames],  # unknown motion: the gate keeps them
+            refusals={"cam_1": {"marker_too_small": 2}},
+            attempts={"cam_1": 8},
+        )
 
     monkeypatch.setattr(
         "calibration_service.calibration.extrinsic._detect_group_frames", fake_detect
@@ -454,6 +459,7 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
         board_quads=[None] * 4,
         border_refusals={"cam_1": {"outer_edge_noisy": 3}},
         border_attempts={"cam_0": 9, "cam_1": 9},
+        moving_groups=7,
     )
     ba = BAInputs(
         obs_camera=[int(v) for v in tri.obs_camera],
@@ -469,6 +475,7 @@ def test_refine_preserves_a_reoriented_anchor() -> None:
     for kept in (turned, minimized):
         assert kept.border_refusals == {"cam_1": {"outer_edge_noisy": 3}}
         assert kept.border_attempts == {"cam_0": 9, "cam_1": 9}
+        assert kept.moving_groups == 7  # and the motion gate's (ADR-0056)
     # Anchor pose preserved exactly (held fixed at its reoriented pose).
     assert np.allclose(minimized.rotations["cam_0"], turned.rotations["cam_0"], atol=1e-12)
     assert np.allclose(minimized.translations["cam_0"], turned.translations["cam_0"], atol=1e-12)
@@ -1028,6 +1035,7 @@ def test_the_compute_refines_marker_corners_and_counts_refusals_per_camera(
         with VideoRecorder(tmp_path / f"{name}.mkv", 640, 480, fps=30) as recorder:
             for _ in range(3):
                 recorder.write(frame)
+        (tmp_path / f"{name}.timestamps").write_text("0.000\n0.033\n0.067\n")
     built: list[dict[str, object]] = []
     real_detector = BoardDetector
 
@@ -1042,13 +1050,172 @@ def test_the_compute_refines_marker_corners_and_counts_refusals_per_camera(
     models = {n: CameraModel(name=n, matrix=K, distortions=DIST) for n in ("cam_0", "cam_1")}
     groups = [{"cam_0": 0, "cam_1": 0}, {"cam_0": 2, "cam_1": 2}]
 
-    kept, refusals, attempts = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
-    assert built == [{"border_refine": True}]
-    assert len(kept) == 2 and attempts == {"cam_0": 2, "cam_1": 2}
-    assert refusals == {}
+    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    assert built == [{"border_refine": True}] * 2  # one detector per camera
+    assert len(detected.groups) == 2 and detected.attempts == {"cam_0": 2, "cam_1": 2}
+    assert detected.refusals == {}
 
     monkeypatch.setattr(detector_module, "refine_marker_corners", refuse)
-    kept, refusals, attempts = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
-    assert kept == []  # every view refused: dropped, not kept with CONTOUR's corners
-    assert attempts == {"cam_0": 2, "cam_1": 2}
-    assert refusals == {"cam_0": {"outer_edge_noisy": 2}, "cam_1": {"outer_edge_noisy": 2}}
+    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    assert detected.groups == []  # every view refused: dropped, not kept with CONTOUR's
+    assert detected.attempts == {"cam_0": 2, "cam_1": 2}
+    assert detected.refusals == {
+        "cam_0": {"outer_edge_noisy": 2},
+        "cam_1": {"outer_edge_noisy": 2},
+    }
+
+
+def _sliding_marker(shift_px: float) -> NDArray[np.uint8]:
+    """A 960x720 BGR frame with marker 8 shifted right by ``shift_px``."""
+    dictionary = cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_100)
+    page = np.full((720, 960), 255, np.uint8)
+    page[200:500, 300:600] = cv2.aruco.generateImageMarker(dictionary, 8, 300)
+    matrix = np.array([[1.0, 0.0, shift_px], [0.0, 1.0, 0.0]])
+    moved = cv2.warpAffine(page, matrix, (960, 720), flags=cv2.INTER_LINEAR, borderValue=255)
+    return np.asarray(cv2.cvtColor(moved, cv2.COLOR_GRAY2BGR))
+
+
+def test_the_detection_walk_measures_the_board_speed(tmp_path: Path) -> None:
+    # ADR-0056: each member's corners are tracked into the neighbouring frames the
+    # sequential decode walks anyway. An accelerating slide and irregular, per-camera
+    # stamps make every speed distinct: the central difference over each camera's own
+    # stamps, one-sided at the video's first and last frames, and a forward track past
+    # the last wanted frame of a camera that stops short of its video's end.
+    from calibration_service.calibration import extrinsic
+    from calibration_service.recording import VideoRecorder
+
+    marker = CalibrationBoard(
+        board_type=BoardType.ARUCO,
+        dictionary="DICT_4X4_100",
+        columns=1,
+        rows=1,
+        marker_id=8,
+        marker_size_mm=297.0,
+    )
+    models = {n: CameraModel(name=n, matrix=K, distortions=DIST) for n in ("cam_0", "cam_1")}
+    shift = [0.5 * i * i + 2.0 * i for i in range(12)]
+    gaps = {"cam_0": (0.033, 0.045), "cam_1": (0.045, 0.033)}
+    stamps: dict[str, list[float]] = {}
+    for name in models:
+        with VideoRecorder(tmp_path / f"{name}.mkv", 960, 720, fps=25) as recorder:
+            for x in shift:
+                recorder.write(_sliding_marker(x))
+        offset = 0.012 if name == "cam_1" else 0.0
+        times = [offset + sum(gaps[name][j % 2] for j in range(i)) for i in range(12)]
+        stamps[name] = [round(t, 6) for t in times]
+        (tmp_path / f"{name}.timestamps").write_text("".join(f"{t:.6f}\n" for t in times))
+    groups = [{"cam_0": 0, "cam_1": 0}, {"cam_0": 5, "cam_1": 5}, {"cam_0": 9, "cam_1": 11}]
+    detected = extrinsic._detect_group_frames(tmp_path, groups, models, marker)
+    assert len(detected.groups) == 3
+    for k, group in enumerate(groups):
+        assert set(detected.motions[k]) == set(detected.groups[k]) == {"cam_0", "cam_1"}
+        for name, motion in detected.motions[k].items():
+            frame, t = group[name], stamps[name]
+            assert motion.timestamp == pytest.approx(t[frame], abs=1e-9)
+            lo, hi = max(frame - 1, 0), min(frame + 1, 11)
+            expected = (shift[hi] - shift[lo]) / (t[hi] - t[lo])
+            assert motion.speed_px_s == pytest.approx(expected, rel=0.03)
+
+
+def _detected_with_one_moving_group(groups: list[dict[str, GroupDetection]]) -> _Detected:
+    """Every group held still but the first, whose members are 20 ms apart at 1000 px/s."""
+    from calibration_service.calibration.motion import MemberMotion
+
+    motions = [
+        {name: MemberMotion(timestamp=0.0, speed_px_s=0.0) for name in group} for group in groups
+    ]
+    motions[0] = {
+        name: MemberMotion(timestamp=0.02 * k, speed_px_s=1000.0)
+        for k, name in enumerate(groups[0])
+    }
+    return _Detected(groups=groups, motions=motions, refusals={}, attempts={})
+
+
+def _sweep_on_disk(tmp_path: Path, count: int) -> list[dict[str, GroupDetection]]:
+    fps = 30.0
+    for name in POSES:
+        stamps = [f"{g / fps + 0.001:.6f}" for g in range(count)]
+        (tmp_path / f"{name}.timestamps").write_text("\n".join(stamps) + "\n")
+    return _groups(count)
+
+
+def test_the_motion_gate_drops_a_group_that_moved_between_captures(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    groups = _sweep_on_disk(tmp_path, 6)
+    monkeypatch.setattr(
+        "calibration_service.calibration.extrinsic._detect_group_frames",
+        lambda *_args: _detected_with_one_moving_group(groups),
+    )
+    models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in POSES]
+    result, _ = compute_extrinsic_from_sweep(
+        tmp_path,
+        BOARD,
+        models,
+        anchor="cam_0",
+        window_s=0.95 / 30.0,
+        stride=1,
+        max_groups=8,  # a quarter of it, 2 groups, is the guaranteed floor
+        min_shared=3,
+        max_motion_px=0.5,
+    )
+    assert result.moving_groups == 1
+    assert result.group_count == 5
+
+
+def test_a_gate_that_leaves_no_solvable_array_falls_back_without_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, caplog: pytest.LogCaptureFixture
+) -> None:
+    from calibration_service.calibration import extrinsic
+
+    groups = _sweep_on_disk(tmp_path, 6)
+    monkeypatch.setattr(
+        extrinsic, "_detect_group_frames", lambda *_args: _detected_with_one_moving_group(groups)
+    )
+    solve = extrinsic._solve_groups
+    sizes: list[int] = []
+
+    def flaky(
+        detections: list[dict[str, GroupDetection]], *args: object, **kwargs: object
+    ) -> object:
+        sizes.append(len(detections))
+        if len(sizes) == 1:
+            raise ValueError("no camera pair shares >= 3 board views")
+        return solve(detections, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(extrinsic, "_solve_groups", flaky)
+    models = [CameraModel(name=name, matrix=K, distortions=DIST) for name in POSES]
+    with caplog.at_level("WARNING"):
+        result, _ = compute_extrinsic_from_sweep(
+            tmp_path,
+            BOARD,
+            models,
+            anchor="cam_0",
+            window_s=0.95 / 30.0,
+            stride=1,
+            max_groups=8,
+            min_shared=3,
+            max_motion_px=0.5,
+        )
+    assert sizes == [5, 6]  # gated pool first, then every detected group
+    assert result.moving_groups == 0 and result.group_count == 6
+    assert "motion gate left no solvable array" in caplog.text
+
+
+def test_the_motion_gate_keeps_a_quarter_of_the_group_budget() -> None:
+    # Five of six groups moved: with a budget of 8, the stillest moving one tops the
+    # single still group up to the guaranteed quarter (2).
+    from calibration_service.calibration.extrinsic import _motion_gate
+    from calibration_service.calibration.motion import MemberMotion
+
+    groups = _groups(6)
+    motions = [
+        {name: MemberMotion(timestamp=0.01 * k, speed_px_s=speed) for k, name in enumerate(group)}
+        for group, speed in zip(groups, (0.0, 900.0, 300.0, 800.0, 700.0, 600.0), strict=True)
+    ]
+    detected = _Detected(groups=groups, motions=motions, refusals={}, attempts={})
+    pool, moving = _motion_gate(detected, 0.5, max_groups=8)
+    assert [id(group) for group in pool] == [id(groups[0]), id(groups[2])]
+    assert moving == 4
+    everything, none = _motion_gate(detected, None, max_groups=8)
+    assert len(everything) == 6 and none == 0  # no gate: every group, nothing dropped

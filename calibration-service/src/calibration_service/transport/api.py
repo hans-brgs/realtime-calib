@@ -992,6 +992,14 @@ class ExtrinsicComputeRequest(BaseModel):
         ge=TUNING.min_shared_bounds[0],
         le=TUNING.min_shared_bounds[1],
     )
+    # Board-motion gate (ADR-0056), native px; API-only like min_shared. Even at the
+    # upper bound it still drops a few groups (up to 6 % on the recorded sweeps): the
+    # API has no off switch, the offline eval tool does (--max-motion-px off).
+    max_motion_px: float | None = Field(
+        default=None,
+        ge=TUNING.extrinsic_max_motion_px_bounds[0],
+        le=TUNING.extrinsic_max_motion_px_bounds[1],
+    )
 
 
 def _native_camera_model(camera: CameraConfig) -> CameraModel:
@@ -1078,6 +1086,9 @@ async def compute_extrinsic(
         else (TUNING.max_groups_charuco if charuco else TUNING.max_groups_marker)
     )
     min_shared = params.min_shared if params.min_shared is not None else TUNING.min_shared
+    max_motion_px = (
+        params.max_motion_px if params.max_motion_px is not None else TUNING.extrinsic_max_motion_px
+    )
 
     loop = asyncio.get_running_loop()
     try:
@@ -1093,6 +1104,7 @@ async def compute_extrinsic(
                 max_groups=max_groups,
                 max_spread_s=max_spread_s,
                 min_shared=min_shared,
+                max_motion_px=max_motion_px,
             ),
         )
     except ValueError as exc:
