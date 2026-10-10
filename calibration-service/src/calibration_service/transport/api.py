@@ -69,6 +69,12 @@ from calibration_service.recording import (
 )
 from calibration_service.recording.ffmpeg import FfmpegError
 from calibration_service.session.import_session import UnreadableArchiveError, ingest
+from calibration_service.session.layout import (
+    BA_INPUTS_FILE,
+    REFERENCE_FILE,
+    RESULT_FILE,
+    SWEEP_MANIFEST,
+)
 from calibration_service.session.manager import SessionManager
 from calibration_service.session.workflow import (
     native_camera_model,
@@ -1100,7 +1106,7 @@ async def compute_extrinsic(
             detail=f"cameras missing intrinsics: {', '.join(uncalibrated) or 'need >= 2'}",
         )
     directory = manager.extrinsic_dir()
-    if not (directory / "manifest.json").is_file():
+    if not (directory / SWEEP_MANIFEST).is_file():
         raise HTTPException(status_code=404, detail="no extrinsic recording")
 
     service = get_publish_service(request)
@@ -1129,16 +1135,16 @@ async def compute_extrinsic(
     # (ADR-0042). ba_inputs stay native — they are solver-domain data.
     result = output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
-    _write_solve_file(directory / "result.json", asdict(result))
+    _write_solve_file(directory / RESULT_FILE, asdict(result))
     # BA observations: lets Minimize refine later without redetecting the videos.
-    _write_solve_file(directory / "ba_inputs.json", asdict(ba_inputs))
+    _write_solve_file(directory / BA_INPUTS_FILE, asdict(ba_inputs))
     return _session_out(session, manager)
 
 
 @router.get("/extrinsic/result")
 async def extrinsic_result(request: Request) -> dict[str, object]:
     """Serve the persisted array solve (poses + errors) for the Result 3D view."""
-    path = get_manager(request).extrinsic_dir() / "result.json"
+    path = get_manager(request).extrinsic_dir() / RESULT_FILE
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
     return _read_solve_file(path)
@@ -1162,7 +1168,7 @@ class OrientRequest(BaseModel):
 
 
 def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
-    path = manager.extrinsic_dir() / "result.json"
+    path = manager.extrinsic_dir() / RESULT_FILE
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
     try:
@@ -1175,7 +1181,7 @@ def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
 
 def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) -> None:
     manager.set_extrinsic_result(result)
-    _write_solve_file(manager.extrinsic_dir() / "result.json", asdict(result))
+    _write_solve_file(manager.extrinsic_dir() / RESULT_FILE, asdict(result))
 
 
 @router.post("/extrinsic/orient")
@@ -1261,7 +1267,7 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     if board is None:
         raise HTTPException(status_code=422, detail="no extrinsic board defined")
     result = _load_extrinsic_result(manager)
-    ba_path = manager.extrinsic_dir() / "ba_inputs.json"
+    ba_path = manager.extrinsic_dir() / BA_INPUTS_FILE
     if not ba_path.is_file():
         raise HTTPException(status_code=404, detail="no BA observations (recompute first)")
     try:
@@ -1291,9 +1297,6 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     return payload
 
 
-_REFERENCE_FILE = "reference.json"
-
-
 class ReferenceRequest(BaseModel):
     """A reference calibration to re-align the world on (ADR-0061)."""
 
@@ -1303,7 +1306,7 @@ class ReferenceRequest(BaseModel):
 
 def _stored_reference(manager: SessionManager) -> Reference | None:
     """The deposited reference, None when there is none; 422 when its file is unreadable."""
-    path = manager.extrinsic_dir() / _REFERENCE_FILE
+    path = manager.extrinsic_dir() / REFERENCE_FILE
     if not path.is_file():
         return None
     try:
@@ -1354,7 +1357,7 @@ async def put_extrinsic_reference(request: Request, body: ReferenceRequest) -> d
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     directory = manager.extrinsic_dir()
     directory.mkdir(parents=True, exist_ok=True)
-    _write_solve_file(directory / _REFERENCE_FILE, reference_payload(reference))
+    _write_solve_file(directory / REFERENCE_FILE, reference_payload(reference))
     return _reference_state(manager, reference)
 
 
@@ -1371,7 +1374,7 @@ async def get_extrinsic_reference(request: Request) -> dict[str, object]:
 @router.delete("/extrinsic/reference")
 async def delete_extrinsic_reference(request: Request) -> dict[str, object]:
     """Forget the reference; an applied re-alignment keeps its world."""
-    path = get_manager(request).extrinsic_dir() / _REFERENCE_FILE
+    path = get_manager(request).extrinsic_dir() / REFERENCE_FILE
     existed = path.is_file()
     path.unlink(missing_ok=True)
     return {"deleted": existed}
@@ -1396,7 +1399,7 @@ async def extrinsic_groups(
     manager = get_manager(request)
     session = manager.current()
     directory = manager.extrinsic_dir()
-    if not (directory / "manifest.json").is_file():
+    if not (directory / SWEEP_MANIFEST).is_file():
         raise HTTPException(status_code=404, detail="no extrinsic recording")
     names = [c.name for c in session.cameras]
     loop = asyncio.get_running_loop()
@@ -1545,7 +1548,7 @@ def _stored_result(manager: SessionManager) -> ExtrinsicResult | None:
 
 
 def _stored_ba_inputs(manager: SessionManager) -> BAInputs | None:
-    path = manager.extrinsic_dir() / "ba_inputs.json"
+    path = manager.extrinsic_dir() / BA_INPUTS_FILE
     if not path.is_file():
         return None
     try:

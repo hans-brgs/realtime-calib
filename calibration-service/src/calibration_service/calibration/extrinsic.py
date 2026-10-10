@@ -52,6 +52,7 @@ from calibration_service.calibration.motion import (
 from calibration_service.detection import BoardDetector
 from calibration_service.models.board import BoardType, CalibrationBoard
 from calibration_service.recording import read_timestamps
+from calibration_service.session.layout import SWEEP_MANIFEST
 from calibration_service.synchronization import SyncFrame, SyncGroup
 from calibration_service.synchronization.window import sync_window
 from calibration_service.tuning import TUNING
@@ -1630,7 +1631,7 @@ def _warn_on_mixed_clocks(directory: Path) -> None:
     base. The solve still runs: the manifest says why it may be poorer.
     """
     try:
-        manifest = json.loads((directory / "manifest.json").read_text())
+        manifest = json.loads((directory / SWEEP_MANIFEST).read_text())
         clocks = {str(c["name"]): str(c.get("clock", "unknown")) for c in manifest["cameras"]}
     except (OSError, ValueError, KeyError, TypeError):
         return

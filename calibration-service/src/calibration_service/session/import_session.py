@@ -53,6 +53,7 @@ from calibration_service.recording.replay import (
     video_properties,
 )
 from calibration_service.recording.video_writer import intrinsic_capture_path
+from calibration_service.session.layout import SWEEP_MANIFEST
 from calibration_service.session.manager import validate_session_id
 from calibration_service.session.store import SESSION_FILE, save_session, session_dir
 from calibration_service.synchronization.caliscope_alignment import (
@@ -525,7 +526,7 @@ def _write_manifest(directory: Path, plan: ImportPlan, props: dict[int, VideoPro
             for video in plan.extrinsic
         ]
     }
-    (directory / "manifest.json").write_text(dumps(manifest, indent=2))
+    (directory / SWEEP_MANIFEST).write_text(dumps(manifest, indent=2))
 
 
 def _camera_configs(

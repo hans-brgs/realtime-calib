@@ -26,6 +26,12 @@ from calibration_service.models.session import (
 )
 from calibration_service.recording import extrinsic_dir, intrinsic_capture_path
 from calibration_service.session.config_store import load_board_config, save_board_config
+from calibration_service.session.layout import (
+    BA_INPUTS_FILE,
+    INTRINSIC_METRICS_FILE,
+    RESULT_FILE,
+    SWEEP_MANIFEST,
+)
 from calibration_service.session.store import (
     SESSION_FILE,
     create_session,
@@ -103,7 +109,7 @@ def _extrinsic_geometry(board: CalibrationBoard | None) -> tuple[object, ...] | 
 # Solve artefacts derived from the extrinsic recording. The recording itself
 # (videos, sidecars, manifest) is kept: after a corrected definition or new
 # intrinsics, the same sweep recomputes the array without a new capture.
-_EXTRINSIC_RESULT_FILES = ("result.json", "ba_inputs.json")
+_EXTRINSIC_RESULT_FILES = (RESULT_FILE, BA_INPUTS_FILE)
 
 
 class NoActiveSessionError(RuntimeError):
@@ -361,7 +367,7 @@ class SessionManager:
         The manifest is what announces a sweep; a camera rebuild removes it
         (``configure_cameras``), so a sweep of other cameras is never offered.
         """
-        return (self.extrinsic_dir() / "manifest.json").is_file()
+        return (self.extrinsic_dir() / SWEEP_MANIFEST).is_file()
 
     def _check_board_request(
         self, target: str, board: CalibrationBoard | None, inherited: bool
@@ -450,7 +456,7 @@ class SessionManager:
 
     def intrinsic_metrics_path(self, camera_name: str) -> Path:
         """Path of the persisted review metrics (coverage/orientation/poses, ADR-0022)."""
-        return self.intrinsic_video_path(camera_name).with_name("metrics.json")
+        return self.intrinsic_video_path(camera_name).with_name(INTRINSIC_METRICS_FILE)
 
     def extrinsic_dir(self) -> Path:
         """Folder of the synchronized extrinsic sweep (videos + timestamp sidecars)."""
@@ -553,7 +559,7 @@ class SessionManager:
         # the new cam_0 (why ADR-0040 refused /cameras/order). Without its
         # manifest the sweep is neither announced nor computable (404); the next
         # sweep overwrites the videos.
-        (self.extrinsic_dir() / "manifest.json").unlink(missing_ok=True)
+        (self.extrinsic_dir() / SWEEP_MANIFEST).unlink(missing_ok=True)
         save_session(self._sessions_dir, session)
         logger.info("configured %d camera(s); step -> %s", len(cameras), session.step)
         return session
