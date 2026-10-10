@@ -128,7 +128,6 @@ class PairEstimate:
     rotation: NDArray[np.float64]  # 3x3
     translation: NDArray[np.float64]  # (3,)
     error: float  # stereoCalibrate RMSE (normalized units)
-    shared_groups: int
 
 
 @dataclass(frozen=True)
@@ -403,7 +402,6 @@ def stereo_pairwise(
                 rotation=np.asarray(rotation, np.float64),
                 translation=np.asarray(translation, np.float64).reshape(3),
                 error=float(rmse),
-                shared_groups=len(shared),
             )
             logger.info(
                 "pair %s-%s: %d shared groups, stereo RMSE %.4f",
@@ -1004,7 +1002,7 @@ def _group_board_quads(
     points3d: NDArray[np.float64],
     chess: NDArray[np.float64],
     group_count: int,
-    min_corners: int = _MIN_COMMON_CORNERS,
+    min_corners: int,
 ) -> list[list[list[float]] | None]:
     """Per group, the board's 4 outline corners in world coords (Kabsch fit).
 

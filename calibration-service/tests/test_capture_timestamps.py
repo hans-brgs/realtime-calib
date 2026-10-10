@@ -131,7 +131,7 @@ class _ScriptedDevice:
 
     async def retrieve(self) -> Frame:
         self.retrieved.append(self._last)
-        return Frame(0, 1, self._last, np.zeros((48, 64, 3), np.uint8))
+        return Frame(self._last, np.zeros((48, 64, 3), np.uint8))
 
     async def release(self) -> None:
         pass

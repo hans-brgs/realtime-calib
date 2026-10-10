@@ -36,6 +36,3 @@ class CovisibilityGraph:
             for b in seeing[i + 1 :]:
                 key = pair_key(a, b)
                 self.pair_counts[key] = self.pair_counts.get(key, 0) + 1
-
-    def count(self, a: str, b: str) -> int:
-        return self.pair_counts.get(pair_key(a, b), 0)

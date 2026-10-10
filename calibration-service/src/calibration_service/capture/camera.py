@@ -75,16 +75,11 @@ class CameraCapture:
     def __init__(self, source: VideoSource, camera_index: int) -> None:
         self._source = source
         self._camera_index = camera_index
-        self._frame_id = 0
         # Timestamp base, chosen once by choose_clock(); host until then.
         self._clock: Clock = "host"
         self._last_kernel_s: float | None = None
         self._grab_stamp: float | None = None  # timestamp of the last grabbed frame
         self._dropped = 0  # frames whose kernel stamp did not increase
-
-    @property
-    def camera_index(self) -> int:
-        return self._camera_index
 
     @property
     def clock(self) -> Clock:
@@ -218,13 +213,7 @@ class CameraCapture:
         return milliseconds / 1000.0
 
     def _frame(self, image: NDArray[np.uint8], timestamp: float) -> Frame:
-        self._frame_id += 1
-        return Frame(
-            camera_index=self._camera_index,
-            frame_id=self._frame_id,
-            timestamp=timestamp,
-            image=image,
-        )
+        return Frame(timestamp=timestamp, image=image)
 
     def release(self) -> None:
         if self._dropped:

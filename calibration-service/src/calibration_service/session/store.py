@@ -51,6 +51,14 @@ _LEGACY_MODES: dict[str, SessionMode] = {
 }
 
 
+# A status no service ever wrote, removed from the enum: read as the closest live one.
+_LEGACY_STATUSES: dict[str, CameraStatus] = {"detected": CameraStatus.CONFIGURED}
+
+
+def _parse_status(raw: str) -> CameraStatus:
+    return _LEGACY_STATUSES.get(raw) or CameraStatus(raw)
+
+
 def _parse_mode(raw: str) -> SessionMode:
     """Parse a persisted mode value, mapping legacy names (ADR-0019)."""
     if raw in _LEGACY_MODES:
@@ -149,7 +157,7 @@ def _camera_from_dict(c: Mapping[str, Any]) -> CameraConfig:
         height=int(c["height"]),
         resize_factor=float(c["resize_factor"]),
         fps=int(c["fps"]),
-        status=CameraStatus(c["status"]),
+        status=_parse_status(str(c["status"])),
         matrix=[[float(v) for v in row] for row in matrix] if matrix is not None else None,
         distortions=[float(v) for v in distortions] if distortions is not None else None,
         calibration_error=float(error) if error is not None else None,

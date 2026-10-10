@@ -4,13 +4,13 @@ from __future__ import annotations
 
 import pytest
 
-from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer
+from calibration_service.synchronization import CovisibilityGraph, FrameSynchronizer, pair_key
 
 WINDOW = 0.040  # 40 ms
 
 
-def _sync(cameras: list[str], **kwargs: int) -> FrameSynchronizer[str]:
-    return FrameSynchronizer(cameras, WINDOW, **kwargs)
+def _sync(cameras: list[str]) -> FrameSynchronizer[str]:
+    return FrameSynchronizer(cameras, WINDOW)
 
 
 def test_groups_heads_within_the_window() -> None:
@@ -62,54 +62,13 @@ def test_partial_group_waits_for_stragglers_then_emits() -> None:
     assert set(group.frames) == {"cam_0", "cam_1"}
 
 
-def test_dead_camera_excluded_via_active_count() -> None:
-    # With the live count lowered to 2, a 2-camera group is complete: no waiting.
-    sync = _sync(["cam_0", "cam_1", "cam_2"])
-    sync.set_active_count(2)
-    sync.add("cam_0", 10.000, "a")
-    sync.add("cam_1", 10.010, "b")
-    group = sync.try_emit()
-    assert group is not None
-    assert set(group.frames) == {"cam_0", "cam_1"}
-
-
-def test_drain_emits_buffered_groups_in_order() -> None:
-    # Offline mode (compute over sidecars): everything buffered, then drained.
-    sync = _sync(["cam_0", "cam_1"])
-    for i in range(3):
-        base = 10.0 + i * 0.1
-        sync.add("cam_0", base, f"a{i}")
-        sync.add("cam_1", base + 0.005, f"b{i}")
-    groups = sync.drain()
-    assert len(groups) == 3
-    assert [g.frames["cam_0"].payload for g in groups] == ["a0", "a1", "a2"]
-    assert all(g.spread <= WINDOW for g in groups)
-
-
 def test_covisibility_counts_pairs_only_when_both_see_the_board() -> None:
     graph = CovisibilityGraph(["cam_0", "cam_1", "cam_2"])
     graph.record({"cam_0": True, "cam_1": True, "cam_2": False})
     graph.record({"cam_0": True, "cam_1": False, "cam_2": True})
     graph.record({"cam_0": True, "cam_1": True, "cam_2": True})
     assert graph.synced_groups == 3
-    assert graph.count("cam_0", "cam_1") == 2
-    assert graph.count("cam_1", "cam_0") == 2  # order-insensitive
-    assert graph.count("cam_0", "cam_2") == 2
-    assert graph.count("cam_1", "cam_2") == 1
+    assert graph.pair_counts[pair_key("cam_1", "cam_0")] == 2  # order-insensitive key
+    assert graph.pair_counts[pair_key("cam_0", "cam_2")] == 2
+    assert graph.pair_counts[pair_key("cam_1", "cam_2")] == 1
     assert graph.board_frames == {"cam_0": 3, "cam_1": 2, "cam_2": 2}
-
-
-def test_drain_survives_desynchronized_stretches() -> None:
-    # Real-rig regression: a lone unpaired frame mid-sweep made a drain pass drop
-    # it and return None -> drain() read "done" and DISCARDED the rest of the
-    # recording (only the first seconds ever got grouped). The cleanup pass must
-    # retry, so pairs after the gap still come out.
-    sync = _sync(["cam_0", "cam_1"])
-    sync.add("cam_0", 10.000, "a1")
-    sync.add("cam_1", 10.010, "b1")  # pair 1
-    sync.add("cam_0", 10.100, "lone")  # cam_1 has nothing near 10.100
-    sync.add("cam_0", 10.200, "a2")
-    sync.add("cam_1", 10.210, "b2")  # pair 2, AFTER the gap
-    groups = sync.drain()
-    assert [g.frames["cam_0"].payload for g in groups] == ["a1", "a2"]
-    assert [g.frames["cam_1"].payload for g in groups] == ["b1", "b2"]

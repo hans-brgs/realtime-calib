@@ -67,7 +67,7 @@ def _image() -> NDArray[np.uint8]:
     return np.zeros((4, 4, 3), dtype=np.uint8)
 
 
-def test_read_increments_frame_id_and_sets_fields() -> None:
+def test_read_returns_timestamped_frames() -> None:
     source = FakeSource([_image(), _image()])
     camera = CameraCapture(source, camera_index=2)
 
@@ -76,8 +76,6 @@ def test_read_increments_frame_id_and_sets_fields() -> None:
 
     assert first is not None
     assert second is not None
-    assert first.camera_index == 2
-    assert (first.frame_id, second.frame_id) == (1, 2)
     assert second.timestamp >= first.timestamp
     assert first.image.shape == (4, 4, 3)
 
@@ -100,8 +98,6 @@ def test_grab_then_retrieve_decodes_the_grabbed_frame() -> None:
     frame = camera.retrieve()
 
     assert frame is not None
-    assert frame.camera_index == 3
-    assert frame.frame_id == 1
     assert frame.image.shape == (4, 4, 3)
 
 

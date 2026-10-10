@@ -20,9 +20,6 @@ SUPPORTED_DICTIONARIES: tuple[str, ...] = (
     "DICT_7X7_100",
 )
 
-# Special-case capacities that are not encoded in the constant name.
-_SPECIAL_CAPACITY: dict[str, int] = {"DICT_ARUCO_ORIGINAL": 1024}
-
 
 def is_supported(name: str) -> bool:
     return name in SUPPORTED_DICTIONARIES
@@ -36,8 +33,6 @@ def resolve(name: str) -> cv2.aruco.Dictionary:
 
 
 def dictionary_capacity(name: str) -> int:
-    """Number of distinct markers in the dictionary (from its name or a special case)."""
-    if name in _SPECIAL_CAPACITY:
-        return _SPECIAL_CAPACITY[name]
+    """Number of distinct markers in the dictionary, read from its name."""
     # Names look like DICT_<n>X<n>_<capacity>.
     return int(name.rsplit("_", 1)[1])

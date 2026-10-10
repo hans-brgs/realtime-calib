@@ -28,7 +28,7 @@ class _SlowCamera:
         return self.clock
 
     def read(self) -> Frame:
-        return Frame(0, 1, time.monotonic(), np.zeros((48, 64, 3), np.uint8))
+        return Frame(time.monotonic(), np.zeros((48, 64, 3), np.uint8))
 
     def release(self) -> None:
         pass

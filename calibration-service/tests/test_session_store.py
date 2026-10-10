@@ -181,3 +181,14 @@ def test_a_session_from_a_newer_schema_is_refused(tmp_path: Path) -> None:
     path.write_text(path.read_text().replace("schema_version = 2", "schema_version = 3"))
     with pytest.raises(ValueError, match="schema 3"):
         load_session(tmp_path, "new")
+
+
+def test_a_stray_detected_status_reloads_as_configured(tmp_path: Path) -> None:
+    # CameraStatus.DETECTED was never assigned and left the enum; a file carrying it
+    # (hand-edited, or from a fork) still loads, as the closest live status.
+    save_session(tmp_path, CalibrationSession(session_id="stray", cameras=[_sample_camera()]))
+    path = session_dir(tmp_path, "stray") / SESSION_FILE
+    text = path.read_text()
+    assert 'status = "configured"' in text
+    path.write_text(text.replace('status = "configured"', 'status = "detected"'))
+    assert load_session(tmp_path, "stray").cameras[0].status is CameraStatus.CONFIGURED

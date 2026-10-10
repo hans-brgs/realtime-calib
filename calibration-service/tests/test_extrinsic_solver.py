@@ -134,8 +134,8 @@ def test_chain_bridges_a_missing_pair() -> None:
     t01 = POSES["cam_1"]
     t12 = POSES["cam_2"] @ np.linalg.inv(POSES["cam_1"])
     pairs = {
-        ("cam_0", "cam_1"): PairEstimate(t01[:3, :3], t01[:3, 3], 0.1, 5),
-        ("cam_1", "cam_2"): PairEstimate(t12[:3, :3], t12[:3, 3], 0.2, 5),
+        ("cam_0", "cam_1"): PairEstimate(t01[:3, :3], t01[:3, 3], 0.1),
+        ("cam_1", "cam_2"): PairEstimate(t12[:3, :3], t12[:3, 3], 0.2),
     }
     poses = chain_from_anchor(pairs, ["cam_0", "cam_1", "cam_2"], "cam_0")
     assert np.allclose(poses["cam_0"], np.eye(4))
@@ -144,7 +144,7 @@ def test_chain_bridges_a_missing_pair() -> None:
 
 def test_chain_raises_on_unreachable_camera() -> None:
     t01 = POSES["cam_1"]
-    pairs = {("cam_0", "cam_1"): PairEstimate(t01[:3, :3], t01[:3, 3], 0.1, 5)}
+    pairs = {("cam_0", "cam_1"): PairEstimate(t01[:3, :3], t01[:3, 3], 0.1)}
     with pytest.raises(ValueError, match="cam_2"):
         chain_from_anchor(pairs, ["cam_0", "cam_1", "cam_2"], "cam_0")
 

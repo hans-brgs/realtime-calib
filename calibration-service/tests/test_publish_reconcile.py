@@ -436,7 +436,7 @@ def test_a_configured_camera_at_the_wrong_resolution_is_refused(
         released = False
 
         def read(self) -> Frame:
-            return Frame(0, 1, 0.0, np.zeros((720, 1280, 3), np.uint8))
+            return Frame(0.0, np.zeros((720, 1280, 3), np.uint8))
 
         def release(self) -> None:
             self.released = True
@@ -471,7 +471,7 @@ def test_a_configured_camera_at_its_resolution_goes_live(
             return self.clock
 
         def read(self) -> Frame:
-            return Frame(0, 1, 0.0, np.zeros((1080, 1920, 3), np.uint8))
+            return Frame(0.0, np.zeros((1080, 1920, 3), np.uint8))
 
         def release(self) -> None:
             self.released = True

@@ -51,7 +51,6 @@ class SessionMode(StrEnum):
 class CameraStatus(StrEnum):
     """Per-camera progress (monotone, see Camera entity)."""
 
-    DETECTED = "detected"
     CONFIGURED = "configured"
     INTRINSIC_DONE = "intrinsic_done"
     EXTRINSIC_DONE = "extrinsic_done"
