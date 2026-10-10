@@ -2,6 +2,7 @@ import { Box, Paper, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
+import { useSidePanel } from '@/components/layout/useSidePanel';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -46,6 +47,7 @@ export function CaptureWizardLayout({
   compactHero = 'frame',
 }: CaptureWizardLayoutProps) {
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
   return (
     <>
       {top}
@@ -56,7 +58,7 @@ export function CaptureWizardLayout({
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
           gap: 22,
         }}
       >
@@ -114,7 +116,7 @@ export function CaptureWizardLayout({
             // Locked: the panel is its own scroll container. Flow: the PAGE scrolls,
             // so scrolling here too would trap the settings inside a short box.
             overflowY: compact ? 'visible' : 'auto',
-            display: 'flex',
+            display: panelCollapsed ? 'none' : 'flex',
             flexDirection: 'column',
           }}
         >

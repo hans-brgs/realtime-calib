@@ -22,6 +22,7 @@ import {
 import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
+import { useSidePanel } from '@/components/layout/useSidePanel';
 import {
   captureGridColumns,
   HERO_VIEWPORT_BUDGET,
@@ -53,6 +54,7 @@ export function ExportScreen() {
   const session = useAppSelector(selectSession);
   const defaults = useAppSelector(selectDefaults);
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
   const cameras = session?.cameras ?? [];
   const posed = cameras.filter((c) => c.rotation != null).length;
   const ready = cameras.length > 0 && posed === cameras.length;
@@ -157,22 +159,23 @@ export function ExportScreen() {
       h={screenHeight(compact)}
       style={{ display: 'flex', flexDirection: 'column' }}
     >
-      <Group justify="space-between" align="flex-start" wrap="nowrap">
-        <ScreenHeader
-          title="Export"
-          subtitle="Camera calibration files for Caliscope and 3D engines."
-        />
-        <Badge color="teal" variant="light" size="lg" mt={6} style={{ flex: 'none' }}>
-          {posed} / {cameras.length} cameras posed
-        </Badge>
-      </Group>
+      <ScreenHeader
+        panelToggle
+        title="Export"
+        subtitle="Camera calibration files for Caliscope and 3D engines."
+        right={
+          <Badge color="teal" variant="light" size="lg" style={{ flex: 'none' }}>
+            {posed} / {cameras.length} cameras posed
+          </Badge>
+        }
+      />
 
       <Box
         style={{
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
           gap: 22,
         }}
       >
@@ -217,7 +220,7 @@ export function ExportScreen() {
           style={{
             minHeight: 0,
             overflowY: 'auto',
-            display: 'flex',
+            display: panelCollapsed ? 'none' : 'flex',
             flexDirection: 'column',
             gap: 'var(--mantine-spacing-lg)',
           }}

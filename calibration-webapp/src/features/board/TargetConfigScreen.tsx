@@ -25,6 +25,7 @@ import { type ReactNode, useEffect, useRef, useState } from 'react';
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { labelWithHelp } from '@/components/labelWithHelp';
 import { StickyActionBar } from '@/components/layout/StickyActionBar';
+import { useSidePanel } from '@/components/layout/useSidePanel';
 import {
   captureGridColumns,
   screenHeight,
@@ -175,6 +176,7 @@ function TargetConfigForm({
   const dispatch = useAppDispatch();
   const session = useAppSelector(selectSession);
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
 
   const [dictionaries, setDictionaries] = useState<string[]>([intrinsicSeed.dictionary]);
   const [active, setActive] = useState<BoardTarget>(
@@ -371,6 +373,7 @@ function TargetConfigForm({
         </Group>
       </Modal>
       <ScreenHeader
+        panelToggle
         title="Target Config"
         subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
       />
@@ -380,7 +383,7 @@ function TargetConfigForm({
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
           gap: 22,
         }}
       >
@@ -461,7 +464,7 @@ function TargetConfigForm({
             // Flow: the page scrolls, so the sticky Save bar sticks to the viewport;
             // an internal scroll here would trap it in a non-scrolling box (ADR-0041).
             overflowY: compact ? 'visible' : 'auto',
-            display: 'flex',
+            display: panelCollapsed ? 'none' : 'flex',
             flexDirection: 'column',
           }}
         >

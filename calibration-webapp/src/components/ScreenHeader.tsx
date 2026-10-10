@@ -1,18 +1,34 @@
 import { Box, Group, Text, Title } from '@mantine/core';
 import type { ReactNode } from 'react';
 
+import { SidePanelToggle } from '@/components/layout/SidePanel';
+import { useCompactLayout } from '@/components/layout/useCompactLayout';
+
 interface ScreenHeaderProps {
   title: string;
   subtitle?: ReactNode;
   right?: ReactNode;
+  // The screen has a foldable right panel: its toggle closes the header row, above
+  // the panel it folds.
+  panelToggle?: boolean;
 }
 
 // Per-screen header: Sora screen-title (h2 / 21px) + muted subtitle, with optional
 // right-aligned actions. Shared across every wizard screen.
-export function ScreenHeader({ title, subtitle, right }: ScreenHeaderProps) {
+export function ScreenHeader({ title, subtitle, right, panelToggle = false }: ScreenHeaderProps) {
+  const compact = useCompactLayout();
   return (
-    <Group justify="space-between" align="flex-start" wrap="wrap" gap="md" mb="lg">
-      <Box>
+    // Locked regime: no wrap, the subtitle gives way and the actions stay on the title
+    // row (with the panel toggle they no longer fit beside a full subtitle at ~1200px).
+    // Compact: they wrap under it, a phone has no width to share.
+    <Group
+      justify="space-between"
+      align="flex-start"
+      wrap={compact ? 'wrap' : 'nowrap'}
+      gap="md"
+      mb="lg"
+    >
+      <Box style={{ flex: 1, minWidth: 0 }}>
         <Title order={2}>{title}</Title>
         {subtitle ? (
           <Text c="dark.2" fz="0.84rem" mt={6} maw={640}>
@@ -20,7 +36,14 @@ export function ScreenHeader({ title, subtitle, right }: ScreenHeaderProps) {
           </Text>
         ) : null}
       </Box>
-      {right}
+      {panelToggle ? (
+        <Group gap={9} wrap="nowrap">
+          {right}
+          <SidePanelToggle />
+        </Group>
+      ) : (
+        right
+      )}
     </Group>
   );
 }

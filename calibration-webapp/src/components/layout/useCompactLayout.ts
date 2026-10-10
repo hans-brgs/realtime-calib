@@ -50,8 +50,11 @@ export function screenHeight(compact: boolean): '100%' | undefined {
 // Flow: a single column. The screens render the view first and the panel after it, so
 // stacking puts the settings under the view, which is what an operator on a phone
 // expects to scroll to.
-export function captureGridColumns(compact: boolean): string {
-  return compact ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) clamp(280px, 26%, 360px)';
+//
+// Folded panel (SidePanel): the view takes the single column; the panel stays mounted
+// with `display: none`, so its local state survives the fold.
+export function captureGridColumns(compact: boolean, panelCollapsed = false): string {
+  return compact || panelCollapsed ? 'minmax(0, 1fr)' : 'minmax(0, 1fr) clamp(280px, 26%, 360px)';
 }
 
 // FLOOR for hero content with no intrinsic size (a code preview, a stack of camera

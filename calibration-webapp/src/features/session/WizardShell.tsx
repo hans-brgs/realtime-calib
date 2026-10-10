@@ -4,6 +4,7 @@ import { IconSettings } from '@tabler/icons-react';
 import { useEffect, useState } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
+import { SidePanelProvider } from '@/components/layout/SidePanel';
 import { Topbar } from '@/components/layout/Topbar';
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
 import { SessionChecklist } from '@/components/SessionChecklist';
@@ -23,7 +24,18 @@ import { setCaptureView } from '@/transport/httpClient';
 // the horizontal Stepper. `view` is volatile UI state (free navigation between
 // non-locked stages); it syncs to the persisted FSM step on load/transition but
 // does not itself mutate server state (ADR-0010, spec wizard-navigation).
+//
+// The side panel's fold state lives here too, beside the rail's: one choice for every
+// step, kept while the operator moves between them.
 export function WizardShell() {
+  return (
+    <SidePanelProvider>
+      <WizardShellLayout />
+    </SidePanelProvider>
+  );
+}
+
+function WizardShellLayout() {
   const status = useAppSelector(selectSessionStatus);
   const stages = useAppSelector(selectStages);
   const persistedView = useAppSelector(selectActiveView);

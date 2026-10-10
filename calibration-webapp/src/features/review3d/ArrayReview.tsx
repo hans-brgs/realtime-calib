@@ -252,13 +252,14 @@ export function ArrayReview({
   const [busy, setBusy] = useState(false);
   const [mutateError, setMutateError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
-  // The World-frame controls are a 190px overlay — a third of a phone's 3D view. On
-  // compact they collapse to a corner button and open on demand (ADR-0041); on desktop
-  // they stay pinned open, where the space is free.
+  // The World-frame controls are a 190px overlay over the 3D view, foldable to a corner
+  // button. Folded by default in compact, where they would cover a third of a phone's
+  // view (ADR-0041); open by default on desktop. `null` = the layout's default, until
+  // the operator chooses.
   const compact = useCompactLayout();
-  const [controlsOpen, setControlsOpen] = useState(false);
+  const [controlsOpen, setControlsOpen] = useState<boolean | null>(null);
   const [referenceOpen, setReferenceOpen] = useState(false);
-  const showControls = !compact || controlsOpen;
+  const showControls = controlsOpen ?? !compact;
   // Roomier hit targets once the panel is a deliberate touch surface (ADR-0041).
   const controlSize = compact ? 'sm' : 'compact-xs';
   const maxGroup = Math.max(0, result.group_count - 1);
@@ -393,17 +394,15 @@ export function ArrayReview({
               <Text fz="0.62rem" c="dark.3">
                 World frame
               </Text>
-              {compact && (
-                <ActionIcon
-                  size="sm"
-                  variant="subtle"
-                  color="gray"
-                  aria-label="Hide world-frame controls"
-                  onClick={() => setControlsOpen(false)}
-                >
-                  <IconX size={15} />
-                </ActionIcon>
-              )}
+              <ActionIcon
+                size="sm"
+                variant="subtle"
+                color="gray"
+                aria-label="Hide world-frame controls"
+                onClick={() => setControlsOpen(false)}
+              >
+                <IconX size={15} />
+              </ActionIcon>
             </Group>
             {/* Single framing gesture (ADR-0026): origin on the board + its normal on
                 the up axis, so a floor-laid board lands level in every export. */}
@@ -481,7 +480,7 @@ export function ArrayReview({
             )}
           </Box>
         ) : (
-          // Compact + collapsed: a corner button that gives the 3D view back its space.
+          // Folded: a corner button that gives the 3D view back its space.
           <ActionIcon
             size="lg"
             variant="default"

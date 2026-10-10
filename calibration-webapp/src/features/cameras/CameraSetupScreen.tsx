@@ -25,6 +25,7 @@ import {
 import { type CSSProperties, type ReactNode, useEffect, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
+import { useSidePanel } from '@/components/layout/useSidePanel';
 import {
   captureGridColumns,
   HERO_MEDIA_CEILING,
@@ -259,6 +260,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
   // Same responsive switch as the live CameraGrid: desktop fills the area with a
   // near-square grid (no scroll); phone/portrait scrolls a single column.
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
   const [confirming, setConfirming] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const cameras = [...session.cameras].sort((a, b) => a.index - b.index);
@@ -285,6 +287,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
       style={{ display: 'flex', flexDirection: 'column' }}
     >
       <ScreenHeader
+        panelToggle
         title="Camera Setup"
         subtitle={
           <>
@@ -301,7 +304,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
           gap: 24,
         }}
       >
@@ -353,7 +356,14 @@ function ImportedCameraSetup({ session }: { session: Session }) {
           </Box>
         </Box>
 
-        <Box style={{ display: 'flex', flexDirection: 'column', gap: 18, minWidth: 0 }}>
+        <Box
+          style={{
+            display: panelCollapsed ? 'none' : 'flex',
+            flexDirection: 'column',
+            gap: 18,
+            minWidth: 0,
+          }}
+        >
           <Box>
             <SectionLabel>
               Cameras{' '}
@@ -480,6 +490,7 @@ function LiveCameraSetup() {
   // Backend-served knob defaults/bounds (ADR-0036): fps ladder + resize factors.
   const defaults = useAppSelector(selectDefaults);
   const compact = useCompactLayout();
+  const { collapsed: panelCollapsed } = useSidePanel();
 
   const [prefix, setPrefix] = useState('cam');
   const [resolution, setResolution] = useState<string | null>(null);
@@ -698,6 +709,7 @@ function LiveCameraSetup() {
         </Group>
       </Modal>
       <ScreenHeader
+        panelToggle
         title="Camera Setup"
         subtitle={
           <>
@@ -747,7 +759,7 @@ function LiveCameraSetup() {
           flex: 1,
           minHeight: 0,
           display: 'grid',
-          gridTemplateColumns: captureGridColumns(compact),
+          gridTemplateColumns: captureGridColumns(compact, panelCollapsed),
           gap: 24,
         }}
       >
@@ -762,7 +774,7 @@ function LiveCameraSetup() {
 
         <Box
           style={{
-            display: 'flex',
+            display: panelCollapsed ? 'none' : 'flex',
             flexDirection: 'column',
             gap: 18,
             minWidth: 0,
@@ -770,9 +782,12 @@ function LiveCameraSetup() {
             overflowY: 'auto',
           }}
         >
-          <Box>
+          {/* One card for everything "Apply configuration" writes: the order of the
+              cameras travels in the same request as the capture format, so the two
+              sit together above the button that applies them. */}
+          <Paper p={16} radius="xl" withBorder>
             <SectionLabel>
-              Reorder cameras{' '}
+              Camera order{' '}
               <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
                 · drag · index 0 = anchor
               </Text>
@@ -797,14 +812,15 @@ function LiveCameraSetup() {
                 {detecting ? 'Detecting cameras…' : 'No cameras detected.'}
               </Text>
             )}
-          </Box>
-          <Paper p={16} radius="xl" withBorder>
-            <SectionLabel>
-              Capture configuration{' '}
-              <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
-                · all cameras
-              </Text>
-            </SectionLabel>
+
+            <Box mt={16} pt={14} style={{ borderTop: '1px solid var(--mantine-color-dark-4)' }}>
+              <SectionLabel>
+                Capture format{' '}
+                <Text span c="dark.3" tt="none" style={{ letterSpacing: 0 }} inherit>
+                  · all cameras
+                </Text>
+              </SectionLabel>
+            </Box>
 
             {noCommon ? (
               <Text fz="0.78rem" c="var(--rc-warning)">

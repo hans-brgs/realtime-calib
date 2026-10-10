@@ -924,6 +924,7 @@ export function ExtrinsicScreen() {
       style={{ display: 'flex', flexDirection: 'column' }}
     >
       <ScreenHeader
+        panelToggle
         title="Extrinsics"
         subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
       />
