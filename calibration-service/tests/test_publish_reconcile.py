@@ -5,12 +5,15 @@ from __future__ import annotations
 import asyncio
 import contextlib
 import json
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from calibration_service.capture.camera import CameraOpenError
 from calibration_service.config import LiveKitConfig
+from calibration_service.models.frame import Frame
 from calibration_service.models.session import CameraConfig, SessionMode
 from calibration_service.session.manager import SessionManager
 from calibration_service.transport import camera_publish_service
@@ -415,6 +418,75 @@ def test_a_camera_that_cannot_open_is_reported_and_backs_off(
         # behaviour hammered the device (and the log) every second, forever.
         await service._reconcile_open_set(loop, None, publisher, by_name, open_cams)  # type: ignore[arg-type]
         assert attempts == ["/dev/video4"]
+
+    asyncio.run(scenario())
+
+
+def test_a_configured_camera_at_the_wrong_resolution_is_refused(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The requested mode is only a driver hint: a configured 1080p camera that
+    # streams 720p would have recorded an mkv of zero decodable frames behind a
+    # manifest counting them all (cv2.VideoWriter drops wrong-size frames).
+    class _Camera720p:
+        released = False
+
+        def read(self) -> Frame:
+            return Frame(0, 1, 0.0, np.zeros((720, 1280, 3), np.uint8))
+
+        def release(self) -> None:
+            self.released = True
+
+    camera = _Camera720p()
+    monkeypatch.setattr(camera_publish_service, "open_camera", lambda *_a, **_k: camera)
+
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        loop = asyncio.get_running_loop()
+        target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30, configured=True)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            opened = await service._start_capture(loop, executor, _FakeLivePublisher(), target)  # type: ignore[arg-type]
+        assert opened is None
+        assert camera.released
+        state = service._health.snapshot(loop.time())["cam_0"]
+        assert state["state"] == "error"
+        assert "delivers 1280x720, not the configured 1920x1080" in str(state["reason"])
+
+    asyncio.run(scenario())
+
+
+def test_a_configured_camera_at_its_resolution_goes_live(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Positive control of the resolution check: a (w, h) / (h, w) mix-up would
+    # pass the refusal test above and refuse every non-square camera on the rig.
+    class _Camera1080p:
+        released = False
+
+        def read(self) -> Frame:
+            return Frame(0, 1, 0.0, np.zeros((1080, 1920, 3), np.uint8))
+
+        def release(self) -> None:
+            self.released = True
+
+    class _DisconnectedPublisher(_FakeLivePublisher):
+        def is_disconnected(self) -> bool:
+            return True  # the capture loop returns at once
+
+    camera = _Camera1080p()
+    monkeypatch.setattr(camera_publish_service, "open_camera", lambda *_a, **_k: camera)
+
+    async def scenario() -> None:
+        service = _service(tmp_path)
+        loop = asyncio.get_running_loop()
+        target = _PublishTarget("cam_0", 0, "/dev/video0", 1920, 1080, 30, configured=True)
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            service._capture_executor = executor
+            opened = await service._start_capture(loop, executor, _DisconnectedPublisher(), target)  # type: ignore[arg-type]
+            assert opened is not None
+            assert service._health.snapshot(loop.time())["cam_0"]["state"] == "live"
+            await opened[1]  # the loop ends (disconnected) and releases in its finally
+        assert camera.released
 
     asyncio.run(scenario())
 

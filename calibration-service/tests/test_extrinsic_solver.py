@@ -774,3 +774,14 @@ def test_solve_reports_rigidity_and_reprojection_stays_reprojection_only() -> No
     # Exact synthetic data: both the residuals and the board shape are satisfied.
     assert overall < 0.1
     assert rigidity_mm(points, tri.point_group, tri.point_corner, MARKER_BOARD) < 0.1
+
+
+def test_stereo_failure_is_reported_as_unusable_input(monkeypatch: pytest.MonkeyPatch) -> None:
+    # A cv2.error out of stereoCalibrate (degenerate shared views) is a property of
+    # the sweep: a ValueError naming the pair (-> 422), not an HTTP 500.
+    def _assert_fails(*_args: object, **_kwargs: object) -> None:
+        raise cv2.error("(-215:Assertion failed) degenerate views")
+
+    monkeypatch.setattr(cv2, "stereoCalibrate", _assert_fails)
+    with pytest.raises(ValueError, match="stereo calibration failed for cam_0-cam_1"):
+        stereo_pairwise(_groups(), BOARD, min_shared=3)

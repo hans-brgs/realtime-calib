@@ -299,7 +299,8 @@ def calibrate_intrinsic(
 ) -> IntrinsicResult:
     """Calibrate camera intrinsics from retained ChArUco detections.
 
-    Raises ``ValueError`` for a non-ChArUco board or too few usable views.
+    Raises ``ValueError`` for a non-ChArUco board, too few usable views, or an
+    OpenCV solver failure on them.
     """
     if board.board_type is not BoardType.CHARUCO:
         raise ValueError("intrinsic calibration requires a ChArUco board")
@@ -331,9 +332,15 @@ def calibrate_intrinsic(
     guess = guessed_camera_matrix(width, height)
     # distCoeffs=None is valid at runtime (OpenCV allocates it); the cv2 stub types
     # it as required, hence the ignore.
-    result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
-        object_points, image_points, (width, height), guess, None, flags=_CALIB_FLAGS
-    )
+    try:
+        result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
+            object_points, image_points, (width, height), guess, None, flags=_CALIB_FLAGS
+        )
+    except cv2.error as exc:
+        # The solver's own assertions (degenerate views the gates above missed)
+        # are a property of the sweep, not a service fault: report them like the
+        # other unusable-input cases (ValueError -> 422) instead of a bare 500.
+        raise ValueError(f"OpenCV calibration failed on these views: {exc}") from exc
     rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]

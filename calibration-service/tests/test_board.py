@@ -169,6 +169,49 @@ def test_board_config_fails_loud_on_missing_required_key(tmp_path: Path) -> None
     assert "square_size_mm" in issues[0]
 
 
+@pytest.mark.parametrize(
+    "bad",
+    [
+        {"square_size_mm": -40.0, "marker_size_mm": -50.0},
+        {"square_size_mm": 0.0, "marker_size_mm": -1.0},
+        {"square_size_mm": 40.0, "marker_size_mm": 0.0},
+        {"square_size_mm": float("nan"), "marker_size_mm": 30.0},
+    ],
+)
+def test_validate_rejects_non_positive_charuco_sizes(bad: dict[str, float]) -> None:
+    # The ordering check alone (marker < square) let -40/-50 through: a negative
+    # scale mirrors the exported world (det -1); a nan passed every comparison.
+    with pytest.raises(ValueError, match="> 0"):
+        validate_board(_charuco(**bad))
+
+
+def test_validate_counts_markers_like_opencv(monkeypatch: pytest.MonkeyPatch) -> None:
+    # cv2.aruco.CharucoBoard places floor(c*r/2) markers (5x7 -> 17), not ceil.
+    # The 100-id dictionaries never hit the difference within the API bounds,
+    # hence a dictionary holding exactly 17.
+    cv_board = cv2.aruco.CharucoBoard(
+        (5, 7), 1.0, 0.75, cv2.aruco.getPredefinedDictionary(cv2.aruco.DICT_4X4_100)
+    )
+    assert len(cv_board.getIds()) == 17
+    monkeypatch.setattr("calibration_service.board.validate.dictionary_capacity", lambda _: 17)
+    validate_board(_charuco(columns=5, rows=7))
+
+
+def test_board_config_validates_loaded_boards(tmp_path: Path) -> None:
+    # A hand-edited config.toml used to reload a board POST /board would refuse.
+    save_board_config(tmp_path, "demo", _charuco(), _charuco(square_size_mm=40.0))
+    path = tmp_path / "demo" / "config.toml"
+    path.write_text(
+        path.read_text()
+        .replace("square_size_mm = 40.0", "square_size_mm = -40.0")
+        .replace("marker_size_mm = 30.0", "marker_size_mm = -50.0")
+    )
+    intrinsic, extrinsic, _inherited, issues = load_board_config(tmp_path, "demo")
+    assert intrinsic is not None  # the intrinsic block is untouched and valid
+    assert extrinsic is None
+    assert len(issues) == 1 and "> 0" in issues[0]
+
+
 def test_session_load_surfaces_board_issues(tmp_path: Path) -> None:
     # End to end: a corrupt board block -> SessionOut.issues names the boards step,
     # the board reads unconfigured, and a fresh definition clears the issue.

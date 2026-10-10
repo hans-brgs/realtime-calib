@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from calibration_service.app import create_app
@@ -39,6 +40,36 @@ def test_store_survives_a_corrupt_file(tmp_path: Path) -> None:
     (tmp_path / "settings.toml").write_text("not [valid { toml")
     store = SettingsStore(tmp_path)
     assert store.current == RuntimeSettings()  # TUNING defaults, no crash
+
+
+@pytest.mark.parametrize(
+    "content",
+    [
+        'record_quality = "high"',  # wrong type: used to raise out of create_app
+        "record_quality = 500",  # outside the bounds PUT /settings enforces
+        "record_quality = 95\npreview_fps = 0",
+    ],
+)
+def test_store_falls_back_on_unusable_values(tmp_path: Path, content: str) -> None:
+    (tmp_path / "settings.toml").write_text(content)
+    assert SettingsStore(tmp_path).current == RuntimeSettings()
+
+
+def test_failed_write_keeps_previous_settings(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    store = SettingsStore(tmp_path)
+    store.replace(RuntimeSettings(record_quality=90, preview_fps=15))
+
+    def _disk_full(*_args: object, **_kwargs: object) -> None:
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr("calibration_service.settings.atomic_write_text", _disk_full)
+    with pytest.raises(OSError):
+        store.replace(RuntimeSettings(record_quality=99, preview_fps=None))
+    # Neither adopted live nor lost on disk.
+    assert store.current == RuntimeSettings(record_quality=90, preview_fps=15)
+    assert SettingsStore(tmp_path).current == RuntimeSettings(record_quality=90, preview_fps=15)
 
 
 def _client(tmp_path: Path) -> TestClient:

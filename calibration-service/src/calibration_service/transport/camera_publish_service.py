@@ -216,6 +216,9 @@ class _PublishTarget:
     width: int
     height: int
     fps: int
+    # A session camera (its resolution is a contract: recordings, intrinsics and
+    # exports are sized from it) rather than a detected one shown for identification.
+    configured: bool = False
 
 
 class CameraPublishService:
@@ -500,7 +503,9 @@ class CameraPublishService:
             return []
         if session.cameras:
             return [
-                _PublishTarget(c.name, c.index, c.device_node, c.width, c.height, c.fps)
+                _PublishTarget(
+                    c.name, c.index, c.device_node, c.width, c.height, c.fps, configured=True
+                )
                 for c in session.cameras
             ]
         # Not configured yet: publish detected cameras for identification.
@@ -720,7 +725,21 @@ class CameraPublishService:
             camera.release()
             self._report_failure(target.name, "opened but produced no frame", loop.time())
             return None
-        size = _preview_size(first.image.shape[1], first.image.shape[0])
+        height, width = first.image.shape[:2]
+        if target.configured and (width, height) != (target.width, target.height):
+            # The requested mode is only a hint to the driver. A configured camera
+            # streaming another size would record frames the writer cannot take
+            # (it refuses them) and calibrate a resolution the session does not
+            # describe — refuse it visibly instead.
+            camera.release()
+            self._report_failure(
+                target.name,
+                f"delivers {width}x{height}, not the configured "
+                f"{target.width}x{target.height} — pick a mode the camera supports",
+                loop.time(),
+            )
+            return None
+        size = _preview_size(width, height)
         publisher.push(target.name, _downscale(first.image, size))
         publisher.unmute(target.name)  # first frame ready before unmuting (#449)
         task = asyncio.create_task(

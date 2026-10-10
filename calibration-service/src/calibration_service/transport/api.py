@@ -1,4 +1,4 @@
-"""HTTP API: session rehydration + camera detection/configuration (Phase 1).
+"""HTTP API of the calibration service: session, cameras, boards, computes, export.
 
 Mounted at the service root; Caddy strips the ``/api`` prefix (ADR-0014).
 """
@@ -15,7 +15,7 @@ import zipfile
 from dataclasses import asdict, replace
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 import numpy as np
 import rtoml
@@ -23,6 +23,7 @@ from fastapi import APIRouter, Form, HTTPException, Query, Request, Response, Up
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 
+from calibration_service.atomic_io import atomic_write_text, replace_directory
 from calibration_service.board import SUPPORTED_DICTIONARIES, render_board_png, validate_board
 from calibration_service.calibration import (
     BAInputs,
@@ -63,6 +64,8 @@ from calibration_service.session.manager import SessionManager
 from calibration_service.settings import RuntimeSettings, SettingsStore
 from calibration_service.transport.camera_publish_service import CameraPublishService
 from calibration_service.tuning import TUNING
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter()
 
@@ -352,6 +355,37 @@ def get_manager(request: Request) -> SessionManager:
     return manager
 
 
+def _require_camera(session: CalibrationSession, camera: str) -> CameraConfig:
+    """The session camera named ``camera``, or 404 — before any work is done.
+
+    A path segment from the client is never trusted to name a camera: an unknown
+    one used to run a whole intrinsic compute and only fail when storing the
+    result (an unhandled ValueError -> 500).
+    """
+    found = next((c for c in session.cameras if c.name == camera), None)
+    if found is None:
+        raise HTTPException(status_code=404, detail=f"unknown camera {camera!r}")
+    return found
+
+
+# Any: a JSON object's values are untyped until a dataclass or the route reads them.
+def _read_json(path: Path) -> dict[str, Any]:
+    """A persisted JSON payload; an unreadable one is a 422 naming the file.
+
+    These files are written by the service itself, so a parse error means a
+    truncated or hand-edited file — answer what to do, not a bare 500.
+    """
+    try:
+        payload = json.loads(path.read_text())
+    except ValueError as exc:  # JSONDecodeError, UnicodeDecodeError
+        raise HTTPException(
+            status_code=422, detail=f"{path.name} is unreadable ({exc}) — recompute"
+        ) from exc
+    if not isinstance(payload, dict):
+        raise HTTPException(status_code=422, detail=f"{path.name} is not a JSON object — recompute")
+    return payload
+
+
 def get_publish_service(request: Request) -> CameraPublishService | None:
     service = getattr(request.app.state, "publish_service", None)
     return service if isinstance(service, CameraPublishService) else None
@@ -576,7 +610,7 @@ async def start_intrinsic(request: Request, camera: str) -> dict[str, object]:
         raise HTTPException(status_code=503, detail="capture service unavailable")
     # Surface "no active session" as the uniform 409 (ADR-0028) BEFORE the broad
     # except below, which would otherwise mask NoActiveSessionError as a 422.
-    get_manager(request).current()
+    _require_camera(get_manager(request).current(), camera)
     try:
         await service.start_intrinsic_recording(camera)
     except (ValueError, RuntimeError) as exc:
@@ -620,7 +654,9 @@ def _preview_status_out(status: PreviewStatus) -> dict[str, object]:
 @router.get("/intrinsic/{camera}/preview")
 async def intrinsic_preview(request: Request, camera: str) -> FileResponse:
     """The CFR-retimed H.264 preview of the recorded sweep (ADR-0027)."""
-    path = preview_path(get_manager(request).intrinsic_video_path(camera))
+    manager = get_manager(request)
+    _require_camera(manager.current(), camera)
+    path = preview_path(manager.intrinsic_video_path(camera))
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no preview for {camera}")
     return FileResponse(path, media_type="video/mp4")
@@ -629,14 +665,18 @@ async def intrinsic_preview(request: Request, camera: str) -> FileResponse:
 @router.get("/intrinsic/{camera}/preview/status")
 async def intrinsic_preview_status(request: Request, camera: str) -> dict[str, object]:
     """Transcode state (auto-enqueues a missing preview when the source exists)."""
-    source = get_manager(request).intrinsic_video_path(camera)
+    manager = get_manager(request)
+    _require_camera(manager.current(), camera)
+    source = manager.intrinsic_video_path(camera)
     return _preview_status_out(await get_preview_jobs(request).status(source))
 
 
 @router.post("/intrinsic/{camera}/preview/transcode")
 async def intrinsic_preview_retry(request: Request, camera: str) -> dict[str, object]:
     """Explicitly relaunch a failed transcode (webapp Retry button)."""
-    source = get_manager(request).intrinsic_video_path(camera)
+    manager = get_manager(request)
+    _require_camera(manager.current(), camera)
+    source = manager.intrinsic_video_path(camera)
     jobs = get_preview_jobs(request)
     jobs.retry(source)
     return _preview_status_out(await jobs.status(source))
@@ -673,6 +713,7 @@ async def compute_intrinsic(
     """
     params = body or ComputeRequest()
     manager = get_manager(request)
+    _require_camera(manager.current(), camera)
     board = manager.current().intrinsic_board
     if board is None:
         raise HTTPException(status_code=422, detail="no intrinsic board defined")
@@ -716,9 +757,7 @@ async def compute_intrinsic(
         "sharpness_min": result.sharpness_min,
         "sharpness_median": result.sharpness_median,
     }
-    metrics_path = manager.intrinsic_metrics_path(camera)
-    metrics_path.parent.mkdir(parents=True, exist_ok=True)
-    metrics_path.write_text(json.dumps(metrics))
+    atomic_write_text(manager.intrinsic_metrics_path(camera), json.dumps(metrics))
     return _session_out(session, manager)
 
 
@@ -745,11 +784,12 @@ async def intrinsic_metrics(request: Request, camera: str) -> dict[str, object]:
     fraction, orientation_bins: /8, board_quads: per-keyframe 4x3 board outline in
     camera coords, sharpness_min/median: retained-keyframe sharpness (ADR-0038)}``.
     """
-    path = get_manager(request).intrinsic_metrics_path(camera)
+    manager = get_manager(request)
+    _require_camera(manager.current(), camera)
+    path = manager.intrinsic_metrics_path(camera)
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no metrics for {camera}")
-    payload: dict[str, object] = json.loads(path.read_text())
-    return payload
+    return _read_json(path)
 
 
 @router.post("/extrinsic/start")
@@ -943,9 +983,9 @@ async def compute_extrinsic(
     # (ADR-0042). ba_inputs stay native — they are solver-domain data.
     result = _output_scaled_errors(result, session)
     session = manager.set_extrinsic_result(result)
-    (directory / "result.json").write_text(json.dumps(asdict(result)))
+    atomic_write_text(directory / "result.json", json.dumps(asdict(result)))
     # BA observations: lets Minimize refine later without redetecting the videos.
-    (directory / "ba_inputs.json").write_text(json.dumps(asdict(ba_inputs)))
+    atomic_write_text(directory / "ba_inputs.json", json.dumps(asdict(ba_inputs)))
     return _session_out(session, manager)
 
 
@@ -955,8 +995,7 @@ async def extrinsic_result(request: Request) -> dict[str, object]:
     path = get_manager(request).extrinsic_dir() / "result.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
-    payload: dict[str, object] = json.loads(path.read_text())
-    return payload
+    return _read_json(path)
 
 
 class OrientRequest(BaseModel):
@@ -978,12 +1017,17 @@ def _load_extrinsic_result(manager: SessionManager) -> ExtrinsicResult:
     path = manager.extrinsic_dir() / "result.json"
     if not path.is_file():
         raise HTTPException(status_code=404, detail="no extrinsic result")
-    return ExtrinsicResult(**json.loads(path.read_text()))
+    try:
+        return ExtrinsicResult(**_read_json(path))
+    except TypeError as exc:  # unknown or missing key: a payload of another schema
+        raise HTTPException(
+            status_code=422, detail=f"result.json is unreadable ({exc}) — recompute"
+        ) from exc
 
 
 def _store_extrinsic_result(manager: SessionManager, result: ExtrinsicResult) -> None:
     manager.set_extrinsic_result(result)
-    (manager.extrinsic_dir() / "result.json").write_text(json.dumps(asdict(result)))
+    atomic_write_text(manager.extrinsic_dir() / "result.json", json.dumps(asdict(result)))
 
 
 @router.post("/extrinsic/orient")
@@ -1043,7 +1087,12 @@ async def minimize_extrinsic(request: Request) -> dict[str, object]:
     ba_path = manager.extrinsic_dir() / "ba_inputs.json"
     if not ba_path.is_file():
         raise HTTPException(status_code=404, detail="no BA observations (recompute first)")
-    ba_inputs = BAInputs(**json.loads(ba_path.read_text()))
+    try:
+        ba_inputs = BAInputs(**_read_json(ba_path))
+    except TypeError as exc:  # unknown or missing key: a payload of another schema
+        raise HTTPException(
+            status_code=422, detail=f"ba_inputs.json is unreadable ({exc}) — recompute"
+        ) from exc
     models = [_native_camera_model(c) for c in session.cameras if c.matrix is not None]
     anchor = min(session.cameras, key=lambda c: c.index)
 
@@ -1165,13 +1214,17 @@ async def extrinsic_preview_retry(request: Request) -> dict[str, object]:
 @router.get("/extrinsic/{camera}/preview")
 async def extrinsic_preview(request: Request, camera: str) -> FileResponse:
     """One camera's CFR-retimed H.264 preview of the sweep (ADR-0027)."""
-    path = preview_path(get_manager(request).extrinsic_dir() / f"{camera}.mkv")
+    manager = get_manager(request)
+    _require_camera(manager.current(), camera)
+    path = preview_path(manager.extrinsic_dir() / f"{camera}.mkv")
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"no preview for {camera}")
     return FileResponse(path, media_type="video/mp4")
 
 
-_EXPORT_TARGET_IDS = {"caliscope", *PLATFORM_FORMATS}
+_EXPORT_TARGET_IDS = frozenset({"caliscope", *PLATFORM_FORMATS})
+# The export units the writers accept (TUNING.export_units_options, ADR-0026).
+ExportUnits = Literal["mm", "m"]
 
 
 class ExportRequest(BaseModel):
@@ -1181,7 +1234,7 @@ class ExportRequest(BaseModel):
 
     formats: list[str] = []
     # None = the session's persisted preference (seeded from TUNING at creation).
-    units: Literal["mm", "m"] | None = None
+    units: ExportUnits | None = None
 
 
 def _export_board(session: CalibrationSession) -> CalibrationBoard:
@@ -1220,22 +1273,24 @@ async def export_calibration(request: Request, body: ExportRequest) -> dict[str,
     if not body.formats:
         raise HTTPException(status_code=422, detail="select at least one artifact")
 
-    directory = manager.export_dir()
-    directory.mkdir(parents=True, exist_ok=True)
     square = board_unit_mm(board)  # square side (ChArUco) or marker side (ArUco)
     units = body.units if body.units is not None else session.export_units
     selected = set(body.formats)
+    contents: dict[str, str] = {}
     files: list[dict[str, object]] = []
     for target in export_targets():  # catalog order, stable output
         if target.id not in selected:
             continue
-        _language, content = _render_target(session, target.id, square, units)
-        (directory / target.filename).write_text(content)
+        _, contents[target.filename] = _render_target(session, target.id, square, units)
         files.append({"name": target.filename, "convention": target.label})
+    # The folder holds exactly THIS export (the archive zips it whole): writing
+    # into it file by file kept a previous selection's artefacts — a mm TOML
+    # shipped next to a fresh m JSON.
+    replace_directory(manager.export_dir(), contents)
 
     manager.set_export_config(units, body.formats)
     manager.mark_exported()
-    logging.getLogger(__name__).info("exported: %s", ", ".join(str(f["name"]) for f in files))
+    logger.info("exported: %s", ", ".join(contents))
     return {"files": files}
 
 
@@ -1249,7 +1304,7 @@ class ExportPreviewRequest(BaseModel):
     """Dry-run preview: render the selected targets' content without writing."""
 
     formats: list[str] = []
-    units: Literal["mm", "m"] | None = None  # None = session preference
+    units: ExportUnits | None = None  # None = session preference
 
 
 @router.post("/export/preview")
@@ -1277,7 +1332,7 @@ class ExportConfigRequest(BaseModel):
     """
 
     formats: list[str] = []
-    units: Literal["mm", "m"]
+    units: ExportUnits
 
 
 @router.post("/export/config", response_model=SessionOut)

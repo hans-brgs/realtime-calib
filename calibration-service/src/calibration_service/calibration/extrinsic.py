@@ -344,18 +344,23 @@ def stereo_pairwise(
 
             identity = np.eye(3)
             zeros = np.zeros(5)
-            result = cv2.stereoCalibrate(  # type: ignore[call-overload]
-                object_points,
-                points_a,
-                points_b,
-                identity,
-                zeros,
-                identity,
-                zeros,
-                None,  # imageSize: unused under CALIB_FIX_INTRINSIC (normalized pts)
-                criteria=_STEREO_CRITERIA,
-                flags=cv2.CALIB_FIX_INTRINSIC,
-            )
+            try:
+                result = cv2.stereoCalibrate(  # type: ignore[call-overload]
+                    object_points,
+                    points_a,
+                    points_b,
+                    identity,
+                    zeros,
+                    identity,
+                    zeros,
+                    None,  # imageSize: unused under CALIB_FIX_INTRINSIC (normalized pts)
+                    criteria=_STEREO_CRITERIA,
+                    flags=cv2.CALIB_FIX_INTRINSIC,
+                )
+            except cv2.error as exc:
+                # Degenerate shared views are a property of the sweep: report them
+                # as unusable input (ValueError -> 422), naming the pair.
+                raise ValueError(f"stereo calibration failed for {cam_a}-{cam_b}: {exc}") from exc
             rmse, _, _, _, _, rotation, translation = result[:7]
             pairs[(cam_a, cam_b)] = PairEstimate(
                 rotation=np.asarray(rotation, np.float64),

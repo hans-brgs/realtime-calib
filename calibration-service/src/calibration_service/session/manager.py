@@ -1,7 +1,7 @@
-"""Owns the current calibration session in memory and persists it (ADR-0011).
+"""Owns the active calibration session in memory and persists it (ADR-0011).
 
-Phase 1: a single active session (``default``). Loaded from disk on first
-access if present, else created. Mutations are persisted immediately.
+No session is active until the operator creates or opens one (ADR-0028); the
+active one is held in memory and every mutation is persisted immediately.
 """
 
 from __future__ import annotations
@@ -35,6 +35,7 @@ from calibration_service.session.store import (
     session_dir,
     session_mtime,
 )
+from calibration_service.tuning import TUNING
 
 logger = logging.getLogger(__name__)
 
@@ -130,60 +131,87 @@ class SessionManager:
         return session
 
     def open(self, session_id: str) -> CalibrationSession:
-        """Make an existing session the active one (ADR-0028); refuses if absent."""
+        """Make an existing session the active one (ADR-0028); refuses if absent.
+
+        The session is loaded BEFORE it becomes active: an unreadable one raises
+        (``ValueError`` -> 422) and the previously active session stays active —
+        never a manager pointed at a session every later route fails to load.
+        """
         sid = validate_session_id(session_id)
         if not (session_dir(self._sessions_dir, sid) / SESSION_FILE).is_file():
             raise FileNotFoundError(f"session {sid!r} not found")
+        session = self._load(sid)
         self._session_id = sid
-        self._session = None  # lazy reload (+ boards) through current()
+        self._session = session
         logger.info("activated session %s", sid)
-        return self.current()
+        return session
 
     def current_or_none(self) -> CalibrationSession | None:
         """The active session, or ``None`` when none is active (ADR-0028).
 
         Loads from disk on first access; an explicit id pointing at a missing
         folder is auto-created (test convenience — production never does this).
-        Boards live in ``config.toml`` and are merged into the session on load.
         """
         if self._session_id is None:
             return None
         if self._session is None:
             exists = (session_dir(self._sessions_dir, self._session_id) / SESSION_FILE).is_file()
             if exists:
-                session = load_session(self._sessions_dir, self._session_id)
-                intrinsic, extrinsic, inherited, problems = load_board_config(
-                    self._sessions_dir, self._session_id
-                )
-                # Legacy sessions may carry a single-ArUco intrinsic board; the
-                # intrinsic solve is ChArUco-only (rejected at POST /board since
-                # ADR-0036) — fail loud instead of failing after a whole sweep.
-                if intrinsic is not None and intrinsic.board_type is not BoardType.CHARUCO:
-                    problems.append(
-                        "the intrinsic board is a single ArUco marker (extrinsic-only)"
-                        " — reconfigure it as a ChArUco board"
-                    )
-                    intrinsic = None
-                # No extrinsic block on a session that claims Target Config is
-                # done: sessions written before ADR-0045 inherited by fallback,
-                # which is gone. Fail loud rather than calibrate on a metric
-                # scale nobody entered — the operator revisits the step, and the
-                # block is materialized on the way through.
-                if extrinsic is None and session.step not in _BOARDS_PENDING:
-                    problems.append(
-                        "no extrinsic board defined — revisit Target Config to set the"
-                        " board and its measured size"
-                    )
-                session.intrinsic_board = intrinsic
-                session.extrinsic_board = extrinsic
-                session.extrinsic_inherited = inherited
-                session.issues = [SessionIssue(step="boards", message=m) for m in problems]
-                for issue in session.issues:
-                    logger.warning("session issue: %s", issue.message)
+                self._session = self._load(self._session_id)
             else:
-                session = create_session(self._sessions_dir, self._session_id)
-            self._session = session
+                self._session = create_session(self._sessions_dir, self._session_id)
         return self._session
+
+    def _load(self, session_id: str) -> CalibrationSession:
+        """Read a session from disk with its boards merged in and its issues listed.
+
+        Boards live in ``config.toml``. Recoverable anomalies (ADR-0036 fail-loud)
+        become ``issues`` the webapp surfaces on the stage to revisit; an
+        unreadable ``session.toml`` raises ``ValueError``.
+        """
+        try:
+            session = load_session(self._sessions_dir, session_id)
+        except (KeyError, TypeError, ValueError) as exc:  # TomlParsingError is a ValueError
+            raise ValueError(f"session {session_id!r} is unreadable: {exc}") from exc
+        intrinsic, extrinsic, inherited, problems = load_board_config(
+            self._sessions_dir, session_id
+        )
+        # Legacy sessions may carry a single-ArUco intrinsic board; the intrinsic
+        # solve is ChArUco-only (rejected at POST /board since ADR-0036) — fail
+        # loud instead of failing after a whole sweep.
+        if intrinsic is not None and intrinsic.board_type is not BoardType.CHARUCO:
+            problems.append(
+                "the intrinsic board is a single ArUco marker (extrinsic-only)"
+                " — reconfigure it as a ChArUco board"
+            )
+            intrinsic = None
+        # No extrinsic block on a session that claims Target Config is done:
+        # sessions written before ADR-0045 inherited by fallback, which is gone.
+        # Fail loud rather than calibrate on a metric scale nobody entered — the
+        # operator revisits the step, and the block is materialized on the way.
+        if extrinsic is None and session.step not in _BOARDS_PENDING:
+            problems.append(
+                "no extrinsic board defined — revisit Target Config to set the"
+                " board and its measured size"
+            )
+        session.intrinsic_board = intrinsic
+        session.extrinsic_board = extrinsic
+        session.extrinsic_inherited = inherited
+        session.issues = [SessionIssue(step="boards", message=m) for m in problems]
+        if session.export_units not in TUNING.export_units_options:
+            # A unit the writers cannot honour (hand-edited file): fall back to the
+            # default the operator sees and can change, and say so.
+            session.issues.append(
+                SessionIssue(
+                    step="export",
+                    message=f"unknown export units {session.export_units!r} in session.toml"
+                    f" — reset to {TUNING.export_units!r}, check the Export step",
+                )
+            )
+            session.export_units = TUNING.export_units
+        for issue in session.issues:
+            logger.warning("session issue: %s", issue.message)
+        return session
 
     def current(self) -> CalibrationSession:
         """The active session, raising ``NoActiveSessionError`` when none is active."""
@@ -321,6 +349,9 @@ class SessionManager:
         session.export_units = units
         session.export_targets = list(targets)
         save_session(self._sessions_dir, session)
+        # An explicit choice resolves the load-time unit anomaly, like a fresh
+        # board definition clears the board ones (the webapp drops the alert).
+        session.issues = [issue for issue in session.issues if issue.step != "export"]
         return session
 
     def begin_extrinsic_capture(self) -> CalibrationSession:
