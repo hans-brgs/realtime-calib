@@ -28,6 +28,7 @@ import { screenHeight, useCompactLayout } from '@/components/layout/useCompactLa
 import { PhaseStepper } from '@/components/PhaseStepper';
 import { RecordingBadge } from '@/components/RecordingBadge';
 import { ScreenHeader } from '@/components/ScreenHeader';
+import { outputDimensions } from '@/features/cameras/captureOptions';
 import { CaptureWizardLayout } from '@/features/capture/CaptureWizardLayout';
 import { TranscodePreparingModal } from '@/features/capture/TranscodePreparingModal';
 import { useCaptureWizard } from '@/features/capture/useCaptureWizard';
@@ -208,6 +209,7 @@ function ResultPanel({
 }) {
   const coveragePct = metrics ? Math.round(metrics.image_coverage * 100) : null;
   const bins = metrics?.orientation_bins ?? null;
+  const output = outputDimensions(camera.width, camera.height, camera.resize_factor);
   return (
     <>
       <Text
@@ -334,9 +336,10 @@ function ResultPanel({
         </Text>
       </Group>
       <Text fz="0.66rem" c="dark.3" mt="md">
-        Calibrated at {camera.width * camera.resize_factor}×{camera.height * camera.resize_factor}
+        {/* The size the export declares (the service's rounding), not s x native. */}
+        Exported at {output.width}×{output.height}
         {camera.resize_factor !== 1
-          ? ` (native ${camera.width}×${camera.height}, ×${camera.resize_factor})`
+          ? ` (calibrated at native ${camera.width}×${camera.height}, ×${camera.resize_factor})`
           : ''}
       </Text>
     </>

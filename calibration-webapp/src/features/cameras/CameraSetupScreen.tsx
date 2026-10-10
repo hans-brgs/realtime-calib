@@ -849,8 +849,9 @@ function LiveCameraSetup() {
                       <InfoPopover label="About the resize factor">
                         Calibration always runs at the camera&apos;s native resolution, where there
                         is the most detail to measure. The factor only sizes what leaves the app:
-                        the exported intrinsics are scaled with it (K_out = s·K), and every error
-                        this app reports is expressed at that output resolution.
+                        the exported intrinsics are mapped to the output size, pixel centres
+                        included, and every error this app reports is expressed at that output
+                        resolution.
                         <br />
                         <br />
                         So s trades file size and downstream cost against resolution — never
@@ -946,7 +947,7 @@ function LiveCameraSetup() {
               />
               {/* Only the destructive consequence stays always-on — it is the one
                   thing here that changes what the operator does next. The native/
-                  K_out = s·K rationale moved to the resize factor's own popover,
+                  output-intrinsics rationale moved to the resize factor's own popover,
                   next to the control it explains. */}
               <Text fz="0.66rem" c="dark.3" style={{ lineHeight: 1.5 }}>
                 Applying a changed configuration rebuilds the cameras — completed calibrations are

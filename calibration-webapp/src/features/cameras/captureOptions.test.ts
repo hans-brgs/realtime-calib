@@ -78,8 +78,10 @@ describe('captureOptions', () => {
     expect(outputDimensions(1920, 1080, 1 / 3)).toEqual({ width: 640, height: 360 });
     // 1280x720 * 0.5 = 640x360.
     expect(outputDimensions(1280, 720, 0.5)).toEqual({ width: 640, height: 360 });
-    // odd intermediate rounds up to even.
-    expect(outputDimensions(1280, 722, 0.5).height % 2).toBe(0);
+    // The export's own size, odd or not: 1280x720 at 1/3 is 427x240.
+    expect(outputDimensions(1280, 720, 1 / 3)).toEqual({ width: 427, height: 240 });
+    // A tie goes to the even neighbour, like the service's round().
+    expect(outputDimensions(1281, 722, 0.5)).toEqual({ width: 640, height: 361 });
   });
 
   it('default capture picks the largest common resolution and its top fps', () => {
