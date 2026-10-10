@@ -138,15 +138,19 @@ def _charuco_outline(
 
 
 def guessed_camera_matrix(width: int, height: int) -> NDArray[np.float64]:
-    """A rough pinhole K (focal ≈ frame width, ~52° HFOV) when none is known yet.
+    """A rough pinhole K when none is known yet: Caliscope v0.11.5's seed (ADR-0053).
 
-    ONE definition for both users (ADR-0036 — it used to exist twice): the live
-    tilt metric's pre-calibration PnP (approximate but monotonic, enough to guide
-    the operator) and the intrinsic solve's CALIB_USE_INTRINSIC_GUESS seed. The
-    tilt is recomputed exactly at compute time with the real intrinsics.
+    Focal = the longer image side (~53° HFOV on a landscape frame), principal point
+    at the image centre in pixel-centre coordinates. ONE definition for both users
+    (ADR-0036 — it used to exist twice): the live tilt metric's pre-calibration PnP
+    (approximate but monotonic, enough to guide the operator) and the intrinsic
+    solve's CALIB_USE_INTRINSIC_GUESS seed. The tilt is recomputed exactly at
+    compute time with the real intrinsics.
     """
-    f = float(width)
-    return np.array([[f, 0.0, width / 2], [0.0, f, height / 2], [0.0, 0.0, 1.0]], np.float64)
+    f = float(max(width, height))
+    return np.array(
+        [[f, 0.0, (width - 1) / 2], [0.0, f, (height - 1) / 2], [0.0, 0.0, 1.0]], np.float64
+    )
 
 
 def _tilt_deg(

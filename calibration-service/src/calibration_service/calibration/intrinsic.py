@@ -9,8 +9,10 @@ solver:
   cell, no absolute blur gate — ADR-0038). Coverage/diversity is maximised, not
   the frame count.
 - ``calibrate_intrinsic`` — run ``cv2.calibrateCameraExtended`` on the retained
-  views (classic 5-coefficient model, seeded guess — real Caliscope parity,
-  ADR-0032), exposing ``perViewErrors`` for outlier rejection.
+  views (classic 5-coefficient model — real Caliscope parity, ADR-0032; solved
+  from Caliscope v0.11.5's seed, OpenCV's own initialisation standing in when
+  that solve fails — ADR-0053), exposing
+  ``perViewErrors`` for outlier rejection.
 
 Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 ``board.matchImagePoints`` (ChArUco corners → object/image points) then
@@ -19,10 +21,11 @@ Modern OpenCV (>= 4.7) removed ``calibrateCameraCharuco``; the path is
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Iterator
 from dataclasses import dataclass, replace
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -35,10 +38,11 @@ from calibration_service.resolution import output_size, to_output
 
 # Real Caliscope parity (ADR-0032, verified against caliscope source): plain
 # cv2.calibrateCamera with NO model flags — classic 5-coefficient distortion
-# [k1,k2,p1,p2,k3], free aspect ratio. Only the guess seed is kept (validated on
-# the home_calib dataset: per-camera coefficients become consistent, extrinsic
-# RMSE unchanged). The former RATIONAL_MODEL+FIX_ASPECT anchor was not grounded
-# in caliscope code and produced degenerate per-camera coefficients.
+# [k1,k2,p1,p2,k3], free aspect ratio. The former RATIONAL_MODEL+FIX_ASPECT anchor
+# was not grounded in caliscope code and produced degenerate per-camera
+# coefficients. The guess seed (Caliscope v0.11.5's) is solved next to OpenCV's own
+# initialisation (the flag-free solve of Caliscope <= 0.5.4), the lower cost kept
+# (ADR-0053).
 _CALIB_FLAGS = cv2.CALIB_USE_INTRINSIC_GUESS
 # stride/cap defaults live in calibration_service.tuning (ADR-0036); the transport
 # layer resolves omitted request fields there and always passes explicit values.
@@ -50,6 +54,8 @@ _MIN_VIEWS = 6  # calib.io: at least ~6 observations
 # this is filtered independently of BoardDetector's lower live-detection floor
 # (detection/detector.py's _MIN_CORNERS=4, which only gates UI "board found").
 _MIN_CORNERS_FOR_CALIBRATION = 6
+logger = logging.getLogger(__name__)
+
 # Anti-"sliver" gate: a view whose corners are near-collinear is rank-deficient
 # (2nd singular value under this share of the 1st) and derails the solver's pose
 # init — see _is_well_spread. Prudent and eprouve; not a tuning knob.
@@ -313,7 +319,9 @@ def select_keyframes(
         current = best.get(slot)
         if current is None or candidates[i].sharpness > candidates[current].sharpness:
             best[slot] = i
-    return [candidates[best[slot]] for slot in sorted(best)]
+    # In frame order, not in the order the sampling placed the anchors: that order
+    # follows the tilt, hence the seed, and the solve must not depend on it.
+    return [candidates[i] for i in sorted(best.values())]
 
 
 def _cv_charuco_board(board: CalibrationBoard) -> cv2.aruco.CharucoBoard:
@@ -359,19 +367,35 @@ def calibrate_intrinsic(
         raise ValueError(f"need >= {_MIN_VIEWS} usable views, got {len(object_points)}")
 
     width, height = image_size
-    guess = guessed_camera_matrix(width, height)
-    # distCoeffs=None is valid at runtime (OpenCV allocates it); the cv2 stub types
-    # it as required, hence the ignore.
-    try:
-        result = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
-            object_points, image_points, (width, height), guess, None, flags=_CALIB_FLAGS
-        )
-    except cv2.error as exc:
+    # From Caliscope v0.11.5's seed (ADR-0053): it does not depend on the order of the
+    # views, where OpenCV's own initialisation, from their homographies, does (1.40 to
+    # 6.5 px on the same 50 views, by their order). That one only stands in when
+    # the seeded solve raises or returns a non-finite cost. distCoeffs=None (and
+    # cameraMatrix=None without the guess flag) is valid at runtime; the cv2 stub
+    # types both as required, hence the ignore. A solve is an 8-tuple of mixed types.
+    failures: list[str] = []
+    solve: Any = None
+    for seed, flags in ((guessed_camera_matrix(width, height), _CALIB_FLAGS), (None, 0)):
+        try:
+            solve = cv2.calibrateCameraExtended(  # type: ignore[call-overload]
+                object_points, image_points, (width, height), seed, None, flags=flags
+            )
+        except cv2.error as exc:
+            failures.append(str(exc).strip())
+            solve = None
+        else:
+            if np.isfinite(solve[0]):
+                break
+            failures.append(f"non-finite cost {solve[0]}")
+            solve = None
+        source = "the seed" if seed is not None else "OpenCV's initialisation"
+        logger.warning("intrinsic solve from %s failed: %s", source, failures[-1])
+    if solve is None:
         # The solver's own assertions (degenerate views the gates above missed)
         # are a property of the sweep, not a service fault: report them like the
         # other unusable-input cases (ValueError -> 422) instead of a bare 500.
-        raise ValueError(f"OpenCV calibration failed on these views: {exc}") from exc
-    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = result
+        raise ValueError(f"OpenCV calibration failed on these views: {'; then '.join(failures)}")
+    rms, matrix, dist, rvecs, tvecs, _sdi, _sde, per_view = solve
     rvec_list = [np.asarray(r, np.float64) for r in rvecs]
     tvec_list = [np.asarray(t, np.float64) for t in tvecs]
     coverage = _coverage_map(image_points, (width, height))

@@ -1,6 +1,6 @@
 # Test fixtures
 
-Small extracts of real recordings, kept because a synthetic stand-in would not reproduce the behaviour under test. Both come from session `calib-07-13-2026` (4 × 1080p USB cameras, single ArUco marker id 8 of `DICT_4X4_100`, 297.6 mm), which is not part of the repository.
+Small extracts of real recordings, kept because a synthetic stand-in would not reproduce the behaviour under test. The first two come from session `calib-07-13-2026` (4 × 1080p USB cameras, single ArUco marker id 8 of `DICT_4X4_100`, 297.6 mm), the third from session `test` (the same rig, a ChArUco 7 × 9 of `DICT_4X4_100` for the intrinsics); neither session is part of the repository.
 
 ## `aruco_contour_assert.png` (38×39 px, grayscale)
 
@@ -33,3 +33,24 @@ np.savez_compressed(
 ```
 
 The detections predate the lot 0 detector fixes; the fixture tests the solver, not the detector.
+
+## `intrinsic_keyframes_test_cam3.npz` (12 KB)
+
+The 50 keyframes production selects on `cam_3`'s intrinsic sweep (stride 5, cap 50): 1418 ChArUco corners with their ids, the per-view counts, the image size and the board. On these views OpenCV's own initialisation lands anywhere from 1.40 to 6.5 px depending on the order of the views, the seeded solve does not (ADR-0053). Used by `test_calibration.py`.
+
+Generated with the production pipeline, `select_keyframes` wrapped to keep its output:
+
+```python
+result = compute_intrinsic_from_video(session / "intrinsic/cam_3/capture.mkv", board, cap=50, stride=5)
+np.savez_compressed(
+    "intrinsic_keyframes_test_cam3.npz",
+    corners=np.concatenate([d.corners.reshape(-1, 2) for d in kept]).astype(np.float32),
+    ids=np.concatenate([d.ids.reshape(-1) for d in kept]).astype(np.int16),
+    counts=np.array([d.count for d in kept], np.int32),
+    image_size=np.array(size, np.int32),
+    columns=np.int32(board.columns),
+    rows=np.int32(board.rows),
+    dictionary=np.array(board.dictionary),
+    marker_ratio=np.float64(board.marker_ratio),
+)
+```

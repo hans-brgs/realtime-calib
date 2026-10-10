@@ -8,10 +8,11 @@ where the solver works (Docker/CI).
 from __future__ import annotations
 
 import functools
+import itertools
 import subprocess
 import sys
 from pathlib import Path
-from typing import cast
+from typing import Any, cast
 
 import cv2
 import numpy as np
@@ -274,8 +275,8 @@ def test_compute_trim_past_the_recording_finds_no_frames(tmp_path: Path) -> None
         compute_intrinsic_from_video(path, board, cap=25, stride=1, frame_start=10)
 
 
-@pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")
-def test_calibrate_recovers_intrinsics() -> None:
+def _projected_views() -> tuple[CalibrationBoard, list[BoardDetection]]:
+    """15 noise-free views of a 7x8 ChArUco through a 600 px pinhole at 640x480."""
     board = CalibrationBoard(
         board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
     )
@@ -295,14 +296,110 @@ def test_calibrate_recovers_intrinsics() -> None:
             continue
         if pts[:, 1].min() < 8 or pts[:, 1].max() > h - 8:
             continue
-        dets.append(
-            BoardDetection(True, pts, ids.copy(), None, 0.5, 500.0, 10.0)
-        )
+        dets.append(BoardDetection(True, pts, ids.copy(), None, 0.5, 500.0, 10.0))
+    return board, dets
 
-    result = calibrate_intrinsic(dets, board, (w, h))
+
+@pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")
+def test_calibrate_recovers_intrinsics() -> None:
+    board, dets = _projected_views()
+    result = calibrate_intrinsic(dets, board, (640, 480))
     assert result.error < 1.0
     assert abs(result.matrix[0][0] - 600.0) / 600.0 < 0.1  # fx within 10%
     assert result.view_count == 15
+
+
+@pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")
+def test_the_seeded_solve_alone_runs_when_it_succeeds(monkeypatch: pytest.MonkeyPatch) -> None:
+    # ADR-0053: Caliscope v0.11.5's seed; OpenCV's own initialisation is not run.
+    board, dets = _projected_views()
+    solve = cv2.calibrateCameraExtended
+    flags: list[int] = []
+
+    def _solve(*args: Any, **kwargs: Any) -> Any:
+        flags.append(kwargs["flags"])
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", _solve)
+    assert calibrate_intrinsic(dets, board, (640, 480)).error < 1.0
+    assert flags == [cv2.CALIB_USE_INTRINSIC_GUESS]
+
+
+@pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")
+@pytest.mark.parametrize("failure", ["raises", "nan"])
+def test_a_failed_seeded_solve_falls_back_to_opencvs_initialisation(
+    monkeypatch: pytest.MonkeyPatch, failure: str
+) -> None:
+    board, dets = _projected_views()
+    solve = cv2.calibrateCameraExtended
+
+    def _solve(*args: Any, **kwargs: Any) -> Any:
+        if kwargs["flags"] & cv2.CALIB_USE_INTRINSIC_GUESS:
+            if failure == "raises":
+                raise cv2.error("(-215:Assertion failed) degenerate view")
+            return (float("nan"), *solve(*args, **kwargs)[1:])
+        return solve(*args, **kwargs)
+
+    monkeypatch.setattr(cv2, "calibrateCameraExtended", _solve)
+    result = calibrate_intrinsic(dets, board, (640, 480))
+    assert abs(result.matrix[0][0] - 600.0) / 600.0 < 0.1
+    assert np.isfinite(result.error)
+
+
+def _real_keyframes() -> tuple[CalibrationBoard, list[BoardDetection], tuple[int, int]]:
+    """The 50 keyframes production keeps on session test, cam_3 (fixtures/README.md)."""
+    data = np.load(Path(__file__).parent / "fixtures" / "intrinsic_keyframes_test_cam3.npz")
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO,
+        dictionary=str(data["dictionary"]),
+        columns=int(data["columns"]),
+        rows=int(data["rows"]),
+        marker_ratio=float(data["marker_ratio"]),
+    )
+    bounds = np.cumsum(np.concatenate([[0], data["counts"]]))
+    dets = [
+        BoardDetection(
+            True,
+            data["corners"][a:b].astype(np.float32),
+            data["ids"][a:b].astype(np.int32),
+            None,
+            0.5,
+            500.0,
+            10.0,
+        )
+        for a, b in itertools.pairwise(bounds)
+    ]
+    width, height = (int(v) for v in data["image_size"])
+    return board, dets, (width, height)
+
+
+@pytest.mark.skipif(not _solver_works(), reason="cv2.calibrateCamera unavailable here (SIGILL)")
+def test_the_solve_does_not_depend_on_the_order_of_the_views() -> None:
+    # On these real views, OpenCV's own initialisation lands anywhere from 1.40 to
+    # 6.5 px depending on their order; the seeded solve must not.
+    board, dets, size = _real_keyframes()
+    reference = calibrate_intrinsic(dets, board, size)
+    rng = np.random.default_rng(9)
+    for _ in range(2):
+        order = rng.permutation(len(dets))
+        shuffled = calibrate_intrinsic([dets[i] for i in order], board, size)
+        assert shuffled.error == pytest.approx(reference.error, abs=1e-6)
+        assert np.allclose(shuffled.matrix, reference.matrix, atol=1e-4)
+        assert np.allclose(shuffled.distortions, reference.distortions, atol=1e-6)
+
+
+def test_keyframes_come_back_in_frame_order() -> None:
+    # The sampling's anchor order follows the tilt, so the seed: the solve takes the
+    # kept views in the order the video gave them.
+    rng = np.random.default_rng(4)
+    dets = [
+        _detection(rng.uniform(80, 560), rng.uniform(80, 400), rng.uniform(0, 40))
+        for _ in range(40)
+    ]
+    kept = select_keyframes(dets, (640, 480), cap=10)
+    positions = [next(i for i, d in enumerate(dets) if d is k) for k in kept]
+    assert len(kept) == 10
+    assert positions == sorted(positions)
 
 
 def test_solver_failure_is_reported_as_unusable_input(monkeypatch: pytest.MonkeyPatch) -> None:
