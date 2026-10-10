@@ -430,6 +430,20 @@ export const confirmCameraSetup = (): Promise<Session> => postJson<Session>('/ca
 export const fetchExportTargets = (): Promise<ExportTarget[]> =>
   getJson<{ targets: ExportTarget[] }>('/export/conventions').then((r) => r.targets);
 
+// One pre-export check (GET /export/checks, ADR-0057): judged backend-side.
+export interface ExportCheck {
+  id: string;
+  status: 'ok' | 'warn' | 'fail' | 'unavailable';
+  value: number | null;
+  thresholds: number[];
+  scope: 'internal' | 'external';
+  detail: string;
+  items: Record<string, number>;
+}
+
+export const fetchExportChecks = (): Promise<ExportCheck[]> =>
+  getJson<{ checks: ExportCheck[] }>('/export/checks').then((r) => r.checks);
+
 // Dry-run: the exact content each selected target would write, without touching disk.
 export interface PreviewFile {
   name: string;
