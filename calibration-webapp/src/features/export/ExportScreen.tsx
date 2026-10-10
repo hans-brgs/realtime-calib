@@ -128,7 +128,7 @@ export function ExportScreen() {
       <Box p={{ base: 'md', sm: 'xl' }} h={screenHeight(compact)}>
         <ScreenHeader
           title="Export"
-          subtitle="Camera calibration files for Caliscope and 3D engines."
+          info="Camera calibration files for Caliscope and 3D engines."
         />
         <Center h="60%">
           <Stack align="center" gap={8}>
@@ -162,7 +162,7 @@ export function ExportScreen() {
       <ScreenHeader
         panelToggle
         title="Export"
-        subtitle="Camera calibration files for Caliscope and 3D engines."
+        info="Camera calibration files for Caliscope and 3D engines."
         right={
           <Badge color="teal" variant="light" size="lg" style={{ flex: 'none' }}>
             {posed} / {cameras.length} cameras posed

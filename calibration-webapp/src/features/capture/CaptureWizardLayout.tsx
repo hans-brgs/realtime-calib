@@ -1,4 +1,4 @@
-import { Box, Paper, Text } from '@mantine/core';
+import { Box, Group, Paper, ScrollArea, Text } from '@mantine/core';
 import type { ReactNode } from 'react';
 
 import { STICKY_ACTION_GAP, STICKY_ACTION_LAYER } from '@/components/layout/StickyActionBar';
@@ -11,7 +11,8 @@ import {
 } from '@/components/layout/useCompactLayout';
 
 interface CaptureWizardLayoutProps {
-  // Optional row above the stepper (e.g. the intrinsic per-camera SegmentedControl).
+  // Optional control before the stepper (e.g. the intrinsic per-camera tabs): on the
+  // stepper's row in the locked regime, above it in compact.
   top?: ReactNode;
   stepper: ReactNode;
   // Left area (the big preview / scrubber / 3D scene) — the screen picks it by step.
@@ -50,8 +51,31 @@ export function CaptureWizardLayout({
   const { collapsed: panelCollapsed } = useSidePanel();
   return (
     <>
-      {top}
-      {stepper}
+      {/* One header row in the locked regime: the camera tabs, then the phases — two
+          stacked rows took ~120px above the view. Compact stacks them, a phone has no
+          width for both. */}
+      {compact ? (
+        <>
+          {top && <Box mb="md">{top}</Box>}
+          <Box mb="md">{stepper}</Box>
+        </>
+      ) : (
+        // Wraps when the row is too narrow for both (many cameras, ~1000px): the
+        // stepper then takes its own line instead of ellipsizing its labels. The tabs
+        // scroll inside an overlay scrollbar, which takes no height.
+        <Group wrap="wrap" gap="md" mb="md" align="center">
+          {top && (
+            <ScrollArea
+              type="hover"
+              scrollbarSize={4}
+              style={{ flex: '0 1 auto', maxWidth: '100%' }}
+            >
+              {top}
+            </ScrollArea>
+          )}
+          <Box style={{ flex: '1 1 440px', minWidth: 0 }}>{stepper}</Box>
+        </Group>
+      )}
 
       <Box
         style={{
@@ -169,18 +193,21 @@ export function CaptureWizardLayout({
         </Paper>
 
         {/* Folded panel: the step's action (Start/Stop REC, Compute, Validate…) and its
-            error stay reachable under the view, at the panel's width — folding is for
+            error stay reachable under the view, in one row — folding is for
             a wider view while recording, not for losing the Stop button (ADR-0041 §5:
             the action stays reachable). Rendered here instead of in the hidden panel,
             never in both. */}
         {panelCollapsed && (
-          <Box style={{ justifySelf: 'end', width: 'clamp(280px, 26%, 360px)' }}>
+          <Box>
             {message && (
-              <Text fz="0.72rem" c="var(--rc-error)" mb="xs">
+              <Text fz="0.72rem" c="var(--rc-error)" mb="xs" ta="right">
                 {message}
               </Text>
             )}
-            {action}
+            {/* One row, right-aligned: the screens build the action as a column of
+                full-width buttons for the panel; stacked under the view they cost
+                ~130px of its height (rig test 2026-10-10). */}
+            <Box className="rc-folded-actions">{action}</Box>
           </Box>
         )}
       </Box>

@@ -19,7 +19,7 @@ import {
   IconPlayerRecordFilled,
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
-import { lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
+import { Fragment, lazy, type ReactNode, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { InfoPopover } from '@/components/InfoPopover';
@@ -926,7 +926,20 @@ export function ExtrinsicScreen() {
       <ScreenHeader
         panelToggle
         title="Extrinsics"
-        subtitle="One synchronized sweep for the whole rig: capture with live co-visibility, prepare, compute, review the array."
+        info={
+          <>
+            One synchronized sweep for the whole rig: capture with live co-visibility, prepare,
+            compute, review the array.
+            <br />
+            <br />
+            {PHASES.map((phase) => (
+              <Fragment key={phase.key}>
+                <b>{phase.label}</b>: {phase.sub}
+                <br />
+              </Fragment>
+            ))}
+          </>
+        }
       />
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <ExtrinsicInner />

@@ -53,10 +53,14 @@ function WizardShellLayout() {
   const [drawerOpened, { toggle: toggleDrawer, close: closeDrawer }] = useDisclosure(false);
   const [settingsOpened, { open: openSettings, close: closeSettings }] = useDisclosure(false);
 
-  // Follow server-side step transitions (and the initial rehydrate landing step).
+  // Follow server-side step transitions (and the initial rehydrate landing step), and
+  // land on a newly opened session's step even when it equals the previous session's
+  // (both at Export): keyed on the step alone, opening a session from the dashboard
+  // left the view where it was and looked like a click with no effect.
+  const sessionId = useAppSelector(selectSession)?.session_id;
   useEffect(() => {
     setView(persistedView);
-  }, [persistedView]);
+  }, [persistedView, sessionId]);
 
   // Report the current view so the service captures only the cameras it needs
   // (ADR-0021): cameras/extrinsic → all, intrinsic → the active camera, else none.

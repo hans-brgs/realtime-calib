@@ -55,7 +55,7 @@ import {
   confirmCameraSetupThunk,
   selectSession,
 } from '@/features/session/sessionSlice';
-import { errorMessage, intrinsicPreviewUrl } from '@/transport/httpClient';
+import { errorMessage, extrinsicPreviewUrl, intrinsicPreviewUrl } from '@/transport/httpClient';
 import type { Session } from '@/transport/types';
 
 function SectionLabel({ children }: { children: ReactNode }) {
@@ -188,12 +188,17 @@ function CameraRow({ row }: { row: RowData }) {
   );
 }
 
-// First-frame thumbnail of an imported camera's recording, via the preview mp4
-// (ADR-0027) seeked to 0. Fills its grid cell and letterboxes the frame
-// (objectFit: contain) exactly like the live CameraTile. The transcode is kicked
-// at import time; until it is ready the <video> 404s and we fall back to a
-// quiet placeholder.
-function ImportThumbnail({ name }: { name: string }) {
+// Thumbnail of an imported camera's recording, via its preview mp4 (ADR-0027): a frame
+// from the MIDDLE of the extrinsic sweep when there is one — the same moment on every
+// camera, which is what checking the camera order needs — else of the intrinsic
+// sweep. Never the first frame: it is black while the exposure settles (rig test
+// 2026-10-10). Fills its grid cell and letterboxes the frame (objectFit: contain)
+// like the live CameraTile. Until a transcode is ready the <video> 404s: the
+// extrinsic source falls back to the intrinsic one, then to a quiet placeholder.
+function ImportThumbnail({ name, sweep }: { name: string; sweep: boolean }) {
+  const [source, setSource] = useState<'extrinsic' | 'intrinsic'>(
+    sweep ? 'extrinsic' : 'intrinsic',
+  );
   const [failed, setFailed] = useState(false);
   return (
     <Box
@@ -223,11 +228,15 @@ function ImportThumbnail({ name }: { name: string }) {
         </Box>
       ) : (
         <video
-          src={intrinsicPreviewUrl(name)}
-          preload="metadata"
+          src={source === 'extrinsic' ? extrinsicPreviewUrl(name) : intrinsicPreviewUrl(name)}
+          preload="auto"
           muted
           playsInline
-          onError={() => setFailed(true)}
+          onLoadedMetadata={(event) => {
+            const video = event.currentTarget;
+            if (Number.isFinite(video.duration)) video.currentTime = video.duration / 2;
+          }}
+          onError={() => (source === 'extrinsic' ? setSource('intrinsic') : setFailed(true))}
           style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         />
       )}
@@ -289,7 +298,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
       <ScreenHeader
         panelToggle
         title="Camera Setup"
-        subtitle={
+        info={
           <>
             Imported session — the cameras derive from the uploaded videos.{' '}
             <Text span c="var(--rc-accent-bright)" inherit>
@@ -309,7 +318,11 @@ function ImportedCameraSetup({ session }: { session: Session }) {
         }}
       >
         <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <SectionLabel>Recordings · first frame</SectionLabel>
+          <SectionLabel>
+            {session.extrinsic_recorded
+              ? 'Recordings · mid extrinsic sweep, same moment'
+              : 'Recordings · mid intrinsic sweep'}
+          </SectionLabel>
           {/* Mirrors the live PreviewGrid geometry: fills the column height with a
               cols = ceil(sqrt(n)) letterboxed grid (no scroll); same 58vh floor. */}
           <Box style={{ flex: 1, minHeight: 'min(58vh, 560px)' }}>
@@ -349,7 +362,7 @@ function ImportedCameraSetup({ session }: { session: Session }) {
                       : { minWidth: 0, minHeight: 0 }
                   }
                 >
-                  <ImportThumbnail name={camera.name} />
+                  <ImportThumbnail name={camera.name} sweep={session.extrinsic_recorded ?? false} />
                 </Box>
               ))}
             </Box>
@@ -711,7 +724,7 @@ function LiveCameraSetup() {
       <ScreenHeader
         panelToggle
         title="Camera Setup"
-        subtitle={
+        info={
           <>
             Detect USB cameras, set the shared capture format, and order the indices.{' '}
             <Text span c="var(--rc-accent-bright)" inherit>
@@ -764,7 +777,6 @@ function LiveCameraSetup() {
         }}
       >
         <Box style={{ minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-          <SectionLabel>Preview · map physical ↔ index</SectionLabel>
           {/* Fills the column height; the tile grid letterboxes inside with no scroll.
               minHeight floors it so the stacked mobile layout keeps a usable preview. */}
           <Box style={{ flex: 1, minHeight: 'min(58vh, 560px)' }}>

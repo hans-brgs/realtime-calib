@@ -19,7 +19,7 @@ import {
   IconPlayerStopFilled,
 } from '@tabler/icons-react';
 import { Track } from 'livekit-client';
-import { type CSSProperties, lazy, Suspense, useEffect, useRef, useState } from 'react';
+import { type CSSProperties, Fragment, lazy, Suspense, useEffect, useRef, useState } from 'react';
 
 import { useAppDispatch, useAppSelector } from '@/app/hooks';
 import { InfoPopover } from '@/components/InfoPopover';
@@ -681,7 +681,6 @@ function IntrinsicsInner() {
               label: c.matrix != null ? `${c.name} ✓` : c.name,
               value: c.name,
             }))}
-            mb="md"
           />
         }
         stepper={
@@ -984,7 +983,20 @@ export function IntrinsicsScreen() {
       <ScreenHeader
         panelToggle
         title="Intrinsics"
-        subtitle="Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then review the result."
+        info={
+          <>
+            Per camera: capture a board sweep, prepare (replay + tune sampling), compute, then
+            review the result.
+            <br />
+            <br />
+            {PHASES.map((phase) => (
+              <Fragment key={phase.key}>
+                <b>{phase.label}</b>: {phase.sub}
+                <br />
+              </Fragment>
+            ))}
+          </>
+        }
       />
       <Box style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
         <IntrinsicsInner />

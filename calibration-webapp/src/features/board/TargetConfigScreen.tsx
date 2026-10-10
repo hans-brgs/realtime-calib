@@ -375,7 +375,7 @@ function TargetConfigForm({
       <ScreenHeader
         panelToggle
         title="Target Config"
-        subtitle="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
+        info="Define the ChArUco/ArUco board, download the PNG to print, then measure a printed square and enter its real size — that measurement is the metric scale."
       />
 
       <Box

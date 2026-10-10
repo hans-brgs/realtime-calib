@@ -3,10 +3,12 @@ import { Box, Group, Text } from '@mantine/core';
 import { useCompactLayout } from '@/components/layout/useCompactLayout';
 
 // Sub-step rail of the 4-phase flows (design "SUB-STEPPER", realtime-calib.dc.html):
-// ONE joined bar, each phase a full-height cell with an accent left bar, a round
-// numbered badge (check when done) and a title + hint. Shared by the intrinsic and
-// extrinsic screens. Display-only: transitions are driven by the screens' action
-// buttons, not by clicking the rail.
+// ONE joined bar, each phase a cell with an accent left bar, a round numbered badge
+// (check when done) and its title, so the bar fits on one row beside the camera tabs
+// (rig test 2026-10-10: the two stacked rows took ~120px above the view). The phase
+// hints live in the screen's info popover (`phaseHints`), which opens on touch. Shared by the intrinsic and extrinsic screens. Display-only: transitions
+// are driven by the screens' action buttons, not by clicking the rail. No outer
+// margin: CaptureWizardLayout places it.
 export interface Phase {
   key: string;
   label: string;
@@ -20,7 +22,6 @@ function CompactPhaseStepper({ phases, index }: { phases: Phase[]; index: number
   const active = phases[Math.max(0, index)] ?? phases[0];
   return (
     <Box
-      mb="md"
       style={{
         border: '1px solid var(--rc-border)',
         borderRadius: 12,
@@ -88,7 +89,6 @@ export function PhaseStepper({ phases, current }: { phases: Phase[]; current: st
   }
   return (
     <Box
-      mb="md"
       style={{
         display: 'flex',
         alignItems: 'stretch',
@@ -109,9 +109,9 @@ export function PhaseStepper({ phases, current }: { phases: Phase[]; current: st
               minWidth: 0,
               display: 'flex',
               alignItems: 'center',
-              gap: 11,
-              minHeight: 52,
-              padding: '0 15px',
+              gap: 9,
+              minHeight: 38,
+              padding: '0 12px',
               background: active ? 'rgba(167,139,250,0.1)' : 'transparent',
               borderLeft: `2px solid ${active ? 'var(--rc-accent)' : 'transparent'}`,
             }}
@@ -120,8 +120,8 @@ export function PhaseStepper({ phases, current }: { phases: Phase[]; current: st
               component="span"
               className="rc-tnum"
               style={{
-                width: 26,
-                height: 26,
+                width: 22,
+                height: 22,
                 flex: 'none',
                 borderRadius: '50%',
                 border: `1.5px solid ${
@@ -135,7 +135,7 @@ export function PhaseStepper({ phases, current }: { phases: Phase[]; current: st
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                fontSize: '0.72rem',
+                fontSize: '0.68rem',
                 fontWeight: 600,
                 color: active
                   ? 'var(--rc-accent-bright)'
@@ -146,20 +146,15 @@ export function PhaseStepper({ phases, current }: { phases: Phase[]; current: st
             >
               {done ? '✓' : i + 1}
             </Box>
-            <Box style={{ minWidth: 0 }}>
-              <Text
-                fz="0.82rem"
-                fw={600}
-                ff="heading"
-                c={active ? undefined : done ? 'dark.1' : 'dark.2'}
-                style={{ whiteSpace: 'nowrap' }}
-              >
-                {phase.label}
-              </Text>
-              <Text fz="0.64rem" c="dark.3" style={{ whiteSpace: 'nowrap' }} visibleFrom="sm">
-                {phase.sub}
-              </Text>
-            </Box>
+            <Text
+              fz="0.8rem"
+              fw={600}
+              ff="heading"
+              c={active ? undefined : done ? 'dark.1' : 'dark.2'}
+              style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}
+            >
+              {phase.label}
+            </Text>
           </Box>
         );
       })}
