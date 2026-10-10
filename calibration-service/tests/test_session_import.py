@@ -15,6 +15,7 @@ import time
 import zipfile
 from pathlib import Path
 
+import cv2
 import numpy as np
 import pytest
 
@@ -22,18 +23,20 @@ from calibration_service.models.session import CameraConfig, WizardStep
 from calibration_service.recording.extrinsic_recorder import read_timestamps
 from calibration_service.recording.ffmpeg import (
     FfmpegError,
-    reencode_cfr_args,
+    reencode_args,
     remux_copy_args,
     run_ffmpeg,
     transcode_timeout,
 )
 from calibration_service.recording.replay import VideoProperties, video_properties
 from calibration_service.recording.video_writer import VideoRecorder
+from calibration_service.session import import_session
 from calibration_service.session.import_session import (
     ImportPlan,
     ImportValidationError,
     PlannedVideo,
     UnreadableArchiveError,
+    _normalise_video,
     _sidecar_times,
     ingest,
     parse_camera_index,
@@ -567,7 +570,88 @@ def test_a_stuck_ffmpeg_is_killed_at_its_timeout() -> None:
 
 def test_import_ffmpeg_calls_never_read_the_service_stdin(tmp_path: Path) -> None:
     assert "-nostdin" in remux_copy_args(tmp_path / "a.mp4", tmp_path / "a.mkv")
-    assert "-nostdin" in reencode_cfr_args(tmp_path / "a.mp4", tmp_path / "a.mkv", 30.0)
+    assert "-nostdin" in reencode_args(tmp_path / "a.mp4", tmp_path / "a.mkv", 30.0)
+
+
+def _make_vfr_video(path: Path, frames: int) -> list[float]:
+    """A variable-frame-rate video whose frame i is a flat gray of 10 + 4 i.
+
+    The cadence of this project's cameras: frame periods of 20 ms, one in six 24 ms,
+    off any 1/30 grid. Stamped in whole milliseconds on a 1 ms time base, so that
+    building the source never collides two frames. MJPG in a .mkv, H.264 with
+    B-frames in a .mp4. Returns each frame's gray level, in order.
+    """
+    stage = path.parent / f"{path.stem}-frames"
+    stage.mkdir(parents=True)
+    for i in range(frames):
+        cv2.imwrite(str(stage / f"{i:03d}.png"), np.full((48, 64, 3), 10 + 4 * i, np.uint8))
+    stamps = ["-vf", "settb=1/1000,setpts=20*N+4*floor(N/6)", "-fps_mode", "passthrough"]
+    stamps += ["-enc_time_base", "1:1000"]
+    if path.suffix == ".mp4":
+        codec = ["-c:v", "libx264", "-preset", "ultrafast", "-crf", "10", "-bf", "2"]
+        codec += ["-pix_fmt", "yuv420p", "-video_track_timescale", "1000"]
+    else:
+        codec = ["-c:v", "mjpeg", "-q:v", "2"]
+    source = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(stage / "%03d.png")]
+    run_ffmpeg([*source, *stamps, *codec, str(path)], timeout_s=60)
+    return [10.0 + 4 * i for i in range(frames)]
+
+
+def _gray_levels(path: Path) -> list[float]:
+    capture = cv2.VideoCapture(str(path))
+    levels = []
+    while True:
+        ok, frame = capture.read()
+        if not ok:
+            break
+        levels.append(float(frame.mean()))
+    capture.release()
+    return levels
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+def test_the_reencode_keeps_every_frame_of_a_vfr_source(tmp_path: Path, suffix: str) -> None:
+    # SYN-8 / ADR-0054: the sidecars pair line i with decoded frame i, so the
+    # fallback re-encode must neither duplicate nor drop a frame. A constant-rate
+    # filter turned a source into 61 frames, 12 of them duplicates; a passthrough
+    # re-encode failed at random on this off-grid cadence (hence three runs).
+    source = tmp_path / f"vfr{suffix}"
+    levels = _make_vfr_video(source, 40)
+    for run in range(3):
+        out = tmp_path / f"out{run}.mkv"
+        run_ffmpeg(reencode_args(source, out, 48.5), timeout_s=60)
+        assert _gray_levels(out) == pytest.approx(levels, abs=1.5)
+
+
+@requires_ffmpeg
+@pytest.mark.parametrize("suffix", [".mkv", ".mp4"])
+def test_a_vfr_source_is_remuxed_untouched(tmp_path: Path, suffix: str) -> None:
+    # A variable frame rate no longer triggers a re-encode: every compute decodes
+    # sequentially, so the remux keeps the source's frames, bit for bit.
+    source = tmp_path / f"vfr{suffix}"
+    _make_vfr_video(source, 40)
+    _normalise_video(source, tmp_path / "out/capture.mkv")
+    assert _gray_levels(tmp_path / "out/capture.mkv") == _gray_levels(source)
+
+
+@requires_ffmpeg
+def test_an_unreadable_remux_falls_back_to_the_reencode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "vfr.mkv"
+    levels = _make_vfr_video(source, 20)
+    probe = import_session._probe_or_none
+    calls: list[Path] = []
+
+    def _first_unreadable(path: Path) -> VideoProperties | None:
+        calls.append(path)
+        return None if len(calls) == 1 else probe(path)
+
+    monkeypatch.setattr(import_session, "_probe_or_none", _first_unreadable)
+    _normalise_video(source, tmp_path / "out/capture.mkv")
+    assert len(calls) == 2
+    assert _gray_levels(tmp_path / "out/capture.mkv") == pytest.approx(levels, abs=1.5)
 
 
 def test_the_transcode_timeout_scales_with_the_media() -> None:

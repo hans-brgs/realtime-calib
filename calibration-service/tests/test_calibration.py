@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import functools
 import itertools
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -178,6 +179,47 @@ def test_compute_from_video_reads_detects_and_guards(tmp_path: Path) -> None:
             rec.write(gray)
     with pytest.raises(ValueError, match="usable views"):
         compute_intrinsic_from_video(path, board, cap=25, stride=1)
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg not installed")
+def test_an_untrimmed_compute_reads_past_the_announced_frame_count(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # A variable-rate MKV (20 ms periods, one in six 24 ms) announces far fewer frames
+    # than it decodes; without a trim the compute must read them all.
+    from calibration_service.calibration import intrinsic as intrinsic_module
+
+    stage = tmp_path / "frames"
+    stage.mkdir()
+    for i in range(40):
+        cv2.imwrite(str(stage / f"{i:03d}.png"), np.full((48, 64, 3), 10 + 4 * i, np.uint8))
+    path = tmp_path / "capture.mkv"
+    stamps = ["-vf", "settb=1/1000,setpts=20*N+4*floor(N/6)", "-fps_mode", "passthrough"]
+    source = ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", str(stage / "%03d.png")]
+    command = [*source, *stamps, "-enc_time_base", "1:1000", "-c:v", "mjpeg", str(path)]
+    subprocess.run(command, check=True, capture_output=True, timeout=60)
+    capture = cv2.VideoCapture(str(path))
+    announced = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
+    capture.release()
+    assert announced < 40  # the trap: an estimate from duration x declared rate
+    seen: list[int] = []
+
+    class Recorder:
+        def __init__(self, *_args: object, **_kwargs: object) -> None:
+            pass
+
+        def detect(self, frame: NDArray[np.uint8]) -> BoardDetection:
+            seen.append(round((float(frame.mean()) - 10) / 4))
+            return BoardDetection(False, None, None, None, 0.0, 0.0, None)
+
+    monkeypatch.setattr(intrinsic_module, "BoardDetector", Recorder)
+    monkeypatch.setattr(intrinsic_module, "select_keyframes", lambda d, s, cap: d)
+    monkeypatch.setattr(intrinsic_module, "calibrate_intrinsic", lambda k, b, s: None)
+    board = CalibrationBoard(
+        board_type=BoardType.CHARUCO, dictionary="DICT_5X5_100", columns=7, rows=8
+    )
+    compute_intrinsic_from_video(path, board, cap=25, stride=1)
+    assert seen == list(range(40))
 
 
 def test_coverage_map_accumulates_quad_hulls() -> None:

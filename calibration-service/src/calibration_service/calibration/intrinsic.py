@@ -436,9 +436,10 @@ def compute_intrinsic_from_video(
     """
     detector = BoardDetector(board)
     capture = cv2.VideoCapture(str(video_path))
-    total = int(capture.get(cv2.CAP_PROP_FRAME_COUNT))
     start = max(0, frame_start)
-    end = frame_end if frame_end is not None else (total if total > 0 else None)
+    # Without a trim, to the last decodable frame: the container's frame count is an
+    # estimate, and on a variable-rate MKV it can announce half the frames (47 of 91).
+    end = frame_end
     read_stride = max(1, stride)
     detections: list[BoardDetection] = []
     image_size: tuple[int, int] | None = None

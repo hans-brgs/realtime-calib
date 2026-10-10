@@ -4,15 +4,16 @@ Ingest runs off the event loop (executor, like the intrinsic/extrinsic compute),
 so these are **synchronous** wrappers around ``ffmpeg`` / ``ffprobe`` — both
 guaranteed in the container image (Dockerfile, ADR-0027). Uploaded videos are
 normalised into the canonical session layout by a container **remux** (``-c copy``:
-no re-encode, frames preserved bit-for-bit, ChArUco fidelity untouched); a CFR
-re-encode is the fallback only for variable-frame-rate sources.
+no re-encode, frames preserved bit-for-bit, ChArUco fidelity untouched, a variable
+frame rate kept as is); a frame-for-frame MJPG re-encode is the fallback only when
+the remuxed file is unreadable.
 """
 
 from __future__ import annotations
 
-import json
 import logging
 import subprocess
+from fractions import Fraction
 from pathlib import Path
 
 logger = logging.getLogger(__name__)
@@ -22,11 +23,9 @@ _FFPROBE = "ffprobe"
 # Quiet, overwrite, fail-fast — same posture as the preview transcode (ADR-0027).
 # -nostdin: ffmpeg must never read the service's stdin (SYN-9).
 _BASE_ARGS = ("-nostdin", "-hide_banner", "-loglevel", "error", "-y")
-# Base vs average cadence divergence above this fraction => treat the source as VFR.
-_VFR_TOLERANCE = 0.01
 # Bounds of an ingest call (SYN-9): a stuck ffmpeg would hold the import, and the
 # service's operation lock with it (ADR-0050), forever. A probe is quick; a remux
-# or a CFR re-encode scales with the media, and is expected well under 1x real time.
+# or a re-encode scales with the media, and is expected well under 1x real time.
 PROBE_TIMEOUT_S = 30.0
 _MIN_TRANSCODE_TIMEOUT_S = 120.0
 _TRANSCODE_TIMEOUT_PER_MEDIA_S = 4.0
@@ -46,12 +45,23 @@ def remux_copy_args(source: Path, destination: Path) -> list[str]:
     return [_FFMPEG, *_BASE_ARGS, "-i", str(source), "-c", "copy", str(destination)]
 
 
-def reencode_cfr_args(source: Path, destination: Path, fps: float) -> list[str]:
-    """ffmpeg args to normalise a (VFR) source to constant-frame-rate MJPG.
+def reencode_args(source: Path, destination: Path, fps: float) -> list[str]:
+    """ffmpeg args to re-encode a video to MJPG frame for frame (ADR-0054).
 
-    Fallback when a remux would leave a non-uniform cadence: MJPG keeps the
-    intra-frame, frame-exact property the recorder relies on (ADR-0019).
+    Fallback when the remuxed file does not probe usable. Source frame i must stay
+    frame i: the timestamp sidecars pair line i with decoded frame i (ADR-0035). A
+    constant-rate filter (``-vf fps=``) duplicates and drops frames to fill its grid
+    (a 62-frame VFR source came out as 61 frames, 12 of them duplicates); a plain
+    ``-fps_mode passthrough`` fails at random on a real VFR source (two frames on one
+    tick of the encoder's 1/fps time base, refused as "Invalid pts"); and re-timing
+    by index under ``-r`` duplicated a frame of an MKV source past ~46 fps. So every
+    frame gets pts = its index on an exact 1/fps time base, passed through as is.
+    ``fps`` is the source's declared rate; the capture times live in the sidecars.
+    MJPG keeps the intra-frame, frame-exact property the recorder relies on
+    (ADR-0019).
     """
+    rate = Fraction(fps).limit_denominator(1001)  # 29.97 -> 30000/1001
+    tick = f"{rate.denominator}/{rate.numerator}"
     return [
         _FFMPEG,
         *_BASE_ARGS,
@@ -59,12 +69,16 @@ def reencode_cfr_args(source: Path, destination: Path, fps: float) -> list[str]:
         str(source),
         "-an",
         "-vf",
-        f"fps={fps:.6f}",
+        f"settb={tick},setpts=N",
+        "-fps_mode",
+        "passthrough",
+        "-enc_time_base",
+        tick,
         "-c:v",
         "mjpeg",
         # Quasi-lossless on the ffmpeg 2-31 scale — the import-side mirror of the
         # recorder's TUNING.record_quality: these are the pixels every compute
-        # re-detects on, so the CFR normalisation must not cost corner fidelity.
+        # re-detects on, so the re-encode must not cost corner fidelity.
         "-q:v",
         "3",
         str(destination),
@@ -92,62 +106,3 @@ def run_ffmpeg(args: list[str], *, timeout_s: float) -> None:
             f"{args[0]} exited with {result.returncode}"
         )
         raise FfmpegError(message)
-
-
-def is_vfr(source: Path) -> bool:
-    """Best-effort variable-frame-rate detection via ffprobe.
-
-    Compares the stream's ``r_frame_rate`` (base rate) with ``avg_frame_rate``:
-    they match for CFR, diverge for VFR. Returns ``False`` when either is unknown
-    (can't tell -> remux and rely on the frame-index preview contract, ADR-0027).
-    """
-    args = [
-        _FFPROBE,
-        "-v",
-        "error",
-        "-select_streams",
-        "v:0",
-        "-show_entries",
-        "stream=r_frame_rate,avg_frame_rate",
-        "-of",
-        "json",
-        str(source),
-    ]
-    try:
-        result = subprocess.run(
-            args,
-            capture_output=True,
-            check=False,
-            stdin=subprocess.DEVNULL,
-            timeout=PROBE_TIMEOUT_S,
-        )
-    except FileNotFoundError as exc:
-        raise FfmpegError("ffprobe not found in the container image") from exc
-    except subprocess.TimeoutExpired as exc:
-        raise FfmpegError(f"ffprobe did not finish within {PROBE_TIMEOUT_S:.0f} s") from exc
-    if result.returncode != 0:
-        raise FfmpegError(result.stderr.decode(errors="replace").strip() or "ffprobe failed")
-
-    data = json.loads(result.stdout.decode(errors="replace") or "{}")
-    streams = data.get("streams") if isinstance(data, dict) else None
-    if not isinstance(streams, list) or not streams or not isinstance(streams[0], dict):
-        return False
-    r_rate = _parse_rate(streams[0].get("r_frame_rate"))
-    avg_rate = _parse_rate(streams[0].get("avg_frame_rate"))
-    if r_rate is None or avg_rate is None or r_rate <= 0 or avg_rate <= 0:
-        return False
-    return abs(r_rate - avg_rate) / r_rate > _VFR_TOLERANCE
-
-
-def _parse_rate(value: object) -> float | None:
-    """Parse an ffprobe rational rate (e.g. ``"30000/1001"``) into fps, or ``None``."""
-    if not isinstance(value, str) or "/" not in value:
-        return None
-    num_s, _, den_s = value.partition("/")
-    try:
-        num, den = float(num_s), float(den_s)
-    except ValueError:
-        return None
-    if den == 0:
-        return None
-    return num / den
