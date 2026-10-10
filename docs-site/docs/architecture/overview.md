@@ -6,35 +6,17 @@ keywords: [multi-camera architecture, LiveKit, WebRTC camera streaming, Docker C
 
 # Architecture overview
 
-realtime-calib is a small set of services orchestrated with Docker Compose, built
-around one idea: the heavy lifting (capture, detection, calibration) happens on the
-**server the cameras are plugged into**, and the operator drives it from a
-**web app on any device** over the local network.
+realtime-calib is a small set of services orchestrated with Docker Compose, built around one idea: the heavy lifting (capture, detection, calibration) happens on the **server the cameras are plugged into**, and the operator drives it from a **web app on any device** over the local network.
 
 ## How this project was built
 
-I'm a **PhD in human-movement science and a computer-vision developer**: my work is
-building applied technology for **health and sport**. I'll delimit my expertise up
-front, the way a researcher scopes their field before presenting a result — because
-it matters here. I'm comfortable with engineering, product design and *applying*
-computer vision, but I do **not** have deep training in the projective geometry and
-epipolar mathematics that underpin camera calibration.
+I'm a **PhD in human-movement science and a computer-vision developer**: my work is building applied technology for **health and sport**. I'll delimit my expertise up front, the way a researcher scopes their field before presenting a result — because it matters here. I'm comfortable with engineering, product design and *applying* computer vision, but I do **not** have deep training in the projective geometry and epipolar mathematics that underpin camera calibration.
 
-So for the calibration theory I stand on **Caliscope** and **OpenCV**, and I used
-**Claude Code (mostly Opus 4.8)** to write the code and to explain the harder
-concepts as I went.
+So for the calibration theory I stand on **Caliscope** and **OpenCV**, and I used **Claude Code (mostly Opus 4.8)** to write the code and to explain the harder concepts as I went.
 
-I first used Caliscope in my own work. It calibrates well, but a few frictions kept
-getting in the way — recording every camera in OBS first, no headless path, and
-export conventions that didn't match my projects. As VR and robotics keep growing
-the need for multi-camera rigs, it seemed worth turning a friction-free version
-into something others could use too.
+I first used Caliscope in my own work. It calibrates well, but a few frictions kept getting in the way — recording every camera in OBS first, no headless path, and export conventions that didn't match my projects. As VR and robotics keep growing the need for multi-camera rigs, it seemed worth turning a friction-free version into something others could use too.
 
-My own contribution is therefore the **product and engineering shape**, not the
-calibration math: a **single-pass, multi-device** tool — a responsive web app that
-captures *and* calibrates in one flow, usable on **headless Linux** servers — and
-the **architecture and stack** (a dual-channel WebRTC React application over
-LiveKit).
+My own contribution is therefore the **product and engineering shape**, not the calibration math: a **single-pass, multi-device** tool — a responsive web app that captures *and* calibrates in one flow, usable on **headless Linux** servers — and the **architecture and stack** (a dual-channel WebRTC React application over LiveKit).
 
 ## System topology
 
@@ -79,51 +61,41 @@ It is a **single stack**: Caddy is the always-on entry point, in plain HTTP on t
 
 The web app talks to the server over two complementary paths:
 
-- **HTTP (through `/api`)** — everything transactional: create/open sessions,
-  configure cameras and boards, start/stop sweeps, trigger computes, export.
-  The service owns the session state; the web app rehydrates from it.
-- **WebRTC (through LiveKit)** — everything continuous: one video track per
-  camera (with detection overlays burned in server-side), plus a **data channel**
-  pushing live quality telemetry (coverage, sharpness, co-visibility).
+- **HTTP (through `/api`)**: everything transactional: create, open or import sessions, configure cameras and boards, start and stop recordings, trigger computes, run the pre-export checks, export. The service owns the session state; the web app rehydrates from it.
+- **WebRTC (through LiveKit)**: everything continuous: one video track per camera (with detection overlays burned in server-side), plus a **data channel** pushing live telemetry: coverage, sharpness, co-visibility, and a snapshot of every camera's health (live, opening, in error, with the reason). The snapshot is resent on every tick rather than as one-off events, so a dropped packet or a tablet that joins late catches up within a second.
 
 ## Inside the calibration service
 
-A single asyncio process; blocking work never runs on the event loop.
+A single process: an asyncio event loop for the API and the orchestration, and threads for everything that blocks.
 
 ```mermaid
 graph TD
-    subgraph svc [calibration-service — one asyncio process]
-        API[FastAPI HTTP API]
-        PS[Camera publish service<br/>one async task per camera]
-        POOL[Dedicated capture thread pool<br/>blocking cv2 reads]
-        DET[Board detection<br/>ChArUco / ArUco]
-        BURN[Overlay burn-in +<br/>preview downscale ≤960px · 30fps]
-        REC[Recorder<br/>MJPG .mkv ~30fps]
-        SOLVE[Calibration solves — off the event loop<br/>intrinsic · extrinsic · bundle adjustment]
-        SM[Session manager<br/>state machine + persistence]
+    subgraph svc [calibration-service — one process]
+        API[FastAPI HTTP API<br/>one long operation at a time]
+        LOOP[Per-camera capture loop<br/>absolute frame grid · kernel timestamps]
+        DEV[One thread per camera<br/>the only one touching the device]
+        POOL[Shared thread pool<br/>downscale · live detection · burn-in · video writes]
+        REC[Recorder<br/>native MJPG .mkv + timestamps]
+        SOLVE[Calibration solves, in worker threads<br/>intrinsic · extrinsic · bundle adjustment]
+        SM[Session manager<br/>state + atomic persistence]
     end
 
-    CAM[USB cameras] --> POOL --> PS
-    PS --> DET --> BURN
-    BURN -->|VP8 video tracks| LK[LiveKit SFU]
-    DET -->|coverage telemetry<br/>data channel| LK
-    PS --> REC --> DISK[(Session folder)]
+    CAM[USB cameras] --> DEV --> LOOP
+    LOOP --> POOL
+    POOL -->|VP8 preview tracks| LK[LiveKit SFU]
+    POOL -->|telemetry<br/>data channel| LK
+    POOL --> REC --> DISK[(Session folder)]
     API -->|"compute (on demand)"| SOLVE
-    DISK -->|replay recordings| SOLVE
+    DISK -->|replay native recordings| SOLVE
     SOLVE --> SM --> DISK
-    DISK -->|TOML + engine JSON| EXPORT[Export]
+    DISK -->|TOML · OpenCV JSON · engine JSON · checks| EXPORT[Export]
 ```
 
 Key properties:
 
-- **Capture stays native** — detection and recording run at the camera's real
-  resolution; only the published preview is downscaled and rate-capped to spare
-  the CPU encoder.
-- **Solves are on-demand and replay-based** — a sweep is recorded first, then the
-  compute re-detects from the recording with the operator's Prepare settings
-  (trim, stride), off the event loop so live preview never freezes.
-- **The session folder is the source of truth** — recordings, board config and
-  results all live there; the web app holds no durable state and rehydrates from
-  the service on load.
-- **CPU-only** — no GPU required; the heavy cost is OpenCV detection and
-  SciPy bundle adjustment.
+- **Recording stays native, the preview is light.** Recordings are written at the camera's native resolution, with each frame's timestamp. The live preview is downscaled (at most 960 px wide) for streaming, and live detection runs on that preview: it only drives the operator's feedback. The preview follows the camera's frame rate, or a reduced rate set in Settings.
+- **Solves are on-demand and replay-based.** A sweep is recorded first, then the compute re-detects the board on the native recording with the operator's Prepare settings (trim, stride, caps), in a worker thread so the live preview never freezes.
+- **Devices are never released mid-read.** Each open camera has its own thread, which serializes open, grab and release, so stopping a capture can never close a device while a frame is being read. A camera that fails to open or stops delivering frames is reported to the operator and reopened with a backoff.
+- **One long or mutating operation at a time.** Computes, Minimize, recording starts, session changes and camera or board changes take a single service-wide slot; a second request gets a "busy" answer instead of interleaving with the first.
+- **The session folder is the source of truth.** Recordings, board config and results all live there, written atomically (a crash never leaves a half-written file); the web app holds no durable state and rehydrates from the service on load.
+- **CPU-only.** No GPU required; the heavy cost is OpenCV detection, while the bundle adjustment itself takes under a second.

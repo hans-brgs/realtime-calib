@@ -16,7 +16,8 @@ authors:
 repository-code: "https://github.com/hans-brgs/realtime-calib"
 url: "https://github.com/hans-brgs/realtime-calib"
 license: AGPL-3.0-or-later
-date-released: "2026-07-09"
+version: "0.2.0"
+date-released: "2026-10-10"
 keywords:
   - camera calibration
   - multi-camera
