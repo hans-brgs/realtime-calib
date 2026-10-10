@@ -9,6 +9,10 @@ export const CHECK_LABELS: Record<string, string> = {
   frame: 'World frame',
   cameras_above_floor: 'Cameras above the floor',
   reference: 'Reference calibration',
+  template_binding: 'Cameras at their ports',
+  template_placement: 'Camera placement',
+  template_scale: 'Scale (tape distances)',
+  template_resolution: 'Export resolution',
 };
 
 // The Export screen's section caption, shared with its checks panel.
@@ -41,6 +45,14 @@ export function formatCheckValue(check: ExportCheck): string {
       return check.value > 0 ? `${check.value} below` : '';
     case 'reference':
       return `residual ${(check.value * 100).toFixed(1)} cm`;
+    case 'template_scale': {
+      const percent = check.value * 100;
+      return `${percent >= 0 ? '+' : ''}${percent.toFixed(2)} %`;
+    }
+    case 'template_binding':
+    case 'template_placement':
+    case 'template_resolution':
+      return check.value > 0 ? `${check.value} off` : '';
     case 'frame': {
       // The framed target's printed face against the up axis: only a tilt is news.
       const tilt = Math.min(check.value, 180 - check.value);

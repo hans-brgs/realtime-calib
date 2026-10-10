@@ -4,6 +4,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 
 import { useAppSelector } from '@/app/hooks';
 import { InfoPopover } from '@/components/InfoPopover';
+import { SiteTemplateSetting } from '@/components/SiteTemplateSetting';
 import { selectDefaults } from '@/features/session/defaultsSlice';
 import { errorMessage, fetchSettings, saveSettings } from '@/transport/httpClient';
 
@@ -139,6 +140,8 @@ export function SettingsModal({ opened, onClose }: SettingsModalProps) {
           />
         </SettingRow>
       )}
+
+      <SiteTemplateSetting opened={opened} />
 
       {error && (
         <Alert color="red" variant="light" icon={<IconAlertTriangle size={16} />} mb="md">
