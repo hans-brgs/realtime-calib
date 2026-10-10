@@ -11,13 +11,14 @@ export type QualityLevel = 'good' | 'watch' | 'bad';
 // on the same number.
 //
 // Anchored on what recorded hand-held sweeps achieve rather than a round figure:
-// four sessions from two rigs (three single-marker, one ChArUco, before Minimize)
-// give 0.15-0.86 px per camera, every one holding its target rigid to under 0.7 mm.
-// "Good" covers most of them and "watch" sits at twice it. The static scatter of
-// border-refined single-marker corners, ~0.12 px at a 0.5-factor output (ADR-0052),
-// is 10-53 % of the best cameras' variance; the rest is the target's motion between
-// cameras. Past "watch" a camera is beyond everything recorded: look for a cause of
-// its own (sync, focus, intrinsics).
+// four sessions from two rigs (three single-marker, one ChArUco), solved by this
+// pipeline before Minimize, give 0.10-0.76 px per camera, every one holding its
+// target rigid to under 0.5 mm. "Good" covers all but one camera and "watch" sits at
+// twice it. The static scatter of border-refined single-marker corners, ~0.12 px at
+// a 0.5-factor output (ADR-0052), is of the order of the best cameras'; most of the
+// rest is attributed to the target's residual motion between cameras. Past "watch" a
+// camera is beyond every reference sweep we measured: look for a cause of its own
+// (sync, focus, intrinsics).
 export const DEVIATION_GOOD_PX = 0.6;
 export const DEVIATION_WATCH_PX = 1.2;
 
